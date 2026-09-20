@@ -25,6 +25,8 @@
 8. [SLA 99.95% 达成方案](#八sla-9995-达成方案)
 9. [系统不足与改进措施](#九系统不足与改进措施)
 10. [附录](#十附录)
+11. [附录A：阿里云负载均衡选型与使用指南（ALB / NLB / CLB）](#附录a阿里云负载均衡选型与使用指南alb--nlb--clb)
+12. [附录B：主节点故障容灾设计](#附录b主节点故障容灾设计)
 
 ---
 
@@ -190,10 +192,10 @@ flowchart TB
 | 云解析 DNS + 全球加速 GA | 菲律宾 / 泰国用户就近接入 | 菲律宾用户解析到马尼拉 `ap-southeast-6`，泰国用户解析到曼谷 `ap-southeast-7`；GA 用于跨境回源加速 |
 | CDN / DCDN | `web/dist` 静态资源加速 | 注意 **[现状]** `middleware/cache.go:14` 使用硬编码 `Cache-Version` SHA 做缓存失效，每次发布必须手工 bump，否则 SPA 白屏 |
 | WAF 3.0 | CC 防护、SQLi/XSS、IP 黑名单 | 必须放行 `POST /api/user/epay/notify`、`/api/stripe/webhook` 等回调路径（无鉴权、带签名校验） |
-| ALB | 七层负载均衡、TLS 卸载、按权重灰度 | SSE 场景必须把 `idle_timeout` 设为 ≥ 900 s，否则流式响应被 LB 提前切断 |
+| ALB | 七层负载均衡、TLS 卸载、按权重灰度 | SSE 不断流**不靠**调大超时：ALB listener `idleTimeout` 上限仅 60 s、`requestTimeout` 上限 180 s，且只能在 `AlbConfig` CRD 配置，无对应 Ingress 注解；必须开启网关心跳 ping（默认关闭，间隔须设 15–20 s）并保证首包延迟远小于 180 s，详见附录A |
 | KMS / Secrets Manager | `SQL_DSN`、`SESSION_SECRET`、上游 key 的密文托管 | **[现状]** 渠道 key 明文存 `channels.key`，改进见第九章 R-13 |
 
-**协议约束**：网关自身只做 HTTP/1.1 + SSE 与 WebSocket。`Responses WebSocket` 与 Realtime 需要 ALB 开启 WebSocket 且超时配置对齐 `SHUTDOWN_TIMEOUT_SECONDS`（默认 120 s，`main.go:236`）。
+**协议约束**：网关自身只做 HTTP/1.1 + SSE 与 WebSocket。ALB 的 HTTP/HTTPS 监听对 WS/WSS 透明，但长连接仍受 listener 60 s idle 上限约束，保活依赖应用层心跳；Realtime 若引入 UDP 流量，ALB 无 UDP 监听，必须走 NLB。网关优雅停机需与 ALB 连接优雅摘除（connection drain）时间窗对齐，参考 `SHUTDOWN_TIMEOUT_SECONDS`（默认 120 s，`main.go:236`）。详见附录A。
 
 #### L2 传输与会话层（`main.go` + `middleware/`）
 
@@ -1436,7 +1438,7 @@ flowchart TB
   end
 
   subgraph MNL["区域一 ap-southeast-6 马尼拉 主站点"]
-    ALB1["ALB 多可用区<br/>idle_timeout 900s"]
+    ALB1["ALB 多可用区<br/>idleTimeout 60s + SSE 心跳保活"]
     ACK1["ACK Pro 集群<br/>可用区 A + B"]
     RDS1["RDS PostgreSQL 高可用版<br/>主 A 备 B + 只读实例"]
     TAIR1["Tair 主备版"]
@@ -1493,7 +1495,7 @@ flowchart TB
 | 接入 | 云解析 DNS + GTM | 旗舰版 | 1 | 按延迟解析，HTTP 健康探测 15 s，故障切换 ≤ 60 s | 单区域故障自动切走 |
 | 接入 | DCDN | 按量 | 1 | `index.html` 强制 `no-cache`，带指纹的 chunk 缓存 7 天 | — |
 | 接入 | WAF 3.0 | 企业版 | 2（每区域） | 放行支付回调路径；CC 防护阈值对齐 `GLOBAL_API_RATE_LIMIT` | 抗 L7 |
-| 接入 | ALB | 标准版 II | 2（每区域多 AZ） | `idle_timeout=900`、`request_timeout=0`（不切断 SSE）、HTTPS TLS1.2+1.3、按权重服务器组 | 99.99% |
+| 接入 | ALB | 标准版 II | 2（每区域多 AZ） | `AlbConfig` listeners：`idleTimeout=60`、`requestTimeout=180`（均为产品上限，SSE 靠网关 ping 保活）、HTTPS TLS1.2+1.3、`canary-weight` 灰度 | 99.99% |
 | 计算 | ACK Pro 托管版 | 控制面 SLA 99.95% | 2 集群 | Kubernetes 1.31+，CNI Terway，多 AZ | 99.95% |
 | 计算 | ECS 节点池 | `g8i.2xlarge`(8C32G) | 每区域 ≥ 4（跨 2 AZ） | 系统盘 100 G ESSD PL1 + 数据盘 200 G ESSD（`/data` 与 `/app/logs`） | — |
 | 数据 | RDS PostgreSQL 高可用版 | pg 15，`rds.pg.c2.4xlarge` 或 16C64G | 2（每区域）+ 每区域 1 只读 | 主备跨 AZ、`SQL_MAX_OPEN_CONNS` 对齐连接上限、PITR 保留 7 天、每日全量 + WAL 归档到 OSS | 99.99% |
@@ -1546,7 +1548,7 @@ data:
   USER_SESSION_ACTIVE_LIMIT: "50"
   USER_SESSION_ISSUANCE_LIMIT: "100"
   USER_SESSION_REVOKED_RETENTION_DAYS: "7"
-  SHUTDOWN_TIMEOUT_SECONDS: "150"   # 必须 < ALB idle_timeout 且 > 最长 SSE 预期
+  SHUTDOWN_TIMEOUT_SECONDS: "150"   # SIGTERM 后收尾在途请求的窗口，> 最长 SSE 预期并与 ALB connection-drain(120s) 对齐；与 idle 60s 上限无关（后者只掐无心跳的静默连接）
   RELAY_RESPONSE_HEADER_TIMEOUT: "600"
   RELAY_MAX_IDLE_CONNS: "2000"
   RELAY_MAX_IDLE_CONNS_PER_HOST: "400"
@@ -1684,36 +1686,78 @@ spec:
 # PDB 独立、镜像为 CANDIDATE_SHA、ALB 服务器组独立、不打 HPA
 ```
 
-> **master 节点单独处理**：必须存在一个 `NODE_TYPE=master` 的 Deployment（`replicas: 1`、`strategy: Recreate`、独立 PVC `ReadWriteOnce`）来跑 AutoMigrate 与 master-only 迁移；它**不接 ALB 流量**（不在 Service 选择器内），只跑后台任务与迁移。滚动发布顺序：先升级 master → schema 就绪 → 再滚动 stable slave → 最后升级 canary。这是解决 1.2 中"非 master 从不迁移"风险（R-04）的部署侧手段。
+> **master 节点单独处理**：必须存在一个 `NODE_TYPE=master` 的 Deployment（`replicas: 1`、`strategy: Recreate`、独立 PVC `ReadWriteOnce`）来跑 AutoMigrate 与 master-only 迁移；它**不接 ALB 流量**（不在 Service 选择器内），只跑后台任务与迁移。滚动发布顺序：先升级 master → schema 就绪 → 再滚动 stable slave → 最后升级 canary。这是解决 1.2 中"非 master 从不迁移"风险（R-04）的部署侧手段；master 故障后的接管时序、租约去重与 RTO 预算见附录B。
 
-#### 7.4.3 Service 与 ALB Ingress（含灰度注解）
+#### 7.4.3 AlbConfig、Service 与 ALB Ingress（含灰度）
+
+> **官方核实后的关键事实**：ALB listener `idleTimeout` 取值 1–60 s（默认 15）、`requestTimeout` 取值 1–180 s（默认 60，超时由 ALB 直接返回 504），二者**只能在 `AlbConfig` CRD 的 `spec.listeners` 配置，不存在对应 Ingress 注解**；早期草案里 `idle-timeout: "900"` / `request-timeout: "0"` 均为无效写法。SSE 长流不被切断的前提是网关持续产生心跳事件（ping 默认关闭，须开启并设 15–20 s），完整论证见附录A.6。
 
 ```yaml
-# deploy/aliyun/20-service-ingress.yaml
+# deploy/aliyun/20-alb-ingress.yaml
+apiVersion: alibabacloud.com/v1
+kind: AlbConfig
+metadata:
+  name: new-api-alb
+  namespace: new-api
+spec:
+  config:
+    name: new-api-alb
+    addressType: Internet
+    # zoneMappings: 至少 2 个可用区的 vSwitch（多 AZ 高可用前提）
+    #   - vSwitchId: vsw-xxxx-mnl-a
+    #   - vSwitchId: vsw-xxxx-mnl-b
+  listeners:
+    - port: 80
+      protocol: HTTP            # 仅用于 301 跳转 HTTPS（ssl-redirect）
+      requestTimeout: 30
+    - port: 443
+      protocol: HTTPS
+      idleTimeout: 60           # 产品上限；SSE 保活靠网关 ping（15–20s 间隔）
+      requestTimeout: 180       # 产品上限；只计"等待后端响应头"，不约束流时长
+---
+apiVersion: networking.k8s.io/v1
+kind: IngressClass
+metadata:
+  name: alb
+spec:
+  controller: ingress.k8s.alibabacloud/alb
+  parameters:
+    apiGroup: alibabacloud.com
+    kind: AlbConfig
+    name: new-api-alb
+---
 apiVersion: v1
 kind: Service
 metadata: { name: new-api, namespace: new-api }
 spec:
   type: ClusterIP
-  selector: { app: new-api }            # 同时匹配 stable 与 canary
+  selector: { app: new-api, track: stable }   # 只选 stable；灰度靠独立 canary Service
   ports: [ { name: http, port: 80, targetPort: 3000 } ]
 ---
+apiVersion: v1
+kind: Service
+metadata: { name: new-api-canary, namespace: new-api }
+spec:
+  type: ClusterIP
+  selector: { app: new-api, track: canary }
+  ports: [ { name: http, port: 80, targetPort: 3000 } ]
+---
+# 主 Ingress：全部流量 → stable（不带 canary 注解）
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: new-api
   namespace: new-api
   annotations:
-    alb.ingress.kubernetes.io/backend-protocol: "HTTP"
-    alb.ingress.kubernetes.io/idle-timeout: "900"          # SSE 关键
-    alb.ingress.kubernetes.io/request-timeout: "0"
-    alb.ingress.kubernetes.io/healthcheck-path: "/api/status"   # 补建后改 /readyz
+    alb.ingress.kubernetes.io/backend-protocol: "http"
+    alb.ingress.kubernetes.io/ssl-redirect: "true"
+    alb.ingress.kubernetes.io/healthcheck-enabled: "true"
+    alb.ingress.kubernetes.io/healthcheck-path: "/api/status"      # 补建 readyz 后切换
     alb.ingress.kubernetes.io/healthcheck-interval-seconds: "10"
     alb.ingress.kubernetes.io/healthy-threshold-count: "2"
     alb.ingress.kubernetes.io/unhealthy-threshold-count: "2"
-    # ---- 灰度：基于 ALB 权重金丝雀 ----
-    alb.ingress.kubernetes.io/canary: "true"
-    alb.ingress.kubernetes.io/canary-by-weight: "5"        # 由 GitOps 逐步改 5 -> 20 -> 50 -> 100
+    alb.ingress.kubernetes.io/connection-drain-enabled: "true"
+    alb.ingress.kubernetes.io/connection-drain-timeout: "120"      # 对齐 SHUTDOWN_TIMEOUT_SECONDS
 spec:
   ingressClassName: alb
   tls:
@@ -1726,7 +1770,31 @@ spec:
           - path: /
             pathType: Prefix
             backend: { service: { name: new-api, port: { number: 80 } } }
+---
+# 灰度 Ingress：canary 注解必须在这条独立 Ingress 上，后端指向 canary Service；
+# 权重由 GitOps 逐步改 5 -> 20 -> 50 -> 100（100 后合并回主 Ingress 并下线 canary）
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: new-api-canary
+  namespace: new-api
+  annotations:
+    alb.ingress.kubernetes.io/canary: "true"
+    alb.ingress.kubernetes.io/canary-weight: "5"
+    # 内部账号白名单命中可叠加：alb.ingress.kubernetes.io/canary-by-header: "x-newapi-canary"
+    alb.ingress.kubernetes.io/backend-protocol: "http"
+spec:
+  ingressClassName: alb
+  rules:
+    - host: api.example-ph.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: new-api-canary, port: { number: 80 } } }
 ```
+
+> 注意两点与旧草案的差异：其一，Service 不再"一个 selector 同时匹配 stable 与 canary"——权重分流由 ALB 规则完成，两个轨道必须是两个 Service；其二，超时参数从注解移到 `AlbConfig.listeners`。
 
 ### 7.5 生产 Docker Compose 配置
 
@@ -2333,10 +2401,229 @@ flowchart LR
 
 ### 10.4 文档渲染与校验
 
-- 全部 22 个 mermaid 图已在 **mermaid v11 解析器**上逐个通过语法校验（`flowchart` 7、`sequenceDiagram` 13、`erDiagram` 1、辅助 `flowchart` 若干）。渲染方式：GitHub/GitLab 原生渲染、VS Code Markdown Preview Mermaid 插件、或 `npx -y @mermaid-js/mermaid-cli -i impl_tech.md -o impl_tech.html`。
-- 文档中的 YAML 代码块（ConfigMap/Secret/Deployment/Service/Ingress/Compose）已通过 YAML 语法解析校验，但**未在真实 ACK/ALB 环境应用**；上线前需在 staging 集群 `kubectl apply --dry-run=server` 与 `docker compose config` 双重验证，并按 7.9 完成三数据库矩阵验证。
+- 全部 24 个 mermaid 图已在 **mermaid v11 解析器**上逐个通过语法校验（`flowchart` 9、`sequenceDiagram` 14、`erDiagram` 1）。渲染方式：GitHub/GitLab 原生渲染、VS Code Markdown Preview Mermaid 插件、或 `npx -y @mermaid-js/mermaid-cli -i impl_tech.md -o impl_tech.html`。
+- 文档中的 5 个 YAML 代码块（ConfigMap/Secret/Deployment/Service/AlbConfig/Ingress/Compose）已通过 YAML 语法解析校验，但**未在真实 ACK/ALB 环境应用**；上线前需在 staging 集群 `kubectl apply --dry-run=server` 与 `docker compose config` 双重验证，并按 7.9 完成三数据库矩阵验证。
 - `文件:行号` 引用基线为 commit `972aed197`；代码演进后行号可能漂移，路径与函数名仍可作为定位依据。
+
 
 ---
 
-**文档结束。** 本文对当前工程的分层架构、代码目录、数据存储、核心链路时序、日志/监控/限流/灰度/回滚能力、阿里云菲律宾+泰国双区域部署方案、99.95% SLA 达成路径与 31 项系统不足及改进措施做了完整说明；其中标注 **[需补建]** 与 R-01 ~ R-31 的条目为当前工程尚未实现的能力，须在落地阶段按 9.6 路线图逐项闭环。
+## 附录A：阿里云负载均衡选型与使用指南（ALB / NLB / CLB）
+
+> 本附录关键参数均已按阿里云官方文档核实（2026-09）；产品约束会演进，上线前以官方"ALB 版本与配额""监听配置"文档为准。正文 7.4.3 的 AlbConfig/Ingress 示例与本附录口径一致。
+
+### A.1 产品家族定位
+
+阿里云负载均衡（SLB）家族现役三款：
+
+- **CLB（传统型负载均衡，原 SLB）**：上一代产品，同时提供四层（TCP/UDP）与七层（HTTP/HTTPS）能力，功能面窄，官方定位为存量维护，新产品不再推荐选型。
+- **NLB（网络型负载均衡）**：新一代**四层**专用产品，主打超大规模并发与超低时延，支持 TCP/UDP/TCPSSL，可透传客户端真实源 IP，与 ACK 的集成方式是 Service `type: LoadBalancer`（CCM 管理）。
+- **ALB（应用型负载均衡）**：新一代**七层**专用产品，面向 HTTP/HTTPS/QUIC/gRPC，提供基于 Host/Path/Header/Cookie/Query 的内容路由、按权重与按 Header 的灰度发布、TLS 卸载、访问控制与可观测能力，与 ACK 的集成方式是 **ALB Ingress**（`AlbConfig` CRD + `IngressClass`）。
+
+本项目主入口选型为 **每区域一个公网 ALB（标准版 II）+ ACK ALB Ingress**，理由与详细配置见 A.4/A.5。
+
+```mermaid
+flowchart TD
+  START["新流量入口需要负载均衡"] --> P{"业务协议?"}
+  P -- "HTTP/HTTPS/gRPC/WebSocket/SSE/QUIC" --> ALB["ALB 七层"]
+  P -- "TCP/UDP 裸转发或 TLS 端到端透传" --> NLB["NLB 四层"]
+  P -- "仅存量系统" --> CLB["CLB 不再新建, 规划迁移到 ALB/NLB"]
+  ALB --> A1{"需要 60s idle 上限满足不了的长静默连接或 UDP?"}
+  A1 -- "是" --> SW["改走 NLB, 证书与协议下沉到网关自管"]
+  A1 -- "否" --> A2{"体量与容量诉求?"}
+  A2 -- "中大型/需容量预留" --> A3["ALB 标准版 II"]
+  A2 -- "小型/验证环境" --> A4["ALB 标准版或基础版"]
+```
+
+### A.2 三款产品对比总表
+
+| 维度 | CLB（传统型） | NLB（网络型） | ALB（应用型） |
+| --- | --- | --- | --- |
+| 协议层级 | 四层 + 七层 | 四层 | 七层 |
+| 监听协议 | TCP/UDP/HTTP/HTTPS | TCP/UDP/TCPSSL | HTTP/HTTPS/QUIC |
+| 内容路由（path/header/cookie/query） | 七层仅基础转发 | 不支持（不解析七层） | 支持，含自定义转发规则、脚本 |
+| 灰度发布 | 无权重灰度语义 | 无（四层无法按请求分流） | `canary-weight` / `canary-by-header` / `canary-by-cookie`（Ingress 层） |
+| TLS | 监听上卸载 | TCPSSL 监听卸载，或纯 TCP 透传 | 监听上卸载（SNI 多证书、TLS 安全策略），亦支持 gRPC |
+| HTTP/3 QUIC | 不支持 | 不支持 | 支持（监听开启 QUIC） |
+| UDP | 支持 | 支持 | **不支持** |
+| 连接空闲超时 | 参数面旧 | IdleTimeout 1–60 s（ROS 资源定义） | IdleTimeout 1–60 s，默认 15 s |
+| 请求超时 | 监听级配置 | 无七层请求超时语义 | RequestTimeout 1–180 s，默认 60 s，超时返回 504 |
+| 真实客户端 IP | 四层 FULLNAT 可见；七层 XFF | 四层原生透传，可选 Proxy Protocol v2 | 仅 `X-Forwarded-For` 头（代理型，后端看到回源地址） |
+| 后端 | ECS 等旧模型 | ECS/ECI/IP 等，同地域 | ECS/ECI/IP/函数等，**同地域同 VPC**，要求 ≥2 可用区 |
+| 入口形态 | 固定 IP 为主 | DNS 名（地址可能变化） | DNS 名（**IP 会漂移，禁止固化 A 记录**） |
+| K8s 集成 | 旧 CCM LoadBalancer | Service `type: LoadBalancer` | ALB Ingress（`AlbConfig` CRD） |
+| 计费 | 实例/规格 + 带宽流量 | 实例费 + LCU | 实例费 + LCU（连接/数据量/规则评估多维取峰值） |
+| 定位 | 存量维护 | 高性能四层入口 | 功能丰富的七层入口 |
+
+### A.3 优缺点与最佳使用场景
+
+**ALB**
+
+- 优点：七层路由与灰度能力最全（权重/Header/Cookie 金丝雀、蓝绿、重定向、重写）；TLS 卸载 + QUIC + gRPC；与 ACK/ACM 证书/云防火墙/可观测（访问日志、全链路追踪）原生集成；实例费低、按 LCU 弹性。
+- 缺点：idle 上限 60 s、request 上限 180 s，**无法关闭**；无 UDP；真实 IP 只走 XFF；后端限同地域同 VPC；LCU 计费维度多、长连接型业务成本需预估。
+- 最佳场景：公网 API 网关入口（本项目 `/v1/*`、`/api/*`、SPA 控制台）、需要按权重/Header 灰度的多版本流量切分、需要 QUIC/gRPC 的接入。
+
+**NLB**
+
+- 优点：四层超大并发、微秒级转发；支持 UDP 与 TCPSSL；客户端真实源 IP 原生可见（可选 PPv2）；无七层请求超时——后端"首包慢"不会被 LB 判 504；TCP 长连接只要不静默超过 idle 上限即可长期保持。
+- 缺点：不解析 HTTP——没有 path 路由、没有灰度、没有 TLS 卸载（除非 TCPSSL 监听）；证书与协议兼容要在网关侧自管；idle 同样 1–60 s 封顶。
+- 最佳场景：UDP/实时音频类流量、要求 TLS 端到端（证书放网关）的合规透传、极致性能或超长"静默首包"型请求的旁路入口。
+
+**CLB**
+
+- 优点：老牌稳定，四层 + 七层一站备齐；部分老部署（固定 IP 白名单、经典网络）依赖它。
+- 缺点：功能代差（无权重灰度规则语义、无 QUIC/gRPC/自定义转发）、性能上限低、官方明确引导迁移；新系统不应再引入。
+- 最佳场景：仅存量维护，并规划向 ALB（七层）/NLB（四层）迁移。
+
+### A.4 本项目（new-api）选型结论
+
+| 流量 | 产品 | 关键配置 |
+| --- | --- | --- |
+| 公网 `/v1/*` 中继（HTTP/SSE/WebSocket） | ALB 标准版 II（每区域 1 个，多 AZ） | AlbConfig listener：`idleTimeout: 60`、`requestTimeout: 180`；管理后台开启 ping keepalive 并设 15–20 s |
+| 灰度发布（轨道 B 代码灰度） | 同主 ALB | canary Ingress + `canary-weight`，后端指向独立 canary Service（见 7.4.3） |
+| 首包可能超 180 s 的非流式请求 | ALB 不可达上限 → 改造为异步任务（现状任务接口本就走轮询）或 NLB TCP 旁路 | 监控 TTFT/首包 P99，保证远小于 180 s |
+| Realtime/音频 UDP（若启用） | NLB（TCPSSL 或 UDP 监听） | 直连网关 Pod（Terway）或内网 ALB 之外的四层入口 |
+| 控制台/运维内网入口 | 私网 ALB（第二个 AlbConfig） | `addressType: Intranet` + ACL 收紧 |
+| 跨地域（马尼拉/曼谷）容灾 | 不用 LB 做跨域 —— DNS + GTM 切换 ALB DNS 名 | 严禁把 ALB 解析 IP 写进任何白名单/客户端 |
+
+### A.5 ALB Ingress on ACK 使用指南（分步）
+
+1. **安装组件**：ACK 集群组件管理安装 **ALB Ingress Controller**（它负责把 `AlbConfig`/Ingress 声明同步为云上 ALB 实例与监听/规则/服务器组）。集群与目标 ALB 必须同 VPC、同地域。
+2. **创建 `AlbConfig`**：声明云上实例（可用区 vSwitch、公网/私网、 edition）与**监听级参数**——`idleTimeout`/`requestTimeout`/gzip/QUIC/安全策略等**只能在这里配**，Ingress 注解里没有对应键：
+
+   ```yaml
+   apiVersion: alibabacloud.com/v1
+   kind: AlbConfig
+   metadata:
+     name: new-api-alb
+   spec:
+     config:
+       name: new-api-alb
+       addressType: Internet        # 内网管理入口用 Intranet
+       # zoneMappings:              # ALB 要求至少 2 个可用区
+       #   - vSwitchId: vsw-xxxx-mnl-a
+       #   - vSwitchId: vsw-xxxx-mnl-b
+     listeners:
+       - port: 443
+         protocol: HTTPS
+         idleTimeout: 60            # 取值 1–60，默认 15；上限就是 60，写 900 非法
+         requestTimeout: 180        # 取值 1–180，默认 60；超时 ALB 直接回 504
+       - port: 80
+         protocol: HTTP             # 仅用于 301 跳转 HTTPS（ssl-redirect 注解）
+         requestTimeout: 30
+   ```
+3. **绑定 IngressClass**：`spec.controller: ingress.k8s.alibabacloud/alb`，`parameters` 指向上面的 `AlbConfig`（完整示例见 7.4.3）。
+4. **Service**：`type: ClusterIP`；stable 与 canary 各自一个 Service，选择器分别锁 `track: stable` / `track: canary`。
+5. **主 Ingress**：host/path → stable Service；常用注解：`backend-protocol`（http/https/grpc）、`ssl-redirect`、`healthcheck-enabled/-path/-interval-seconds/-timeout`、`healthy-threshold-count`/`unhealthy-threshold-count`（[2,10]，默认 3）、`connection-drain-enabled` + `connection-drain-timeout`（发布摘流）、`sticky-session*`、`order`（多 Ingress 规则优先级）。
+6. **灰度 Ingress**：新建**第二条** Ingress，host+path 与主 Ingress 一致，后端指向 canary Service，注解只放 `canary: "true"` + `canary-weight: "5"`（键名是 `canary-weight`，**不存在** `canary-by-weight`；`900`/`0` 之类超时注解也无效且不该出现）；可按需叠加 `canary-by-header` 给内部账号白名单；权重由 GitOps 按 5 → 20 → 50 → 100 推进。
+7. **证书**：`tls` 段引用 Secret，或经 ACM 证书 ID 挂载；多域名注意证书数量配额。
+8. **验证**：`kubectl describe albconfig` 看控制器同步事件；ALB 控制台核对监听超时、服务器组健康状态；压测环境跑 30 min 长 SSE 与首包 170 s 的慢请求各一组，确认无 504/断流。配额（监听数、规则数、服务器组数）在配额中心提前提额。
+
+### A.6 坑点清单（new-api 场景逐条给结论）
+
+1. **超时上限误解**：ALB `idleTimeout` 最大 60 s、`requestTimeout` 最大 180 s，均不能设 0/"不限"，也不能用 Ingress 注解配置——"把超时调到 900 s 保 SSE"这条路**不存在**；正确方案是 AlbConfig 顶格 + 应用层心跳。
+2. **SSE 保活开关默认关闭且默认间隔踩线**：`ping_interval_enabled` 默认 `false`、`ping_interval_seconds` 默认 `60`（`setting/operation_setting/general_setting.go:26-33`），60 s 恰好等于 ALB idle 上限，属危险值。上线动作：管理后台开启 ping 并设 **15–20 s**（≤ idleTimeout/3）；关闭 ping 时上游"深度思考"60 s 无字节即被 ALB 切断，客户端拿到半截流。ping 最长持续 30 分钟（`relay/helper/stream_scanner.go:170`）。
+3. **requestTimeout 语义是"等后端首包"**，不是整条流时长：SSE 收到响应头后不再受它约束；受影响的是一次性长响应（非流式大上下文/推理模型首包 >180 s），ALB 会代回 **504**。缓解：网关侧 `RELAY_RESPONSE_HEADER_TIMEOUT`（默认 1800 s）远大于 ALB 上限，真正卡点在 ALB——对客引导 `stream: true`，或该路由改走 NLB。
+4. **504/499 归属难查**：ALB 生成的 504 不落网关访问日志。排障时对齐三处：ALB 访问日志、网关日志按 request_id 反查、响应头里 ALB 注入的标记；不要把它误判为网关故障。
+5. **真实客户端 IP 只走 XFF**：ALB 是代理型 LB，后端看到的源地址是回源网段。网关必须把 `TRUSTED_PROXIES` 配成 ALB 回源交换机网段（`middleware/trusted_proxies.go`），否则限流/审计把"所有人"当同一个 IP，或者信任过宽导致 XFF 可伪造。NLB 四层则相反——直接可见真实源 IP，可再开 Proxy Protocol v2 携带 VPC 信息。
+6. **域名 ≠ 固定 IP**：ALB/NLB 交付的是 DNS 名，底层地址会随扩缩容/故障切换漂移。用户侧与 GTM 一律 CNAME 到 LB 域名；任何防火墙白名单写死解析 IP 的做法都会在变更后瞬间雪崩。
+7. **健康检查阈值抖动摘除**：`healthcheck-interval-seconds` 默认 2 s、阈值次数 [2,10]；本项目当前 `/api/status` 只代表进程活着，不探 DB/Redis（就绪语义缺失见 10.2 / R 项），高负载 GC 停顿也可能连续超时被摘。生产取值 interval 10 s + unhealthy 2–3 次是折中；readyz 落地前，摘除≠健康这种误判要写进 runbook。
+8. **滚动发布断连**：SSE 长连接不随 keep-alive 迁移，Pod 终止必须先摘流：readiness 置灰 → `connection-drain-enabled` + `connection-drain-timeout`（对齐 `SHUTDOWN_TIMEOUT_SECONDS` 120 s）→ preStop sleep（7.4.2 已配 15 s）。三者缺一就会有 502/连接重置尖峰。
+9. **灰度注解三要件**：canary 注解必须放在第二条 Ingress 上、第二条 Ingress 后端必须是**独立 canary Service**、与主 Ingress 的 host+path 完全一致；用一个同时选择 stable/canary Pod 的 Service 做不了权重分流（那是 kube-proxy 轮询，与 ALB 规则无关）。键名是 `canary-weight`，写 `canary-by-weight` 会被静默忽略。
+10. **ALB 没有 UDP 监听**：Realtime/音频 UDP 流量只能走 NLB；在 ALB 上配 UDP 后端组会直接失败。
+11. **gRPC/QUIC 的隐性前置**：gRPC 后端要 `backend-protocol: grpc` 且走 HTTPS/TLS 监听；QUIC 要在监听上显式开启并配好证书，HTTP/3 场景客户端 SDK 兼容性要先验证。
+12. **后端同地域同 VPC**：ALB/NLB 不能挂跨地域后端；马尼拉/曼谷双活只能靠 DNS+GTM 切流量（第八章），不存在"一个 ALB 两地后端"的选项。AlbConfig 建实例要求 ≥2 可用区的 vSwitch。
+13. **LCU 计费与长连接**：LCU 按新建连接、并发连接、数据处理量、规则评估等维度**取峰值**计费——SSE 万级并发长连接会持续推高"并发连接"维度，费用模型要在压测里带上 LB LCU 观测；灰度扩量用权重数字而不是"每版本一条转发规则"，规则数同样进计费与配额。
+14. **版本差异**：基础版缺自定义转发规则等高级能力，标准版 II 面向大流量与容量预留；三者间功能差异以官方版本对比文档为准，上线前逐项核对（本项目灰度依赖的权重规则在标准版以上才完整）。
+15. **TLS 兼容与配额**：菲律宾/泰国存量低端机型 TLS 栈偏旧，安全策略强制 TLS1.3-only 会切断部分客户；推荐 TLS1.2+1.3 并保留观测。SNI 证书数量、监听数、服务器组数都有配额，多域名+双站点部署前先去配额中心提额。
+16. **勿用 CLB 承接新流量**：CLB 属于上一代，功能、灰度、可观测全面落后；只有存量场景保留，并应排期迁移到 ALB/NLB。
+
+### A.7 参考资料
+
+- [负载均衡 SLB 产品家族介绍](https://help.aliyun.com/zh/slb/product-overview/slb-overview)
+- [ALIYUN::ALB::Listener（IdleTimeout 1–60 / RequestTimeout 1–180 取值定义）](https://help.aliyun.com/zh/ros/developer-reference/aliyun-alb-listener)
+- [ALIYUN::NLB::Listener（IdleTimeout 取值、TCP/UDP/TCPSSL、Proxy Protocol v2）](https://help.aliyun.com/zh/ros/developer-reference/aliyun-nlb-listener)
+- [ALB Ingress 配置词典（注解全集；超时仅 AlbConfig 可配）](https://help.aliyun.com/zh/ack/ack-managed-and-ack-dedicated/user-guide/alb-ingress-configuration-dictionary)
+- [通过 ALB Ingress 实现灰度发布](https://www.alibabacloud.com/help/zh/ack/ack-managed-and-ack-dedicated/user-guide/use-alb-ingresses-to-perform-canary-releases-1)
+- [ALB Ingress 服务高级用法](https://help.aliyun.com/zh/ack/ack-managed-and-ack-dedicated/user-guide/advanced-alb-ingress-configurations)
+
+---
+
+## 附录B：主节点故障容灾设计
+
+> 触发背景：官方文档《集群部署》页（docs.newapi.ai cluster-deployment）仍按 one-api 时代拓扑描述"主节点负责处理所有写操作，从节点处理读请求"，并给出固定的单 Master + 多 Slave 架构图。该口径与**当前代码不符**，容易让人误判 Master 是写链路的单点。本附录先澄清 master 的真实职责，再给出其故障时的影响面、容灾设计与 RTO 预算，作为 7.4.2 部署方案与第八章 SLA 的补充。
+
+### B.1 当前代码中 master 的真实职责
+
+`IsMasterNode` 仅由环境变量决定：`NODE_TYPE != "slave"`（`common/init.go:89`）。生产代码中全部 master 判定如下——**没有一处拦截业务写请求**：
+
+| 职责 | 代码位置 | master 缺席时的影响 |
+| --- | --- | --- |
+| 主库 / 日志库 AutoMigrate、审计日志迁移 | `model/main.go:215、235、262` | 仅影响"新版本首次启动时的 schema 升级"，稳态运行无影响 |
+| 退役前端 option 迁移 | `main.go:333` | 同上，启动期一次性 |
+| Casbin 内置角色/策略 seed | `service/authz/enforcer.go:34、57` | 仅新集群初始化需要 |
+| 系统任务 runner（调度 + 执行） | `service/system_task.go:124-127` | **后台任务停摆**（见下行） |
+| 渠道自动测试、上游模型同步、异步任务轮询（Midjourney/Suno/视频）注册为定时系统任务 | `main.go:153-158` | 视频/MJ 任务停留在非终态直到 master 恢复；渠道健康检测暂停 |
+| 订阅额度重置 / 会话清理 / Codex 凭证刷新 | `service/subscription_reset_task.go:31`、`service/auth_cleanup.go:16`、`service/codex_credential_refresh_task.go:37` | 对应任务延迟执行（均可幂等补跑） |
+| 前端 BaseUrl 注入 | `router/main.go:24` | 边缘配置 |
+
+中继链路上的写——额度扣减、`logs`/`usedata` 落库、渠道管理 API——**任何 slave 节点都直接写共享 PostgreSQL**（slave 跑完整 relay 链路有测试佐证，如 `router/relay_router_test.go:103` 显式设 `IsMasterNode=false`）；配置一致性靠各节点轮询（`SYNC_FREQUENCY`），不存在"写必须过主"。因此写吞吐的扩展瓶颈在 PG（用 `BATCH_UPDATE_ENABLED` 合并额度写、只读实例分流看板查询），网关节点包括 master 都不是写路径瓶颈。
+
+### B.2 故障影响面（按场景）
+
+| 场景 | 用户可见影响 | 预计持续 |
+| --- | --- | --- |
+| master 进程崩溃 / Pod 驱逐（K8s 自动重建） | 无感；仅后台任务暂停 | 60–120 s |
+| master 所在节点宕机 | 同上，Pod 跨节点重调度 | 60–120 s |
+| master 滚动升级 | 同上；新旧 master 短暂并存，由租约去重 | ≈0（并存期无双跑） |
+| master 长期未恢复（配置错误/镜像拉取失败） | 主 API 仍可用；异步任务出结果延迟、渠道健康检测停摆、订阅重置推迟 | 分钟→小时，需告警介入 |
+| **PG 主库故障**（真正的数据面单点） | 全部写失败 | RDS HA 自动切换 30–60 s |
+
+结论：master 挂掉**不丢请求、不丢数据**（状态全在 PG/Redis），丢的是"定时任务的执行权"，且任务全部设计为可补跑。
+
+### B.3 容灾设计（与 7.4.2 部署方案配套）
+
+1. **角色化单副本**：master 是独立 Deployment（`replicas: 1`、`strategy: Recreate`、不在 Service 选择器内、不接 ALB 流量），故障由 K8s 控制面自动重建——**容灾主体是"角色可重建"，不是"节点保活"**。
+2. **接管时序**：
+
+```mermaid
+sequenceDiagram
+  participant K8S as ACK 控制面
+  participant M2 as 新 master Pod
+  participant DB as PostgreSQL
+  participant SL as slave 节点组
+  Note over M2: t=0 原 master 故障, 任务租约未释放(等待 60s TTL 过期)
+  K8S->>M2: Recreate 重建并调度到健康节点
+  M2->>DB: InitDB + 幂等 AutoMigrate
+  M2->>DB: StartSystemTaskRunner 抢占 system_task_locks 租约
+  M2->>DB: 15s idle tick 立即 claim 到期任务并补跑
+  SL-->>DB: 全程中继额度与日志写入不受影响
+  Note over M2: t 约 60-120s 后台任务全部恢复
+```
+
+3. **双 master 安全（租约去重）**：调度型系统任务靠 `system_task_locks` 的 DB 租约防双跑——锁 TTL 60 s、调度与 idle tick 15 s、stale lock 清理 30 s（`service/system_task.go:20-27`），注册逻辑明确按"跨 master 的 DB 租约去重 + 执行历史"设计（`main.go:153-156`）。因此滚动升级/故障接管窗口内新旧 master 并存也不会双扣费、双结算。
+4. **补跑语义**：异步任务轮询是无状态重查——任务行在 `tasks` 表，上游（视频/MJ）结果不会因暂停而丢失，master 恢复后下一轮 tick 即推进到终态；订阅重置、会话清理按时间戳幂等，延迟执行只会推迟不会重复。
+5. **可选增强（把 RTO 压到 ≈15 s）**：将 master 改为 **2 副本候选、同设 `NODE_TYPE=master`**，租约天然保证单执行，一侧挂掉另一侧在下一个 15 s tick 接管。前置条件：启动期 AutoMigrate 需要互斥——当前两个 master 同时首启会并发执行迁移（PG 下 DDL 并发可能报错），须先补一把"迁移启动锁"（可复用 `system_task_locks` 模式）并把该增强与 R-04 的迁移治理合并实施；未补锁之前**保持单副本 Recreate**。
+
+### B.4 RTO 与 99.95% 错误预算核算
+
+月度预算 21.6 min（99.95%）：
+
+| 失效域 | 机制 | RTO | 预算占比 |
+| --- | --- | --- | --- |
+| master 单点 | K8s 自动重建 + 租约接管 | 60–120 s | ≤9.3% |
+| 网关节点 | ALB 健康摘除 + 多副本 | ≈0 | — |
+| PG 主库 | RDS 高可用版自动切换 | 30–60 s | ≤4.6% |
+| 单可用区 | ALB/RDS/Tair 跨 AZ | 秒级–分钟级 | 计入区域演练 |
+| 整区域 | GTM 切曼谷 | 300–600 s | 年度演练，不占月度预算常态 |
+
+对比：若按官方文档的 Docker Compose 手工集群，master 故障需人工改 `NODE_TYPE` 提升从节点，RTO ≥10 min 且不可保证——**一次故障吃掉近半预算，该方式不适用于 99.95% SLA 的生产环境**，仅适合演示或小规模内网。
+
+### B.5 验证与反馈项
+
+- **混沌演练（staging，季度）**：`kubectl delete pod <master>`，断言：① 中继成功率无 dip；② 任务执行间隔 ≤ 2 min；③ `system_task` 执行历史无双跑记录；④ 视频任务在恢复后推进到终态。
+- **双 master 演练**：临时 scale master 至 2 副本，验证租约去重（对应 B.3 第 5 条增强前的基线行为）。
+- **文档反馈**：向 docs.newapi.ai《集群部署》页提 issue——"主节点负责所有写操作"与架构图已过时，应改为"master 仅承担迁移与定时任务，业务写由各节点直连共享数据库"，并补充故障接管说明。
+---
+
+**文档结束。** 本文对当前工程的分层架构、代码目录、数据存储、核心链路时序、日志/监控/限流/灰度/回滚能力、阿里云菲律宾+泰国双区域部署方案、99.95% SLA 达成路径与 31 项系统不足及改进措施做了完整说明，附录A 另给出阿里云 ALB / NLB / CLB 负载均衡的选型指南、使用步骤与坑点清单，附录B 补充集群 master 节点职责澄清与故障容灾设计；其中标注 **[需补建]** 与 R-01 ~ R-31 的条目为当前工程尚未实现的能力，须在落地阶段按 9.6 路线图逐项闭环。
