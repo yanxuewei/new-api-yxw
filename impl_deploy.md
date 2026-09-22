@@ -2,11 +2,11 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 文档版本 | v1.0 |
-| 编写日期 | 2026-09-19 |
+| 文档版本 | v1.1 |
+| 编写日期 | 2026-09-22 |
 | 适用代码基线 | 分支 `main`，commit `972aed197`（`fix(log): derive response model mismatch from names instead of a stored flag (#7464)`） |
 | 目标读者 | 架构 / 后端 / 前端 / SRE / 运维 |
-| 部署目标 | 阿里云（主：马尼拉 `ap-southeast-6`；次：曼谷 `ap-southeast-7`），主要服务菲律宾与泰国客户 |
+| 部署目标 | 阿里云（菲律宾主站点：马尼拉 `ap-southeast-6`；泰国主站点：曼谷 `ap-southeast-7`；两地共用备 region：新加坡 `ap-southeast-1`），主要服务菲律宾与泰国客户 |
 | 可用性目标 | 系统整体 SLA ≥ **99.95%** |
 
 > 说明：本文档所有事实均来自当前仓库代码的实际阅读，并在需要处标注 `文件:行号`。凡标注 **[现状]** 的是仓库中已经实现的能力；凡标注 **[需补建]** 的是当前工程缺失、需要在落地部署时补齐的能力。本章之外的"第九章 系统不足与改进措施"对二者做了完整清单化梳理，请勿混读。
@@ -74,8 +74,14 @@ new-api 是一个 **AI 模型 API 网关 / 代理**（Go + React 单体可执行
 | --- | --- | --- | --- |
 | 菲律宾（马尼拉/宿务） | **5–15 ms** | 60–90 ms | 30–45 ms |
 | 泰国（曼谷） | 55–80 ms | **5–20 ms** | 25–40 ms |
+| 新加坡备 region 到主库（公网，仅接管时使用） | 45–70 ms | 40–65 ms | — |
 
-结论：**双区域主备（Active-Active）**，马尼拉承载菲律宾，曼谷承载泰国，新加坡作为灾备第三区域与上游出口汇聚点。AI 网关是长连接流式场景，RTT 直接叠加到 TTFT 体感，不能只放一个区域。
+结论：**双主站点 + 单备 region（Active-Standby）**。马尼拉承载菲律宾、曼谷承载泰国，二者均为承接本国客户常态流量的热主站点；**新加坡作为两地共用的备 region**，只部署网关计算与本地缓存/日志，**不部署 RDS PostgreSQL**：
+
+- **RDS PostgreSQL 高可用版只存在于马尼拉（菲律宾唯一主库）与曼谷（泰国唯一主库）**，两库彼此独立，**取消 DTS 双向同步链路，不做双写**。
+- 新加坡备 region 在接管时，**通过公网（RDS 公网地址 + 强制 TLS 证书校验 + IP 白名单）读写对应主站点的同一个库**：PH 备连马尼拉库，TH 备连曼谷库。任一时刻数据只有一份主库，从根上消除双写冲突、自增/序列错乱与计费对账分裂。
+- 代价是备 region 写入额外叠加 40–70 ms 公网 RTT。该延迟只在"主站点整体不可用、流量被 GTM 切到备 region"期间生效，常态流量始终走主站点内网，不影响常态 TTFT。
+- AI 网关是长连接流式场景，RTT 直接叠加到 TTFT 体感，**主站点不能只放一个区域**；备 region 的职责是承接"主站点整体不可用"这一最坏情形，而不是分担常态流量。
 
 ```mermaid
 flowchart TB
@@ -91,28 +97,33 @@ flowchart TB
     CDN["DCDN 静态加速<br/>web/dist 资源"]
     WAF1["WAF 3.0 实例 马尼拉"]
     WAF2["WAF 3.0 实例 曼谷"]
+    WAF3["WAF 3.0 实例 新加坡"]
   end
 
-  subgraph MNL["区域一 ap-southeast-6 马尼拉 主站点"]
+  subgraph MNL["区域一 ap-southeast-6 马尼拉 主站点（菲律宾）"]
     ALB1["ALB 多可用区<br/>idleTimeout 60s + SSE 心跳保活"]
     ACK1["ACK Pro 集群<br/>可用区 A + B"]
-    RDS1["RDS PostgreSQL 高可用版<br/>主 A 备 B + 只读实例"]
+    RDS1["RDS PostgreSQL 高可用版<br/>菲律宾唯一主库 主 A 备 B"]
     TAIR1["Tair 主备版"]
     CK1["云数据库 ClickHouse<br/>日志"]
     OSS1["OSS 同城冗余"]
   end
 
-  subgraph BKKT["区域二 ap-southeast-7 曼谷 主站点"]
+  subgraph BKKT["区域二 ap-southeast-7 曼谷 主站点（泰国）"]
     ALB2["ALB 多可用区"]
     ACK2["ACK Pro 集群 可用区 A + B"]
-    RDS2["RDS PostgreSQL 高可用版"]
+    RDS2["RDS PostgreSQL 高可用版<br/>泰国唯一主库"]
     TAIR2["Tair 主备版"]
     CK2["ClickHouse"]
     OSS2["OSS"]
   end
 
-  subgraph SG["区域三 ap-southeast-1 新加坡 灾备与出口"]
-    DR["DTS 双向同步只读副本<br/>冷备 ACK 集群"]
+  subgraph SG["区域三 ap-southeast-1 新加坡 备 region（不部署 RDS）"]
+    ALB3["ALB 多可用区"]
+    ACK3["ACK Pro 集群<br/>PH 备 + TH 备 两套独立工作负载"]
+    TAIR3["Tair 主备版 本地缓存"]
+    CK3["ClickHouse 本地日志"]
+    OSS3["OSS"]
     EGR["统一上游出口 NAT 与固定 EIP 池"]
   end
 
@@ -121,11 +132,15 @@ flowchart TB
   PH --> GTM
   TH --> GTM
   OTHER --> GTM
-  GTM -->|"PH 用户"| WAF1
-  GTM -->|"TH 用户"| WAF2
+  GTM -->|"PH 用户 主"| WAF1
+  GTM -->|"TH 用户 主"| WAF2
+  GTM -.->|"PH 故障接管"| WAF3
+  GTM -.->|"TH 故障接管"| WAF3
   CDN --> OSS1
+  CDN --> OSS3
   WAF1 --> ALB1 --> ACK1
   WAF2 --> ALB2 --> ACK2
+  WAF3 --> ALB3 --> ACK3
   ACK1 --> RDS1
   ACK1 --> TAIR1
   ACK1 --> CK1
@@ -133,42 +148,50 @@ flowchart TB
   ACK2 --> RDS2
   ACK2 --> TAIR2
   ACK2 --> CK2
-  RDS1 -.->|"DTS 增量同步"| RDS2
-  RDS2 -.->|"DTS 增量同步"| RDS1
-  RDS1 -.->|"每日全量 + 归档"| DR
+  ACK2 --> OSS2
+  ACK3 -->|"公网 TLS 读写菲律宾主库"| RDS1
+  ACK3 -->|"公网 TLS 读写泰国主库"| RDS2
+  ACK3 --> TAIR3
+  ACK3 --> CK3
+  ACK3 --> OSS3
   ACK1 -->|上游调用| EGR
   ACK2 -->|上游调用| EGR
+  ACK3 -->|上游调用| EGR
   EGR --> GA
   GA --> UPSTREAM["OpenAI / Anthropic / Google / Azure / AWS 等"]
   ACK1 --> MON
   ACK2 --> MON
+  ACK3 --> MON
 ```
 
 ### 7.2 云资源清单（生产最小高可用配置）
 
 | 层 | 产品 | 规格建议 | 数量 | 关键配置 | 可用性贡献 |
 | --- | --- | --- | --- | --- | --- |
-| 接入 | 云解析 DNS + GTM | 旗舰版 | 1 | 按延迟解析，HTTP 健康探测 15 s，故障切换 ≤ 60 s | 单区域故障自动切走 |
+| 接入 | 云解析 DNS + GTM | 旗舰版 | 1 | 按延迟解析，HTTP 健康探测 15 s，故障切换 ≤ 60 s；菲律宾业务：主 → 马尼拉、备 → 新加坡；泰国业务：主 → 曼谷、备 → 新加坡 | 单主站点故障自动切到备 region |
 | 接入 | DCDN | 按量 | 1 | `index.html` 强制 `no-cache`，带指纹的 chunk 缓存 7 天 | — |
-| 接入 | WAF 3.0 | 企业版 | 2（每区域） | 放行支付回调路径；CC 防护阈值对齐 `GLOBAL_API_RATE_LIMIT` | 抗 L7 |
-| 接入 | ALB | 标准版 II | 2（每区域多 AZ） | `AlbConfig` listeners：`idleTimeout=60`、`requestTimeout=180`（均为产品上限，SSE 靠网关 ping 保活）、HTTPS TLS1.2+1.3、`canary-weight` 灰度 | 99.99% |
-| 计算 | ACK Pro 托管版 | 控制面 SLA 99.95% | 2 集群 | Kubernetes 1.31+，CNI Terway，多 AZ | 99.95% |
-| 计算 | ECS 节点池 | `g8i.2xlarge`(8C32G) | 每区域 ≥ 4（跨 2 AZ） | 系统盘 100 G ESSD PL1 + 数据盘 200 G ESSD（`/data` 与 `/app/logs`） | — |
-| 数据 | RDS PostgreSQL 高可用版 | pg 15，`rds.pg.c2.4xlarge` 或 16C64G | 2（每区域）+ 每区域 1 只读 | 主备跨 AZ、`SQL_MAX_OPEN_CONNS` 对齐连接上限、PITR 保留 7 天、每日全量 + WAL 归档到 OSS | 99.99% |
-| 缓存 | Tair（Redis 兼容）| 主备版 4 GB（生产建议集群版） | 2 | 跨 AZ、密码 + 内网 ACL、`maxmemory-policy allkeys-lru` | 99.99% |
-| 日志 | 云数据库 ClickHouse | 24.8 社区版 2 节点 | 2 | 仅 `LOG_SQL_DSN`、`LOG_SQL_CLICKHOUSE_TTL_DAYS=90` | — |
-| 存储 | OSS | 标准 + 低频生命周期 | 2 bucket | 同城冗余 ZRS、版本开启、生命周期 90 天转归档、防盗链 + 签名 URL | 99.995% |
-| 同步 | DTS | 小型 | 2 链路 | 双向增量、冲突检测、延迟告警 > 5 s | 跨区 DR |
+| 接入 | WAF 3.0 | 企业版 | 3（马尼拉 / 曼谷 / 新加坡各 1） | 放行支付回调路径；CC 防护阈值对齐 `GLOBAL_API_RATE_LIMIT` | 抗 L7 |
+| 接入 | ALB | 标准版 II | 3（每站点 1 组多 AZ） | `AlbConfig` listeners：`idleTimeout=60`、`requestTimeout=180`（均为产品上限，SSE 靠网关 ping 保活）、HTTPS TLS1.2+1.3、`canary-weight` 灰度 | 99.99% |
+| 计算 | ACK Pro 托管版 | 控制面 SLA 99.95% | 3 集群（马尼拉、曼谷主集群 + 新加坡备 region 集群） | Kubernetes 1.31+，CNI Terway，多 AZ | 99.95% |
+| 计算 | ECS 节点池 | `g8i.2xlarge`(8C32G) | 马尼拉 / 曼谷各 ≥ 4（跨 2 AZ）；新加坡备 ≥ 2（PH 备 + TH 备 各 1） | 系统盘 100 G ESSD PL1 + 数据盘 200 G ESSD（`/data` 与 `/app/logs`） | — |
+| 数据 | RDS PostgreSQL 高可用版 | pg 15，`rds.pg.c2.4xlarge` 或 16C64G | **2：马尼拉 1（菲律宾唯一主库）+ 曼谷 1（泰国唯一主库）**，可选每站点 1 只读实例 | 主备跨 AZ、PITR 保留 7 天、每日全量 + WAL 归档到 OSS、`max_connections` 按主站点 + 备 region 连接总和核算 | 99.99% |
+| 数据 | RDS 公网访问（SSL） | 按量 | 2（马尼拉、曼谷各开 1 个公网地址） | **仅新加坡备 region 使用**：`sslmode=verify-full` + RDS CA 校验 + 白名单只放新加坡 VPC 的 NAT EIP；主站点流量一律走内网地址 | 备 region 接管 |
+| 缓存 | Tair（Redis 兼容）| 主备版 4 GB（生产建议集群版） | 3（马尼拉 / 曼谷 / 新加坡各 1） | 跨 AZ、密码 + 内网 ACL、`maxmemory-policy allkeys-lru` | 99.99% |
+| 日志 | 云数据库 ClickHouse | 24.8 社区版 2 节点 | 3（马尼拉 / 曼谷 / 新加坡各 1） | 仅 `LOG_SQL_DSN`、`LOG_SQL_CLICKHOUSE_TTL_DAYS=90` | — |
+| 存储 | OSS | 标准 + 低频生命周期 | 3 bucket（马尼拉 / 曼谷 / 新加坡各 1） | 同城冗余 ZRS、版本开启、生命周期 90 天转归档、防盗链 + 签名 URL | 99.995% |
 | 观测 | SLS + ARMS + Prometheus（ARMS Prometheus 版）+ Grafana 服务 | 按量 | 1 套 | 见 7.8 | — |
 | 观测 | 云监控拨测（站点监控） | 菲律宾 + 泰国 + 新加坡探测点 | 3+ | 探测 `GET /api/status` 与 `GET /healthz`，1 min 间隔 | 真实用户视角 |
 | 安全 | KMS 凭据管家 | 软件密钥 | 1 | 托管 `SQL_DSN`、`REDIS_CONN_STRING`、`SESSION_SECRET`、支付密钥 | — |
-| 网络 | VPC + vSwitch + NAT + EIP | /16 与 3 个 /20 | 每区域 1 套 | 私有子网跑 Pod 与 DB，仅 ALB 在公网子网；NAT 出口固定 EIP 池用于上游白名单 | — |
+| 网络 | VPC + vSwitch + NAT + EIP | /16 与 3 个 /20 | 3 套（马尼拉 / 曼谷 / 新加坡） | 私有子网跑 Pod 与 DB，仅 ALB 在公网子网；NAT 出口固定 EIP 池用于上游白名单，同一 EIP 池同时作为新加坡备 region 访问主库的白名单来源 | — |
+
+> **相对旧方案的两项结构性变化**：① **取消 DTS 链路**——菲律宾与泰国各自只有一个主库，跨区不存在任何数据库复制关系，故本表不再保留 `DTS` 条目；② **新增新加坡备 region 的接入与计算资源**，但**新加坡不部署任何 RDS 实例**，备 region 通过 RDS 公网地址读写主站点主库（部署细节见 7.4.4）。
 
 ### 7.3 应用部署形态选择
 
 | 方案 | 适用 | 说明 |
 | --- | --- | --- |
-| **推荐：ACK + ALB Ingress + 双 Deployment（stable/canary）** | 生产 | 满足 99.95%、支持自动扩缩与灰度门禁；见 7.4 |
+| **推荐：ACK + ALB Ingress + 双 Deployment（stable/canary）** | 生产（马尼拉、曼谷主站点） | 满足 99.95%、支持自动扩缩与灰度门禁；见 7.4 |
+| **推荐：新加坡备 region 同构 ACK Pro（PH 备 + TH 备 两套独立 Deployment）** | 生产（两地共用备 region） | 只部署计算与本地 Tair/ClickHouse，**不含 RDS**；PH 备连马尼拉主库、TH 备连曼谷主库，均走公网 TLS；见 7.4.4 |
 | 备选：ECS + Docker Compose（多机） | 成本敏感、单区域起步 | 见 7.5，需自建 Nginx/ALB 后端挂载与 keepalived |
 | 不推荐：SAE / 函数计算 | — | SSE 长连接与 120 s 优雅停机、60 s 配置轮询、后台租约任务与 Serverless 冷启动/请求超时模型不匹配 |
 | 不推荐：单实例 ECS | — | 无法达到 99.95%（任何滚动发布都算停机） |
@@ -191,7 +214,7 @@ metadata: { name: new-api-env, namespace: new-api }
 data:
   # ---- 运行时 ----
   GIN_MODE: "release"
-  TZ: "Asia/Manila"                 # 曼谷站点改 Asia/Bangkok；统计按小时分桶建议统一 UTC 并单列展示时区
+  TZ: "Asia/Manila"                 # 曼谷站点改 Asia/Bangkok；新加坡备 region 按所服务的站点改 Asia/Manila 或 Asia/Bangkok；统计按小时分桶建议统一 UTC 并单列展示时区
   PORT: "3000"
   ERROR_LOG_ENABLED: "true"         # 记录 type=5 错误日志
   BATCH_UPDATE_ENABLED: "true"      # 额度批量合并写，降低主库写放大
@@ -225,6 +248,7 @@ metadata: { name: new-api-secret, namespace: new-api }
 type: Opaque
 stringData:
   # 下列值由 KMS 凭据管家通过 ExternalSecret / RRSA 注入，禁止写进 Git
+  # 主站点（马尼拉/曼谷）用本区域 RDS 内网地址；新加坡备 region 必须改用对应主库的 RDS 公网地址 + verify-full（见 7.4.4）
   SQL_DSN: "postgresql://newapi:REPLACE_ME@pg-mnl-rw.pg.rds.aliyuncs.com:5432/newapi?sslmode=require"
   LOG_SQL_DSN: "clickhouse://default:REPLACE_ME@clickhouse-mnl.clickhouse.rds.aliyuncs.com:9000/newapi_logs"
   REDIS_CONN_STRING: "redis://:REPLACE_ME@tair-mnl.redis.rds.aliyuncs.com:6379"
@@ -342,7 +366,7 @@ spec:
 # PDB 独立、镜像为 CANDIDATE_SHA、ALB 服务器组独立、不打 HPA
 ```
 
-> **master 节点单独处理**：必须存在一个 `NODE_TYPE=master` 的 Deployment（`replicas: 1`、`strategy: Recreate`、独立 PVC `ReadWriteOnce`）来跑 AutoMigrate 与 master-only 迁移；它**不接 ALB 流量**（不在 Service 选择器内），只跑后台任务与迁移。滚动发布顺序：先升级 master → schema 就绪 → 再滚动 stable slave → 最后升级 canary。这是解决 1.2 中"非 master 从不迁移"风险（R-04）的部署侧手段；master 故障后的接管时序、租约去重与 RTO 预算见附录B。
+> **master 节点单独处理**：**每个主站点（马尼拉、曼谷）各需一个 `NODE_TYPE=master` 的 Deployment**（`replicas: 1`、`strategy: Recreate`、独立 PVC `ReadWriteOnce`），各自只对自己站点的 RDS 主库执行 AutoMigrate 与 master-only 迁移；它**不接 ALB 流量**（不在 Service 选择器内），只跑后台任务与迁移。**新加坡备 region 的 PH 备 / TH 备工作负载必须固定 `NODE_TYPE=slave`**：备 region 与主站点访问的是同一个主库，若备 region 也起 master 会与主站点 master 并发迁移同一 schema。滚动发布顺序：先升级 master → schema 就绪 → 再滚动 stable slave → 最后升级 canary → 最后预热新加坡备 region。这是解决 1.2 中"非 master 从不迁移"风险（R-04）的部署侧手段；master 故障后的接管时序、租约去重与 RTO 预算见附录B。
 
 #### 7.4.3 AlbConfig、Service 与 ALB Ingress（含灰度）
 
@@ -452,9 +476,90 @@ spec:
 
 > 注意两点与旧草案的差异：其一，Service 不再"一个 selector 同时匹配 stable 与 canary"——权重分流由 ALB 规则完成，两个轨道必须是两个 Service；其二，超时参数从注解移到 `AlbConfig.listeners`。
 
+#### 7.4.4 新加坡备 region 部署（PH 备 + TH 备）
+
+新加坡备 region **不部署 RDS PostgreSQL**，只部署两套互相独立的网关工作负载，各自通过 RDS 公网地址读写对应主站点的主库：
+
+| 工作负载 | 归属 | `SQL_DSN` 目标 | 触发接管 | 副本 |
+| --- | --- | --- | --- | --- |
+| `new-api-ph-standby` | 菲律宾 | 马尼拉 RDS **公网地址** | GTM 探测到马尼拉不可用 | 2（热备） |
+| `new-api-th-standby` | 泰国 | 曼谷 RDS **公网地址** | GTM 探测到曼谷不可用 | 2（热备） |
+
+与主站点的差异只有环境变量、副本数、Secret 与 Service/Ingress 归属，容器模板复用 7.4.2：
+
+```yaml
+# deploy/aliyun/40-deployment-sg-standby.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: new-api-ph-standby            # 泰国备为 new-api-th-standby，仅 site 标签、Secret 与 GTM 归属不同
+  namespace: new-api
+  labels: { app: new-api, site: ph, track: standby, topology: sg }
+spec:
+  replicas: 2                          # 成本优先可置 0，改为 GTM 触发 + 预留容量预案（RTO 由秒级变为分钟级）
+  strategy: { type: RollingUpdate, rollingUpdate: { maxSurge: 1, maxUnavailable: 0 } }
+  selector:
+    matchLabels: { app: new-api, site: ph, track: standby }
+  template:
+    metadata:
+      labels: { app: new-api, site: ph, track: standby }
+    spec:
+      serviceAccountName: new-api
+      terminationGracePeriodSeconds: 180
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector: { matchLabels: { app: new-api, site: ph, track: standby } }
+      containers:
+        - name: new-api
+          image: registry-vpc.ap-southeast-1.aliyuncs.com/newapi/new-api:STABLE_SHA
+          args: ["--log-dir", "/app/logs"]
+          ports: [ { containerPort: 3000, name: http } ]
+          envFrom:
+            - configMapRef: { name: new-api-env }
+            - secretRef: { name: new-api-secret-sg-ph }      # SQL_DSN 指向马尼拉 RDS 公网地址
+          env:
+            - { name: NODE_TYPE, value: "slave" }            # 备 region 绝不跑 master 迁移
+            - { name: SQL_MAX_OPEN_CONNS, value: "150" }     # 公网链路，压低连接占用
+            - { name: SQL_MAX_LIFETIME, value: "60" }        # 让公网侧僵死连接尽快回收
+            - { name: REDIS_CONN_STRING, value: "redis://:REPLACE_ME@tair-sg.redis.rds.aliyuncs.com:6379" }
+            - { name: LOG_SQL_DSN, value: "clickhouse://default:REPLACE_ME@clickhouse-sg.clickhouse.rds.aliyuncs.com:9000/newapi_logs" }
+          readinessProbe:
+            httpGet: { path: /api/status, port: 3000 }       # 补建 /readyz 后切换（需含一次主库 SELECT 1）
+            periodSeconds: 5
+            failureThreshold: 2
+```
+
+对应的 Secret（`new-api-secret-sg-th` 同理，仅目标库换成曼谷）：
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata: { name: new-api-secret-sg-ph, namespace: new-api }
+type: Opaque
+stringData:
+  # 新加坡访问马尼拉主库的「公网」接入点，强制证书校验，禁止 sslmode=disable / require
+  SQL_DSN: "postgresql://newapi_sg:REPLACE_ME@pg-mnl-rw.pg.rds.aliyuncs.com:5432/newapi?sslmode=verify-full&sslrootcert=/etc/ssl/rds-ca.pem"
+  SESSION_SECRET: "REPLACE_ME_32B_RANDOM_SAME_ACROSS_ALL_NODES_AND_REGIONS"
+```
+
+> 备 region 只需 **Service + Ingress**（`site: ph` / `site: th` 两组），GTM 接管时把对应业务域名解析直接指向新加坡 ALB 实例。备 region 与主站点共用同一份主库数据与同一个 `SESSION_SECRET`，因此接管瞬间控制台会话与 API 令牌无需重新登录。
+
+**备 region 经公网读写主库的安全与容量约束（须逐条落实）**：
+
+- **最小暴露面**：RDS 公网地址的白名单**只放新加坡 VPC 的 NAT EIP**（与上游出口复用同一 EIP 池）；备 region 使用独立低权限账号 `newapi_sg`，禁止与主站点共用账号。
+- **强制加密与校验**：`sslmode=verify-full` + 下载 RDS CA 到镜像只读路径做校验；连接串不得出现 `sslmode=disable` 或 `require`。
+- **连接数硬约束**：备 region 单实例 `SQL_MAX_OPEN_CONNS ≤ 150`，且 `主站点 SQL_MAX_OPEN_CONNS × 实例数 + 备 region × 实例数 ≤ RDS max_connections × 0.8`。
+- **不双写**：同一主库同一时刻只允许"主站点"或"备 region"其一写入，切换由 GTM 健康探测 + 主站点 ALB 摘流共同收口；**禁止**在备 region 部署本地数据库、只读副本或任何 DTS 双向链路。
+- **健康判定必须真读写**：GTM 与备 region 的就绪探针不得只打静态接口，`/readyz`（补建后）必须包含一次主库 `SELECT 1`；否则主库不可达时备 region 会被误判为健康并被接入话务。
+- **延迟与流量**：新加坡 → 马尼拉 / 曼谷公网 RTT 约 40–70 ms，接管期写入 P99 抬升可接受；非接管期备 region 只承接 GTM 健康探测与内部验证流量，避免无谓的跨区写。
+
 ### 7.5 生产 Docker Compose 配置
 
 两种用法：**(a)** 无 K8s 时的单机/多机快速生产部署；**(b)** 作为 ACK 之外的灾备冷站。相较仓库自带 `docker-compose.yml`（参考版，默认弱口令），下面这份是**生产加固版**：3 个网关实例做滚动发布单元、显式网络隔离、只读根文件系统、日志与指标 sidecar。
+
+> **新加坡备 region 不适用下面的本地 `postgres` 服务**：备 region 必须把 `SQL_DSN` 指向马尼拉/曼谷 RDS 的**公网地址**（`sslmode=verify-full`），并在 `.env.prod` 中删除/停用本地 `postgres`、`pg-data` 卷与 `backup` sidecar；本地 `redis`、`clickhouse` 保留，仅作为备 region 的本地缓存与日志库。PH 备与 TH 备用两个独立 compose project（或两个 `--env-file`）区分 `SQL_DSN` 与端口。
 
 ```yaml
 # deploy/aliyun/docker-compose.prod.yml
@@ -612,7 +717,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-    # 生产建议改用 RDS 高可用版并删除本服务
+    # 生产建议改用 RDS 高可用版并删除本服务；新加坡备 region 必须删除本服务，改连主站点 RDS 公网地址
 
   clickhouse:
     image: registry-vpc.ap-southeast-6.aliyuncs.com/library/clickhouse-server:24.8-alpine
@@ -758,6 +863,8 @@ SESSION_SECRET=<openssl rand -base64 48，全实例全区域一致>
 
 `new-api.service` 已在仓库提供。多机部署要点：`ExecStart=/usr/local/bin/new-api --log-dir /var/log/new-api`、`LimitNOFILE=200000`、`Restart=always`、`After=network-online.target`，前置 Nginx 做 `proxy_read_timeout 900s; proxy_buffering off;`（SSE 必须关 buffering）。
 
+新加坡备 region 若采用裸机形态，同样只把 `SQL_DSN` 指向主站点 RDS 的**公网地址**（`sslmode=verify-full` + IP 白名单）并固定 `NODE_TYPE=slave`，**不在本地部署 PostgreSQL**。
+
 ### 7.7 发布与灰度流水线
 
 ```mermaid
@@ -781,6 +888,8 @@ flowchart LR
   Q --> R["更新发布记录 镜像 tag 与 sha 与 option 变更清单"]
 ```
 
+**新加坡备 region 的发布顺序**：PH 备 / TH 备工作负载连的是同一份生产主库、且固定为 `NODE_TYPE=slave`，是天然的"真实数据前置验证"环境。因此**先升级新加坡备 region 并观察一轮，再进入主站点的 canary 门禁**；备 region 版本落后于主站点时不允许让其参与 GTM 接管。
+
 **发布窗口与冻结策略**：菲律宾发薪日（每月 15/30 日）与当地工作时间 09:00–21:00 GMT+8 禁止发布；发布窗口固定在 **马尼拉时间 02:00–05:00**。错误预算燃尽 > 80% 时自动冻结非必要发布。
 
 ### 7.8 监控集成（阿里云侧）
@@ -790,9 +899,10 @@ flowchart LR
 | 指标 | ARMS Prometheus 版 | ACK 装 arms-prometheus + ServiceMonitor 抓 `/metrics`（需补建）；ECS 场景用 prometheus agent 远程写 | 90 天热 + 2 年降采样 |
 | 应用性能 | ARMS Application Monitoring | Go 应用接 OpenTelemetry SDK（需补建 R-07），或 eBPF 无侵入 | 30 天 |
 | 持续剖析 | ARMS 持续剖析（Pyroscope 兼容） | `PYROSCOPE_*` 环境变量已内建 | 30 天 |
-| 日志 | SLS | Logtail 采 `/app/logs` + stdout；`logs`/`audit_logs` 用 DTS 或应用双写投递 | sys 30 天 / audit 180 天 |
+| 日志 | SLS | Logtail 采 `/app/logs` + stdout；`logs`/`audit_logs` 由应用经 SLS SDK / Logtail 投递（**不再依赖 DTS**） | sys 30 天 / audit 180 天 |
 | 看板 | Grafana 服务 | 数据源 Prometheus + SLS；三块看板：SLA/SLO 燃尽、中继健康（模型 × 渠道）、容量与成本 | — |
 | 拨测 | 云监控站点监控 | 探测点选马尼拉、曼谷、新加坡、东京、香港；断言 `success:true` + 版本匹配 | 15 个月 |
+| 备 region 链路 | 云监控 + RDS 监控 | 新加坡 → 马尼拉 / 曼谷 RDS 公网地址的 TCP 拨测：RTT、连接失败率、连接数占比；链路不健康时告警并阻止 GTM 接管到备 region | 15 个月 |
 | RUM | 前端监控 ARMS RUM | 复用现有 Umami / GA 注入点（`main.go:248-289`）叠加 RUM | — |
 | 告警 | ARMS 告警 + 云监控 | 钉钉/企业微信 + 短信 + 电话；P1 走电话，按 6.3.4 表落地；排班用告警值班表 | — |
 | 审计合规 | 操作审计 ActionTrail + DB 审计 | 云 API 变更全部留痕；RDS SQL 洞察开启 | 180 天 |
@@ -804,9 +914,9 @@ flowchart LR
 | dev | 本地 | SQLite + `docker-compose.dev.yml` | 功能开发 | `bun run lint`、`make test` |
 | staging（pre） | 新加坡 | RDS PG + Tair + ClickHouse | 集成与三数据库矩阵 | 每次合并主干；`SQL_DSN` 分别用 MySQL 8.2 / PG 15 / SQLite 跑同一套 E2E |
 | perf | 新加坡 | 同 staging + mock 上游 | 3.9 压测场景矩阵 | 相对基线劣化 > 10% 阻断 |
-| prod mnl | 马尼拉 | RDS PG HA + Tair + CH | 菲律宾流量 | 灰度门禁 |
-| prod bkk | 曼谷 | RDS PG HA + Tair + CH | 泰国流量 | 与 mnl 错峰发布（先 bkk 后 mnl 或反之） |
-| dr | 新加坡 | DTS 只读副本 + 冷备 ACK | 区域级灾备 | 每季度切换演练 |
+| prod mnl | 马尼拉 | RDS PG HA（菲律宾唯一主库）+ Tair + CH | 菲律宾流量（主站点） | 灰度门禁 |
+| prod bkk | 曼谷 | RDS PG HA（泰国唯一主库）+ Tair + CH | 泰国流量（主站点） | 与 mnl 错峰发布（先 bkk 后 mnl 或反之） |
+| standby sg | 新加坡 | **无本地 RDS**：PH 备 / TH 备经公网读写主站点 PG + 本地 Tair + CH | 两地共用的备 region | 区域接管演练；备工作负载先于主站点发布 |
 
 **三数据库强制验证（AGENTS.md 要求，不可省略）**：任何影响 DB 行为的改动（模型/GORM 标签/迁移/DSN/驱动/Scanner-Valuer/原生 SQL/事务/行锁）必须在**真实** SQLite、MySQL ≥ 5.7.8（建议 8.2）、PostgreSQL ≥ 9.6（建议 15）上验证，日志库涉及 ClickHouse 时一并覆盖；迁移需在新建库 + 由上一发布版本产生的存量库上各跑，并至少启动两次证明幂等，且记录数据库版本、命令与结果。
 
@@ -814,10 +924,11 @@ flowchart LR
 
 | 项 | 说明 |
 | --- | --- |
-| 计算 | 每区域 4×`g8i.2xlarge`（可扩至 16），按量转包年包月可省 30–40% |
-| 数据 | RDS PG 高可用版 16C64G + 只读实例 ×2 区域；Tair 4 GB 主备 ×2 |
-| 日志 | ClickHouse 2 节点 ×2 区域，随 TTL 90 天与采样策略线性 |
-| 网络 | ALB LCU 费用与 **出站带宽** 是主要成本项；LLM 流式响应出站带宽大，建议与 DCDN 动静态分离并对上游出口走 GA |
+| 计算 | 马尼拉 / 曼谷各 4×`g8i.2xlarge`（可扩至 16），新加坡备 region 常态 4×（PH 备 + TH 备各 2）；按量转包年包月可省 30–40% |
+| 数据 | **RDS PG 高可用版 16C64G ×2（马尼拉 + 曼谷，各为本地唯一主库，无跨区副本）**；RDS 公网流量与连接许可为新增小额项；Tair 4 GB 主备 ×3 |
+| 日志 | ClickHouse 2 节点 ×3 区域，随 TTL 90 天与采样策略线性 |
+| 网络 | ALB LCU 费用与 **出站带宽** 是主要成本项；LLM 流式响应出站带宽大，建议与 DCDN 动静态分离并对上游出口走 GA；备 region 接管期的跨区数据库读写走公网计费，按小流量估算 |
+| 优化 | 新加坡备 region 若采用"置 0 副本 + GTM 触发扩容"冷备形态，可省下常态计算成本，代价是接管 RTO 由秒级变为分钟级 |
 | 上游 token | 与网关 SLA 解耦，独立列预算；第九章 R-30 要求建立客户维度成本告警 |
 
 ---
@@ -843,16 +954,16 @@ flowchart LR
 
 | 环节 | 配置 | 期望可用性 | 备注 |
 | --- | --- | --- | --- |
-| DNS/GTM + 就近解析 | 双区域 + 健康探测切换 | 99.99% | 单区域故障 60 s 内切走 |
+| DNS/GTM + 就近解析 | 双主站点 + 新加坡备 region，健康探测切换 | 99.99% | 单站点故障 60 s 内切到备 region |
 | WAF + ALB | 阿里云多 AZ 实例，SLA 99.99% | 99.99% | SSE 超时配置正确，避免"假可用" |
 | ACK 控制面 | Pro 托管版多 AZ | 99.95% | 控制面故障不影响已运行 Pod 的数据面 |
-| 网关数据面 | 每区域 ≥ 4 副本跨 2 AZ、`maxUnavailable=0`、PDB、preStop 排空 | 99.99% | 单实例 99.5% × 4 副本并联 |
+| 网关数据面 | 每主站点 ≥ 4 副本跨 2 AZ（备 region 的 PH 备 / TH 备各 ≥ 2 副本）、`maxUnavailable=0`、PDB、preStop 排空 | 99.99% | 单实例 99.5% × 4 副本并联 |
 | 主库 | RDS 高可用版跨 AZ 主备 + 自动切换 | 99.99% | 切换期 30 s 内，写入短暂失败由重试吸收 |
 | 缓存 | Tair 主备 | 99.99% | **注意**：Redis 故障时限流 fail-closed 返回 500（`middleware/rate-limit.go:117`），实际会把可用性拉低到 Redis 的可用性 → 必须改造为降级放行（R-05） |
 | 日志库 | ClickHouse（可写失败降级） | 99.9% | 写日志失败绝不能阻塞中继主链路（需在改造中显式保证） |
-| 跨区数据 | DTS 双向 + 区域自治 | 99.9% | 区域间链路劣化时本站点仍可用 |
+| 跨区数据 | 主库唯一 + 备 region 经公网直连（无 DTS、无双写） | 99.9% | 备 region 接管时写延迟抬升，但不存在双写冲突与对账分裂 |
 
-串联（近似独立）：`0.9999 × 0.9999 × 0.9999 × 0.9999 × 0.9999 ≈ 0.9996`，仍高于 99.95% 目标，留出 ~0.01% 给"人因与变更"（业界的最大故障源）。**结论：双区域 + 每区域 ≥ 4 副本 + RDS 高可用 + Redis 降级改造** 是达成 99.95% 的最低配置；单区域 3 副本约等于 99.9%（99.95 不达标）。
+串联（近似独立）：`0.9999 × 0.9999 × 0.9999 × 0.9999 × 0.9999 ≈ 0.9996`，仍高于 99.95% 目标，留出 ~0.01% 给"人因与变更"（业界的最大故障源）。**结论：双主站点 + 新加坡备 region + 每主站点 ≥ 4 副本 + RDS 高可用 + Redis 降级改造** 是达成 99.95% 的最低配置；单区域 3 副本约等于 99.9%（99.95 不达标）。
 
 ### 8.3 错误预算管理
 
@@ -875,10 +986,11 @@ flowchart TD
 | --- | --- | --- | --- | --- |
 | 单 Pod OOM / panic | readiness 失败 + Recovery 中间件 500 | K8s 重启，ALB 摘除 | 看 pprof / Pyroscope | 秒级 |
 | 单可用区故障 | 云监控 + GTM 探测 | Pod 反亲和 + `DoNotSchedule` 保证另一 AZ 有容量 | 扩容 | ≤ 2 min |
-| 整区域故障 | GTM 健康检查连续失败 | DNS 切到他区（容量已预留 1.5 倍） | 确认后手工降级非核心功能 | ≤ 5 min |
+| 主站点整站故障 | GTM 健康检查连续失败 | DNS 切到新加坡备 region（容量已预留 1.5 倍）；备 region 经公网读写主站点主库 | 确认后手工降级非核心功能 | ≤ 5 min |
 | 上游供应商区域性故障 | 渠道批量自动禁用（status=3）+ 告警 | `RetryTimes` 换渠道 + 优先级分层 + `status_code_mapping` | 切备用渠道 / 改 `model_mapping` | ≤ 60 s（轮询） |
 | Redis 故障 | `newapi_redis_up == 0` | 限流降级内存滑动窗口（需改造），用户/令牌缓存回落 DB | 立即恢复 Tair | 分钟级 |
 | 主库故障 | 连接错误 + RDS 事件 | RDS 主备自动切换；应用重连（`SQL_MAX_LIFETIME=60` 加速收敛） | 确认切换后校验额度一致性 | ≤ 60 s |
+| 备 region→主库公网链路劣化 | 备 region 探针失败 / RTT 与连接失败率告警 | 备 region Pod 不就绪即不参与 GTM 接管，流量保留在主站点 | 排查公网段或改走 GA 优化回源 | ≤ 5 min |
 | 磁盘打满 | 5 s 采样 > 95% → 503 摘流 | 自动拒绝新请求保护进程 | 清磁盘缓存接口 `/api/performance/disk_cache` | 分钟级 |
 | 慢客户端拖垮连接 | `active_connections` + `STREAMING_TIMEOUT` | 120 s（默认）无事件即断；写 deadline `ExtendWriteDeadline` | 调 `USER_SESSION_*` 与限流 | — |
 | 迁移失败 | 启动探针不过 + 日志 `failed to initialize database` | `Restart=unless-stopped` 反复失败 → 告警 | 回滚镜像 + 前向修复（无 down） | 10 min |
@@ -887,14 +999,14 @@ flowchart TD
 ### 8.5 容量规划与压测验收
 
 - **单实例基线**（须由 3.9 的 S1/S2 实测替换）：非流式 800 QPS、并发 SSE 1,500、内存 2 GiB 工作集、fd 需求 = 并发 × 2（客户端 + 上游）+ 余量，故 `nofile=200000`。
-- **区域容量**：峰值按日均 3 倍估算；每区域预留 **1.5 倍单区域全量能力**（保证另一区域故障时单区域可扛全量）。
+- **区域容量**：峰值按日均 3 倍估算；马尼拉 / 曼谷主站点各预留 **1.5 倍单站点全量能力**，且**新加坡备 region 必须具备单站点全量接管能力**（PH 备 + TH 备的可扩容上限 ≥ 被接管站点峰值 × 1.5）。
 - **带宽**：单路流式响应约 20–50 KB/s，1,000 并发 ≈ 40 Mbps，出站流量费用与 ALB LCU 需按此线性预留。
-- **连接数预算**：`SQL_MAX_OPEN_CONNS=300 × 实例数 ≤ RDS max_connections × 0.8`。16 实例时必须配 PgBouncer（或 RDS 代理），否则 4,800 连接会打爆 PG。
+- **连接数预算**：`(主站点 SQL_MAX_OPEN_CONNS × 实例数) + (备 region SQL_MAX_OPEN_CONNS × 实例数) ≤ RDS max_connections × 0.8`。主站点扩到 16 实例时必须配 PgBouncer（或 RDS 代理），否则 4,800+ 连接会打爆 PG。
 - **上游出口**：NAT 固定 EIP 池（≥ 4 个 /28）用于供应商白名单；每渠道独立 host 连接上限，避免单渠道占满 `MaxIdleConnsPerHost=400`。
 
 ### 8.6 灾备演练（季度必做）
 
-1. 区域切换演练：GTM 强制切单区域，验证容量与延迟（目标：TH 用户到马尼拉 RTT 上升 < 90 ms 且成功率不降）。
+1. 备 region 接管演练：GTM 强制把菲律宾流量切到新加坡 PH 备、泰国流量切到新加坡 TH 备，验证备 region 经**公网**读写马尼拉 / 曼谷主库的容量与延迟（目标：接管期成功率不降，写入 P99 抬升 ≤ 80 ms）。
 2. RDS PITR 演练：从备份恢复到新实例，跑额度对账（验证 RPO/RTO）。
 3. Redis 摘除演练：确认降级路径不返回 5xx 雪崩（当前会 fail-closed，见 R-05）。
 4. 版本回滚演练：从 canary 门禁失败到权重归零，实测止血耗时（目标 < 60 s）。
