@@ -84,6 +84,8 @@ new-api 是一个 **AI 模型 API 网关 / 代理**（Go + React 单体可执行
 - AI 网关是长连接流式场景，RTT 直接叠加到 TTFT 体感，**主站点不能只放一个区域**；备 region 的职责是承接"主站点整体不可用"这一最坏情形，而不是分担常态流量。
 
 ```mermaid
+%% 布局：自上而下依次为 终端用户 → 全球接入 → 马尼拉主站点 → 曼谷主站点 → 新加坡备 region → 上游出口 → 上游供应商 → 可观测中心。
+%% 说明：末尾三条 `~~~` 是不可见连线，仅用于强制上述纵向排列次序，不代表任何数据流。
 flowchart TB
   subgraph USERS["终端用户"]
     PH["菲律宾客户"]
@@ -91,9 +93,8 @@ flowchart TB
     OTHER["其他地区客户"]
   end
 
-  subgraph EDGE["阿里云全球接入"]
+  subgraph ACCESS["阿里云全球接入"]
     GTM["云解析 DNS 全局流量管理 GTM<br/>按 Latency 就近解析 + 健康探测切换"]
-    GA["全球加速 GA<br/>跨境回源与上游出口"]
     CDN["DCDN 静态加速<br/>web/dist 资源"]
     WAF1["WAF 3.0 实例 马尼拉"]
     WAF2["WAF 3.0 实例 曼谷"]
@@ -124,19 +125,22 @@ flowchart TB
     TAIR3["Tair 主备版 本地缓存"]
     CK3["ClickHouse 本地日志"]
     OSS3["OSS"]
-    EGR["统一上游出口 NAT 与固定 EIP 池"]
+    SGWAN["备 region 经公网 TLS 读写主库（仅接管时生效，不双写）<br/>PH 备 → pg-mnl-rw.pg.rds.aliyuncs.com<br/>TH 备 → pg-bkk-rw.pg.rds.aliyuncs.com<br/>sslmode=verify-full + IP 白名单"]
   end
 
+  EGR["上游出口 NAT + 固定 EIP 池<br/>同一 EIP 池也是备 region 访问主库的白名单来源"]
+  GA["全球加速 GA"]
+  UPSTREAM["OpenAI / Anthropic / Google / Azure / AWS 等"]
   MON["可观测中心<br/>SLS + ARMS + Prometheus + Grafana + 拨测"]
 
   PH --> GTM
   TH --> GTM
   OTHER --> GTM
-  GTM -->|"PH 用户 主"| WAF1
-  GTM -->|"TH 用户 主"| WAF2
-  GTM -.->|"PH 故障接管"| WAF3
-  GTM -.->|"TH 故障接管"| WAF3
+  GTM -->|"PH 用户 · 主"| WAF1
+  GTM -->|"TH 用户 · 主"| WAF2
+  GTM -.->|"PH / TH 故障接管"| WAF3
   CDN --> OSS1
+  CDN --> OSS2
   CDN --> OSS3
   WAF1 --> ALB1 --> ACK1
   WAF2 --> ALB2 --> ACK2
@@ -149,20 +153,26 @@ flowchart TB
   ACK2 --> TAIR2
   ACK2 --> CK2
   ACK2 --> OSS2
-  ACK3 -->|"公网 TLS 读写菲律宾主库"| RDS1
-  ACK3 -->|"公网 TLS 读写泰国主库"| RDS2
   ACK3 --> TAIR3
   ACK3 --> CK3
   ACK3 --> OSS3
+  ACK3 --> SGWAN
   ACK1 -->|上游调用| EGR
   ACK2 -->|上游调用| EGR
   ACK3 -->|上游调用| EGR
   EGR --> GA
-  GA --> UPSTREAM["OpenAI / Anthropic / Google / Azure / AWS 等"]
-  ACK1 --> MON
-  ACK2 --> MON
-  ACK3 --> MON
+  GA --> UPSTREAM
+  ACK1 -.-> MON
+  ACK2 -.-> MON
+  ACK3 -.-> MON
+
+  %% 不可见连线：仅用于强制子图自上而下排列，不代表数据流
+  RDS1 ~~~ ALB2
+  RDS2 ~~~ ALB3
+  UPSTREAM ~~~ MON
 ```
+
+> **上图读法**：主干自上而下为「用户 → 全球接入 → 主站点 / 备 region → 上游出口 → 上游 AI 供应商」，`~~~` 仅为排版用的不可见连线。备 region 到主库的公网读写路径以 `SGWAN` 节点呈现（**有意不再画跨区域连线**，否则会触发 mermaid 把整张图横向铺开）：PH 备 → 马尼拉主库、TH 备 → 曼谷主库，仅故障接管时生效且不双写。若渲染器版本低于 mermaid 10.2（不支持 `~~~`），删除末三条不可见连线即可，其余语法不受影响。
 
 ### 7.2 云资源清单（生产最小高可用配置）
 
