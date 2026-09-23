@@ -59,7 +59,7 @@ new-api 是一个 **AI 模型 API 网关 / 代理**（Go + React 单体可执行
 | 数据一致性 | 计费误差 = 0（额度不超扣、不重复扣） | `subscription_pre_consume_records.request_id` 唯一索引 + 对账任务 |
 | 配置收敛时间 | ≤ 60 s（现网默认），关键开关目标 ≤ 10 s | 灰度开关演练 |
 | 故障恢复 RTO / RPO | RTO ≤ 5 min（回滚）/ RPO ≤ 0（RDS 主备 + binlog/WAL 归档） | 演练 |
-| 区域延迟 | 菲律宾用户 RTT ≤ 15 ms，泰国用户 RTT ≤ 45 ms | 阿里云地域选择 + GA |
+| 区域延迟 | 菲律宾用户 RTT ≤ 15 ms，泰国用户 RTT ≤ 45 ms | 阿里云地域选择 + 就近站点部署（**不依赖 GA**，理由见 7.1） |
 
 
 ---
@@ -128,8 +128,7 @@ flowchart TB
     SGWAN["备 region 经公网 TLS 读写主库（仅接管时生效，不双写）<br/>PH 备 → pg-mnl-rw.pg.rds.aliyuncs.com<br/>TH 备 → pg-bkk-rw.pg.rds.aliyuncs.com<br/>sslmode=verify-full + IP 白名单"]
   end
 
-  EGR["上游出口 NAT + 固定 EIP 池<br/>同一 EIP 池也是备 region 访问主库的白名单来源"]
-  GA["全球加速 GA"]
+  EGR["上游出口 NAT + 固定 EIP 池<br/>同一 EIP 池也是备 region 访问主库的白名单来源<br/>不使用 GA：上游看到的源 IP 即该固定 EIP"]
   UPSTREAM["OpenAI / Anthropic / Google / Azure / AWS 等"]
   MON["可观测中心<br/>SLS + ARMS + Prometheus + Grafana + 拨测"]
 
@@ -160,8 +159,7 @@ flowchart TB
   ACK1 -->|上游调用| EGR
   ACK2 -->|上游调用| EGR
   ACK3 -->|上游调用| EGR
-  EGR --> GA
-  GA --> UPSTREAM
+  EGR --> UPSTREAM
   ACK1 -.-> MON
   ACK2 -.-> MON
   ACK3 -.-> MON
@@ -174,16 +172,44 @@ flowchart TB
 
 > **上图读法**：主干自上而下为「用户 → 全球接入 → 主站点 / 备 region → 上游出口 → 上游 AI 供应商」，`~~~` 仅为排版用的不可见连线。备 region 到主库的公网读写路径以 `SGWAN` 节点呈现（**有意不再画跨区域连线**，否则会触发 mermaid 把整张图横向铺开）：PH 备 → 马尼拉主库、TH 备 → 曼谷主库，仅故障接管时生效且不双写。若渲染器版本低于 mermaid 10.2（不支持 `~~~`），删除末三条不可见连线即可，其余语法不受影响。
 
+> **上游出口不使用 GA（全球加速）**：出站链路为 `Pod → NAT 网关 + 固定 EIP → 公网 → 供应商`，供应商 IP 白名单即这批固定 EIP。GA 的加速段是"客户端就近接入我的服务"，终端节点是**我方后端**，无法改善"我方 → 上游"的出站跨境链路；若强行把上游地址配为其终端节点，只会把源 IP 变成 GA 侧地址而破坏白名单模型，并同时破坏上游基于域名的 SNI/TLS 校验，还新增一笔按出站流量计费的开销（LLM 流式出站带宽极大，见 8.5 与 7.10）。因此 **7.1 结构图、7.2 云资源清单、7.10 成本结构均不含 GA**；跨境链路质量由多供应商 / 多渠道路由与重试兜底（见 8.4）。若后续出现明确的"其他地区用户就近接入"诉求，应把 GA 放在 `用户 → ALB` 这一段单独评估，而不是挂在出口之后。
+
+#### 7.1.1 接入链路 TLS 终止点与回源协议
+
+**当前设计的 TLS 收敛点是各站点 ALB 的 443 监听**（`AlbConfig.spec.listeners`，见 7.4.3）：`ssl-redirect` 使 ALB 成为全站唯一的 301/HSTS 下发点；网关进程只监听明文 `PORT=3000`，Service 以 `targetPort: 3000` + `backend-protocol: "http"` 挂载，**ALB → Pod 这一段是 VPC 内明文 HTTP**（Terway 下 Pod IP 即 VPC IP，不再套一层 TLS；如需服务网格 mTLS 属于后续增强，本方案不做）。需要提醒的是：**一旦 WAF 采用 CNAME 接入，WAF 自己就会成为一个额外的 TLS 终止点**，"收敛到一处"随即被打破。因此接入链路上真正需要决策的只有两件事：**WAF 用什么方式接入**、**它到 ALB 的回源段是否加密**。
+
+| 方案 | 证书份数 | 回源段协议 | 代价 | 结论 |
+| --- | --- | --- | --- | --- |
+| ① WAF 3.0 **云原生 / 服务化接入 ALB** | **1 份**（只在 ALB Secret） | 无独立回源跳（同 region 内网，ALB 前置/内嵌） | 依赖目标区域可售性与规则能力等价（**未验证**，见 impl_tech.md 9.7） | **首选** |
+| ② WAF CNAME 接入 + **HTTPS 回源** | ≥ 2 份（WAF + ALB） | 必须 HTTPS | 多一跳延迟与一套超时预算；证书需同步 | 可售性不满足时的**回退方案** |
+| ③ WAF CNAME 接入 + HTTP 回源 | 1 份 | 明文 | — | **一票否决** |
+
+方案③被否决的理由不是"不够严谨"，而是这条链路上跑的是**长期可用的凭据**：`Authorization: Bearer <API Key>`、session cookie 与个人访问令牌都在请求头里。CNAME 接入的回源段要出 WAF 的公网接入点、再进入我们侧的 ALB，属于会经过不可信网络的跳，明文即等于把可用令牌放到公网上；这违反 OWASP ASVS 的通信安全要求（V9 Communication Security：机密路径上的全部数据必须加密）与 [Session Management Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html) 对会话令牌"整链路 TLS、不得存在明文段"的要求。同理，DCDN → 源站、以及新加坡备 region → 主库（7.4.4）这些**出 VPC 的段**一律要求 TLS 且校验证书。
+
+**证书单点真源**（避免"同一张证书要维护两份"）：
+
+- **方案①**：cert-manager 走 **DNS-01**（云解析 DNS 的 RAM 子账号只授权 `_acme-challenge` TXT 记录）签发，写入 `api-example-ph-com-tls` Secret，ALB Ingress 用 `secretName` 引用；WAF 侧不存在独立证书，续期由 cert-manager 单链路完成，天然无同步问题。**用 DNS-01 而非 HTTP-01** 的原因：HTTP-01 的校验路径会穿过 WAF 的防护规则与 CC 限流，灰度期容易被自家防护拦掉。
+- **方案②**：把 **CAS（数字证书管理服务）作为唯一真源**，由它签发/托管并用"云产品部署"把同一张证书同时下发到 WAF 与 ALB；此时**不要**再并存一套 cert-manager 链路，否则两个真源互相覆盖、回滚时无法判断哪份生效。注意云产品部署是异步任务，续期窗口内可能出现"WAF 已换新、ALB 仍是旧证"，因此 CAS 自动续期提前量取 ≥ 30 天，并把"到期 21 天内两产品证书指纹不一致"列入 7.8 告警。
+- **不采用**：私有 CA（PCA）签回源证书、让公网证书不出 WAF。它依赖 WAF 是否支持用自定义 CA 校验回源证书，且 ALB 要信任该私有 CA，链路最重、收益与方案①重叠。
+
+**回源/中间段协议一览**：用户 → WAF/DCDN 为 TLS 1.2+1.3；WAF → ALB 按方案①/②（②必须 HTTPS）；ALB → Pod 为 VPC 内明文 HTTP；DCDN → OSS 显式设为 HTTPS 并在 bucket 上开启"仅允许 HTTPS"；`index.html` 强制 `no-cache`，带指纹 chunk 缓存 7 天。数据库的 `sslmode=require`（主站内网）/ `verify-full`（备 region 公网）属于另一条链路，不与接入层证书混用同一份材料。
+
+**两项必须同步重算的工程约束**：
+
+1. **SSE 保活预算**：接入层每多一跳就引入一个独立的空闲超时，而 ALB `idleTimeout` 已到产品上限 60 s。网关 ping 心跳间隔（15–20 s）必须小于**链路上最小的那个空闲超时**，方案①少一跳、预算最好算。灰度门禁与压测用例必须包含"穿过完整接入链路后 SSE 持续 60 s 不断流"这一条，而不是只测 Pod 直连。
+2. **`TRUSTED_PROXIES` 与 XFF 层数**：真实客户端 IP 的解析深度随接入方式变化（方案②为 `用户 → WAF → ALB → Pod` 两级代理，方案①层数不同）。选定方式后必须据此重算 ConfigMap 里的 `TRUSTED_PROXIES`（当前为 `10.0.0.0/8`），否则取到的是代理 IP，会导致 `GLOBAL_API_RATE_LIMIT`、7.2 的 WAF CC 阈值与审计日志的 IP 归属同时失真——这类失真不会报错，只会让限流和风控静默失效。
+
 ### 7.2 云资源清单（生产最小高可用配置）
 
 | 层 | 产品 | 规格建议 | 数量 | 关键配置 | 可用性贡献 |
 | --- | --- | --- | --- | --- | --- |
 | 接入 | 云解析 DNS + GTM | 旗舰版 | 1 | 按延迟解析，HTTP 健康探测 15 s，故障切换 ≤ 60 s；菲律宾业务：主 → 马尼拉、备 → 新加坡；泰国业务：主 → 曼谷、备 → 新加坡 | 单主站点故障自动切到备 region |
-| 接入 | DCDN | 按量 | 1 | `index.html` 强制 `no-cache`，带指纹的 chunk 缓存 7 天 | — |
-| 接入 | WAF 3.0 | 企业版 | 3（马尼拉 / 曼谷 / 新加坡各 1） | 放行支付回调路径；CC 防护阈值对齐 `GLOBAL_API_RATE_LIMIT` | 抗 L7 |
-| 接入 | ALB | 标准版 II | 3（每站点 1 组多 AZ） | `AlbConfig` listeners：`idleTimeout=60`、`requestTimeout=180`（均为产品上限，SSE 靠网关 ping 保活）、HTTPS TLS1.2+1.3、`canary-weight` 灰度 | 99.99% |
+| 接入 | DCDN | 按量 | 1 | `index.html` 强制 `no-cache`，带指纹的 chunk 缓存 7 天；**回源协议显式 HTTPS**，OSS bucket 开启"仅允许 HTTPS" | — |
+| 接入 | WAF 3.0 | 企业版 | 3（马尼拉 / 曼谷 / 新加坡各 1） | **优先云原生 / 服务化接入 ALB**（证书只在 ALB 一份、无回源跳），该方式在目标区域不可用时回退为 CNAME 接入 + **强制 HTTPS 回源**（选型见 7.1.1）；放行支付回调路径；CC 防护阈值对齐 `GLOBAL_API_RATE_LIMIT`；按所选方式重算 `TRUSTED_PROXIES` | 抗 L7 |
+| 接入 | 证书 | cert-manager（DNS-01）或 CAS 云产品部署 | 每域名 1 份真源 | 方案①：cert-manager DNS-01 → `api-example-ph-com-tls` Secret，ALB Ingress `secretName` 引用；方案②：CAS 托管 + 云产品部署同时下发 WAF/ALB，自动续期提前量 ≥ 30 天。**两套签发链路不并存** | — |
+| 接入 | ALB | 标准版 II | 3（每站点 1 组多 AZ） | `AlbConfig` listeners：`idleTimeout=60`、`requestTimeout=180`（均为产品上限，SSE 靠网关 ping 保活）、HTTPS TLS1.2+1.3（唯一的 TLS 终止与 HSTS 下发点）、`canary-weight` 灰度 | 99.99% |
 | 计算 | ACK Pro 托管版 | 控制面 SLA 99.95% | 3 集群（马尼拉、曼谷主集群 + 新加坡备 region 集群） | Kubernetes 1.31+，CNI Terway，多 AZ | 99.95% |
-| 计算 | ECS 节点池 | `g8i.2xlarge`(8C32G) | 马尼拉 / 曼谷各 ≥ 4（跨 2 AZ）；新加坡备 ≥ 2（PH 备 + TH 备 各 1） | 系统盘 100 G ESSD PL1 + 数据盘 200 G ESSD（`/data` 与 `/app/logs`） | — |
+| 计算 | ECS 节点池 | `g8i.2xlarge`(8C32G) | 马尼拉 / 曼谷各常态 4、自动伸缩 4–8（跨 2 AZ）；新加坡备常态 2、自动伸缩 2–12 | 系统盘 100 G ESSD PL1 + 数据盘 300 G ESSD（`/data` 与 `/app/logs`）；节点池必须开启自动伸缩，否则 HPA 扩到上限会因无节点而 Pending | — |
 | 数据 | RDS PostgreSQL 高可用版 | pg 15，`rds.pg.c2.4xlarge` 或 16C64G | **2：马尼拉 1（菲律宾唯一主库）+ 曼谷 1（泰国唯一主库）**，可选每站点 1 只读实例 | 主备跨 AZ、PITR 保留 7 天、每日全量 + WAL 归档到 OSS、`max_connections` 按主站点 + 备 region 连接总和核算 | 99.99% |
 | 数据 | RDS 公网访问（SSL） | 按量 | 2（马尼拉、曼谷各开 1 个公网地址） | **仅新加坡备 region 使用**：`sslmode=verify-full` + RDS CA 校验 + 白名单只放新加坡 VPC 的 NAT EIP；主站点流量一律走内网地址 | 备 region 接管 |
 | 数据 | 连接池收敛层 | RDS 数据库代理（独享型）或 ACK 内自建 PgBouncer 3 副本 | 每站点 1 套（代理随 RDS 售卖；自建池复用 ACK 节点，另加 2 个小规格节点池） | `pool_mode=transaction`，按 7.4.5.1 的 I-2/I-3 核算 `max_client_conn`、`default_pool_size × 副本数`；master 迁移路径直连不走池 | 防连接打爆导致整站不可用 |
@@ -196,6 +222,8 @@ flowchart TB
 | 网络 | VPC + vSwitch + NAT + EIP | /16 与 3 个 /20 | 3 套（马尼拉 / 曼谷 / 新加坡） | 私有子网跑 Pod 与 DB，仅 ALB 在公网子网；NAT 出口固定 EIP 池用于上游白名单，同一 EIP 池同时作为新加坡备 region 访问主库的白名单来源 | — |
 
 > **相对旧方案的两项结构性变化**：① **取消 DTS 链路**——菲律宾与泰国各自只有一个主库，跨区不存在任何数据库复制关系，故本表不再保留 `DTS` 条目；② **新增新加坡备 region 的接入与计算资源**，但**新加坡不部署任何 RDS 实例**，备 region 通过 RDS 公网地址读写主站点主库（部署细节见 7.4.4）。
+
+> **上游出口不使用 GA（全球加速）**：上游调用链路为 `Pod → NAT 网关 + 固定 EIP → 公网 → 供应商`，供应商侧 IP 白名单即这批固定 EIP（见本表"网络"行）。GA 的加速段是"客户端就近接入我方服务"、终端节点是**我方后端**，无法改善"我方 → 上游"的出站跨境链路；若把上游地址配为其终端节点，只会把上游看到的源 IP 变成 GA 侧地址而破坏白名单模型，同时破坏上游基于域名的 SNI/TLS 校验，并新增一笔按出站流量计费的开销（LLM 流式出站带宽极大，见 8.5）。因此**本表不含 GA 条目**，跨境链路质量由多供应商 / 多渠道路由与重试兜底（见 8.4）。若后续出现明确的"其他地区用户就近接入"诉求，应按 `用户 → GA(Anycast) → ALB` 的位置单独评估，而不是挂在出口之后。
 
 ### 7.3 应用部署形态选择
 
@@ -382,7 +410,7 @@ spec:
 
 #### 7.4.3 AlbConfig、Service 与 ALB Ingress（含灰度）
 
-> **官方核实后的关键事实**：ALB listener `idleTimeout` 取值 1–60 s（默认 15）、`requestTimeout` 取值 1–180 s（默认 60，超时由 ALB 直接返回 504），二者**只能在 `AlbConfig` CRD 的 `spec.listeners` 配置，不存在对应 Ingress 注解**；早期草案里 `idle-timeout: "900"` / `request-timeout: "0"` 均为无效写法。SSE 长流不被切断的前提是网关持续产生心跳事件（ping 默认关闭，须开启并设 15–20 s），完整论证见附录A.6。
+> **官方核实后的关键事实**：ALB listener `idleTimeout` 取值 1–60 s（默认 15）、`requestTimeout` 取值 1–180 s（默认 60，超时由 ALB 直接返回 504），二者**只能在 `AlbConfig` CRD 的 `spec.listeners` 配置，不存在对应 Ingress 注解**；早期草案里 `idle-timeout: "900"` / `request-timeout: "0"` 均为无效写法。SSE 长流不被切断的前提是网关持续产生心跳事件（ping 默认关闭，须开启并设 15–20 s），完整论证见附录A.6。**TLS 在 ALB 443 终止、`ssl-redirect` 为唯一重定向点**；WAF 的接入方式与回源协议选型见 7.1.1。
 
 ```yaml
 # deploy/aliyun/20-alb-ingress.yaml
@@ -738,7 +766,7 @@ stringData:
   #                                    ^^^ 该参数是否被 gorm.io/driver/postgres v1.5.9 透传，须按 7.4.5.4 实测后再定值
 ```
 
-RDS 白名单随之收紧：主站点**只放行 PgBouncer Pod 所在 vSwitch/节点网段**（Terway ENI 模式下是 Pod IP 段，见 7.1），`new-api` Pod 不再直连 RDS；运维通道用独立的堡垒机 + 单独白名单条目，不与业务共用。
+RDS 白名单随之收紧：主站点**只放行 PgBouncer Pod 所在 vSwitch/节点网段**（Terway ENI 模式下是 Pod IP 段，见 7.4.5.6），`new-api` Pod 不再直连 RDS；运维通道用独立的堡垒机 + 单独白名单条目，不与业务共用。
 
 > **master 例外**：跑 `AutoMigrate` 的 master Deployment（7.4.2 中 `NODE_TYPE=master`）必须用独立 Secret 覆盖 `SQL_DSN` 为 RDS 直连地址，不走事务池——理由见 7.4.5.4 末行。若白名单已按上句收紧，需同时放行该 master Pod 所在网段。
 
@@ -1134,6 +1162,7 @@ flowchart LR
 | 看板 | Grafana 服务 | 数据源 Prometheus + SLS；三块看板：SLA/SLO 燃尽、中继健康（模型 × 渠道）、容量与成本 | — |
 | 拨测 | 云监控站点监控 | 探测点选马尼拉、曼谷、新加坡、东京、香港；断言 `success:true` + 版本匹配 | 15 个月 |
 | 备 region 链路 | 云监控 + RDS 监控 | 新加坡 → 马尼拉 / 曼谷 RDS 公网地址的 TCP 拨测：RTT、连接失败率、连接数占比；链路不健康时告警并阻止 GTM 接管到备 region | 15 个月 |
+| 证书 | CAS 证书告警 + 云监控 | 剩余有效期 < 21 天告警；采用 7.1.1 方案②（CNAME 接入）时，额外断言 WAF 与 ALB 两侧证书指纹一致，不一致即告警——异步部署会造成"一侧已换新、一侧仍是旧证" | — |
 | RUM | 前端监控 ARMS RUM | 复用现有 Umami / GA 注入点（`main.go:248-289`）叠加 RUM | — |
 | 告警 | ARMS 告警 + 云监控 | 钉钉/企业微信 + 短信 + 电话；P1 走电话，按 6.3.4 表落地；排班用告警值班表 | — |
 | 审计合规 | 操作审计 ActionTrail + DB 审计 | 云 API 变更全部留痕；RDS SQL 洞察开启 | 180 天 |
@@ -1143,8 +1172,8 @@ flowchart LR
 | 环境 | 区域 | 数据库 | 用途 | 门禁 |
 | --- | --- | --- | --- | --- |
 | dev | 本地 | SQLite + `docker-compose.dev.yml` | 功能开发 | `bun run lint`、`make test` |
-| staging（pre） | 新加坡 | RDS PG + Tair + ClickHouse | 集成与三数据库矩阵 | 每次合并主干；`SQL_DSN` 分别用 MySQL 8.2 / PG 15 / SQLite 跑同一套 E2E |
-| perf | 新加坡 | 同 staging + mock 上游 | 3.9 压测场景矩阵 | 相对基线劣化 > 10% 阻断 |
+| staging（pre） | 马尼拉（主站点命名空间 `new-api-staging`） | **复用主站 RDS 的逻辑隔离 schema** + Tair 独立 DB index + ClickHouse 独立 database | 集成与三数据库矩阵 | 每次合并主干；`SQL_DSN` 分别用 MySQL 8.2 / PG 15 / SQLite 跑同一套 E2E。**不新建 RDS 实例**，故不构成对 7.1「新加坡不部署 RDS PostgreSQL」红线的例外 |
+| perf | 马尼拉（主站点命名空间 `new-api-perf`） | 同 staging + mock 上游 | 3.9 压测场景矩阵 | 相对基线劣化 > 10% 阻断 |
 | prod mnl | 马尼拉 | RDS PG HA（菲律宾唯一主库）+ Tair + CH | 菲律宾流量（主站点） | 灰度门禁 |
 | prod bkk | 曼谷 | RDS PG HA（泰国唯一主库）+ Tair + CH | 泰国流量（主站点） | 与 mnl 错峰发布（先 bkk 后 mnl 或反之） |
 | standby sg | 新加坡 | **无本地 RDS**：PH 备 / TH 备经公网读写主站点 PG + 本地 Tair + CH | 两地共用的备 region | 区域接管演练；备工作负载先于主站点发布 |
@@ -1155,10 +1184,10 @@ flowchart LR
 
 | 项 | 说明 |
 | --- | --- |
-| 计算 | 马尼拉 / 曼谷各 4×`g8i.2xlarge`（可扩至 16），新加坡备 region 常态 4×（PH 备 + TH 备各 2）；按量转包年包月可省 30–40% |
+| 计算 | 马尼拉 / 曼谷各常态 4×`g8i.2xlarge`（自动伸缩至 8，HPA 上限 16 副本），新加坡备 region 常态 2×（PH 备 2 副本、TH 备 2 副本），接管期可扩容至 12 节点 / 24 副本（≥ 被接管站点峰值 16 × 1.5）；按量转包年包月可省 30–40% |
 | 数据 | **RDS PG 高可用版 16C64G ×2（马尼拉 + 曼谷，各为本地唯一主库，无跨区副本）**；RDS 公网流量与连接许可为新增小额项；Tair 4 GB 主备 ×3 |
 | 日志 | ClickHouse 2 节点 ×3 区域，随 TTL 90 天与采样策略线性 |
-| 网络 | ALB LCU 费用与 **出站带宽** 是主要成本项；LLM 流式响应出站带宽大，建议与 DCDN 动静态分离并对上游出口走 GA；备 region 接管期的跨区数据库读写走公网计费，按小流量估算 |
+| 网络 | ALB LCU 费用与 **出站带宽** 是主要成本项；LLM 流式响应出站带宽大，建议与 DCDN 动静态分离；**上游出口按 NAT EIP 直出 + IP 白名单交付，不含 GA**（不引入 GA 的流量费与跨境带宽包；理由见 7.1——GA 的加速段是用户就近接入，无法改善出站跨境链路，且会把上游看到的源 IP 改为 GA 侧地址、破坏白名单与 SNI/证书模型）；备 region 接管期的跨区数据库读写走公网计费，按小流量估算 |
 | 优化 | 新加坡备 region 若采用"置 0 副本 + GTM 触发扩容"冷备形态，可省下常态计算成本，代价是接管 RTO 由秒级变为分钟级 |
 | 上游 token | 与网关 SLA 解耦，独立列预算；第九章 R-30 要求建立客户维度成本告警 |
 
@@ -1222,7 +1251,7 @@ flowchart TD
 | Redis 故障 | `newapi_redis_up == 0` | 限流降级内存滑动窗口（需改造），用户/令牌缓存回落 DB | 立即恢复 Tair | 分钟级 |
 | 主库故障 | 连接错误 + RDS 事件 | RDS 主备自动切换；应用重连（`SQL_MAX_LIFETIME=60` 加速收敛） | 确认切换后校验额度一致性 | ≤ 60 s |
 | 连接池层故障（PgBouncer / RDS 代理） | 池 `cl_waiting` 堆积、`query_wait_timeout` 报错、池 Pod 非就绪 | PDB `minAvailable: 2` + 跨 AZ 3 副本兜住单副本；应用侧 `database/sql` 自动重连 + `RetryTimes` | `RELOAD`/滚动修复配置，必要时临时把 master 直连切回应急 DSN | ≤ 30 s（单副本）；全层故障需回退直连，分钟级 |
-| 备 region→主库公网链路劣化 | 备 region 探针失败 / RTT 与连接失败率告警 | 备 region Pod 不就绪即不参与 GTM 接管，流量保留在主站点 | 排查公网段或改走 GA 优化回源 | ≤ 5 min |
+| 备 region→主库公网链路劣化 | 备 region 探针失败 / RTT 与连接失败率告警 | 备 region Pod 不就绪即不参与 GTM 接管，流量保留在主站点 | 排查公网段与 RDS 白名单；持续不达标则维持"备 region 不参与接管"并记录为已知风险（**不引入 GA**，理由见 7.1） | ≤ 5 min |
 | 磁盘打满 | 5 s 采样 > 95% → 503 摘流 | 自动拒绝新请求保护进程 | 清磁盘缓存接口 `/api/performance/disk_cache` | 分钟级 |
 | 慢客户端拖垮连接 | `active_connections` + `STREAMING_TIMEOUT` | 120 s（默认）无事件即断；写 deadline `ExtendWriteDeadline` | 调 `USER_SESSION_*` 与限流 | — |
 | 迁移失败 | 启动探针不过 + 日志 `failed to initialize database` | `Restart=unless-stopped` 反复失败 → 告警 | 回滚镜像 + 前向修复（无 down） | 10 min |
