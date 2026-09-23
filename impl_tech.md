@@ -494,7 +494,7 @@ flowchart LR
   G -->|签名 URL 上传下载| O1
 ```
 
-- 主库连接池：`SQL_MAX_IDLE_CONNS=100`、`SQL_MAX_OPEN_CONNS=1000`、`SQL_MAX_LIFETIME=60`（`model/main.go:258-260`）。
+- 主库连接池：`SQL_MAX_IDLE_CONNS=100`、`SQL_MAX_OPEN_CONNS=1000`、`SQL_MAX_LIFETIME=60`（`model/main.go:211-213`）；日志库用同一组环境变量独立建池（`model/main.go:258-260`）。两者都是**单进程**上限，不约束"副本数 × 每副本连接数"，见 impl_deploy.md 7.4.5。
 - 日志库由 `LOG_SQL_DSN` 决定；未配置时 `LOG_DB = DB`（`model/main.go:230-238`）。**ClickHouse 只允许作为日志库**，用作主库时启动报错并提示改用 `LOG_SQL_DSN`（`model/main.go:143-146`）。
 - 默认主库为 SQLite：`one-api.db?_pragma=busy_timeout(30000)&_pragma=journal_mode(WAL)&_txlock=immediate`（`common/database.go:64`）——仅适合单机/开发。
 - 慢查询阈值 `SQL_SLOW_THRESHOLD_MS` 默认 **200 ms**（`model/gorm_logger.go:20-47`），非 DEBUG 模式关闭参数打印，驱动错误做脱敏。
@@ -1499,6 +1499,7 @@ flowchart TB
 | 计算 | ACK Pro 托管版 | 控制面 SLA 99.95% | 2 集群 | Kubernetes 1.31+，CNI Terway，多 AZ | 99.95% |
 | 计算 | ECS 节点池 | `g8i.2xlarge`(8C32G) | 每区域 ≥ 4（跨 2 AZ） | 系统盘 100 G ESSD PL1 + 数据盘 200 G ESSD（`/data` 与 `/app/logs`） | — |
 | 数据 | RDS PostgreSQL 高可用版 | pg 15，`rds.pg.c2.4xlarge` 或 16C64G | 2（每区域）+ 每区域 1 只读 | 主备跨 AZ、`SQL_MAX_OPEN_CONNS` 对齐连接上限、PITR 保留 7 天、每日全量 + WAL 归档到 OSS | 99.99% |
+| 数据 | 连接池收敛层（见 7.4.5） | RDS 数据库代理（独享型）或 ACK 内 PgBouncer 3 副本 | 每区域 1 套 | `pool_mode=transaction`，按 I-2/I-3 核算 `max_client_conn` 与 `default_pool_size × 池副本数`；master 迁移直连不走池 | 防主库连接打爆导致整区不可用 |
 | 缓存 | Tair（Redis 兼容）| 主备版 4 GB（生产建议集群版） | 2 | 跨 AZ、密码 + 内网 ACL、`maxmemory-policy allkeys-lru` | 99.99% |
 | 日志 | 云数据库 ClickHouse | 24.8 社区版 2 节点 | 2 | 仅 `LOG_SQL_DSN`、`LOG_SQL_CLICKHOUSE_TTL_DAYS=90` | — |
 | 存储 | OSS | 标准 + 低频生命周期 | 2 bucket | 同城冗余 ZRS、版本开启、生命周期 90 天转归档、防盗链 + 签名 URL | 99.995% |
@@ -1555,7 +1556,7 @@ data:
   RELAY_IDLE_CONN_TIMEOUT: "90"
   STREAMING_TIMEOUT: "300"
   SQL_SLOW_THRESHOLD_MS: "200"
-  SQL_MAX_OPEN_CONNS: "300"         # 需 < RDS 最大连接数 / 实例数
+  SQL_MAX_OPEN_CONNS: "300"         # 需 < RDS 最大连接数 / 实例数；启用 7.4.5 的连接池后语义变为"到池的客户端连接上限"
   SQL_MAX_IDLE_CONNS: "60"
   SQL_MAX_LIFETIME: "60"
   REDIS_POOL_SIZE: "40"
@@ -1795,6 +1796,57 @@ spec:
 ```
 
 > 注意两点与旧草案的差异：其一，Service 不再"一个 selector 同时匹配 stable 与 canary"——权重分流由 ALB 规则完成，两个轨道必须是两个 Service；其二，超时参数从注解移到 `AlbConfig.listeners`。
+
+#### 7.4.4 新加坡备 region 部署（PH 备 + TH 备）**[需补建]**
+
+> **版本差异声明（必读）**：本章其余小节（7.1 拓扑、7.2 的 `DTS` 行、7.4.1 副本口径、8.2 可用性推导、8.4 的"整区域故障 → DNS 切他区"）仍是 **v1.0 的"菲/泰双区域互备 + DTS 双向同步"快照**。v1.1 起的目标态已改为**双主站点 + 两地共用的新加坡备 region + 取消 DTS**，权威描述见 **impl_deploy.md 7.4.4 与 8.2**；两份冲突时以 impl_deploy.md 为准，本节只记录与代码/运维语义强耦合的结论。
+
+新加坡备 region **不部署 RDS PostgreSQL**，只部署两套互相独立的网关工作负载，各自通过主站点 RDS 的**公网地址**读写对应主库：
+
+| 工作负载 | 归属 | `SQL_DSN` 目标 | 触发接管 | 副本 | `NODE_TYPE` |
+| --- | --- | --- | --- | --- | --- |
+| `new-api-ph-standby` | 菲律宾 | 马尼拉 RDS 公网地址 | GTM 探测到马尼拉不可用 | 2（热备；成本优先可置 0，RTO 由秒级变分钟级） | 固定 `slave` |
+| `new-api-th-standby` | 泰国 | 曼谷 RDS 公网地址 | GTM 探测到曼谷不可用 | 2（同上） | 固定 `slave` |
+
+与主站点的差异只有环境变量、副本数、Secret 与 Service/Ingress 归属，容器模板复用 7.4.2。六条硬约束：
+
+1. **最小暴露面**：主库公网地址白名单**只放新加坡 VPC 的 NAT EIP**；备 region 使用独立低权限账号（如 `newapi_sg`），禁止与主站点共用。
+2. **强制加密校验**：`sslmode=verify-full` + RDS CA 挂到镜像只读路径；连接串不得出现 `sslmode=disable` 或 `require`。
+3. **连接数**：备 region 单实例 `SQL_MAX_OPEN_CONNS ≤ 150`（公网链路），并计入 7.4.5 的 I-2/I-3；跨区收敛推荐在备 region 额外起一层 PgBouncer，把 `2 Pod × 150` 客户端连接压到 `8–16` 条跨区后端连接。
+4. **禁止双写**：同一主库同一时刻只允许"主站点"或"备 region"其一写入，收口由 GTM 健康探测 + 主站点 ALB 摘流共同完成；**禁止**在备 region 部署本地库、只读副本或任何 DTS 双向链路（这是 v1.0 → v1.1 的结构性变化）。
+5. **迁移只能在主站点**：备 region 与主站点访问同一个主库，若备 region 也起 master 会与主站点 master 并发 AutoMigrate 同一 schema（对应 R-04）。因此备 region 两套负载固定 `slave`，且 `SESSION_SECRET` 必须与主站点全区域同值，接管瞬间会话与 API 令牌不失效。
+6. **就绪探针必须真读写**：`/readyz`（R-01 补建后）须包含一次主库 `SELECT 1`；否则主库不可达时备 region 会被判健康并接入话务。新加坡 → 马尼拉 / 曼谷公网 RTT 约 40–70 ms，接管期写入 P99 抬升可接受，非接管期备 region 只承接 GTM 探测与内部验证流量。
+
+> 备 region 只需 **Service + Ingress**（`site: ph` / `site: th` 两组），GTM 接管时把业务域名解析直接指向新加坡 ALB。`docker-compose` 冷站形态（7.5）在备 region **必须删除本地 `postgres`、`pg-data` 卷与 `backup` sidecar**，`SQL_DSN` 改指主站点公网地址，本地 `redis` / `clickhouse` 保留。
+
+#### 7.4.5 数据库连接池收敛（RDS 代理 / PgBouncer）**[需补建]**
+
+`SQL_MAX_OPEN_CONNS` 由 `sql.DB.SetMaxOpenConns` 设置，只约束**单个进程**（`model/main.go:211-213`，日志库 `model/main.go:258-260`）。区域网关扩到 16 副本时 `300 × 16 = 4,800` 条连接会顶穿 RDS PostgreSQL 的 `max_connections`（本地 compose 基线仅 `max_connections=600`，见 7.5），报 `FATAL: too many connections`。必须在网关与主库之间加收敛层。完整 YAML 清单与排水/告警细则统一维护在 **impl_deploy.md 7.4.5**，本节只固化与代码耦合的结论，避免两份文档各写一份清单后失配。
+
+**三条不变量**（`N_pod` 副本数、`C_pod` 单副本 `SQL_MAX_OPEN_CONNS`、`N_pb` 池副本数、`P_pb` 每池对单库单用户的后端连接上限）：
+
+| # | 不变量 | 16 副本参考取值 |
+| --- | --- | --- |
+| I-1 | `C_pod ≥ 峰值单副本并发事务` | `300` 不变，语义降级为"到池的客户端连接上限" |
+| I-2 | `max_client_conn × N_pb ≥ C_pod × N_pod` | `3000 × 3 ≥ 4800` |
+| I-3 | **`P_pb × N_pb + 直连与运维连接 ≤ RDS max_connections × 0.8`** | `60 × 3 + 40 ≈ 220` |
+
+I-3 是最易漏算的一条：**PgBouncer 副本之间不共享后端连接**，每个副本各持一整份 `default_pool_size`，且该值是"每 (db, user) 组合"的上限——池副本扩容等价于主库连接扩容。后端需求按 Little's law 估：`P_pb ≈ 峰值 DB 事务数/秒 × 平均事务时长 × 1.5`；计费写已合并（`BATCH_UPDATE_ENABLED`）、明细日志走 ClickHouse，实测通常 `20–60` 条即饱和。
+
+**收敛方式**：优先 RDS PostgreSQL 数据库代理（独享型，免运维）；需要跨区收敛或精细控制时用 ACK 内自建 PgBouncer（独立 Deployment，3 副本固定、**不入 HPA**、`pool_mode=transaction`、PDB `minAvailable: 2`、ClusterIP 而非 headless）；**sidecar 模式不做全局收敛**（`P_pb × N_pod` 仍随副本线性增长，I-3 不成立），不能当收敛层用。
+
+**与本项目代码的兼容性红线**（驱动链 `gorm.io/driver/postgres v1.5.9` → `jackc/pgx/v5 v5.9.2`，`go.mod:62,133`）：
+
+| 用法 | 现状 | transaction 模式结论 |
+| --- | --- | --- |
+| 命名 prepared statement | pgx 默认 `QueryExecModeCacheStatement` 缓存**命名**预处理语句 | 最高风险项，症状 `prepared statement "pgx_N" does not exist` / `cached plan must not change result type`，DDL 或后端重连后偶发。降级顺序：PgBouncer ≥ 1.21 且 `max_prepared_statements > 0` → DSN 用 `default_query_exec_mode=exec`/`simple_protocol` → 该库改 `pool_mode=session`。**参数能否被 GORM 透传需实测** |
+| `SELECT ... FOR UPDATE` | `model/locking.go:20-25` 的 `lockForUpdate(tx)` 仅在事务内 | 兼容 |
+| `pg_advisory_xact_lock` | `model/user.go:399`、`model/option_primary_key_migration.go:106` | 兼容（随事务释放）；**会话级 `pg_advisory_lock` 会串号，禁止引入** |
+| 会话级 `SET` / 临时表 / `LISTEN` / `NOTIFY` | 生产代码无（`SET LOCAL search_path` 仅出现在 `model/token_migration_test.go:237`、`model/prefill_group_migration_test.go:232`） | 现状安全；作为 code review 红线固化，生产不得新增 |
+| 启动期 `AutoMigrate` | 仅 master 执行（`NODE_TYPE=master`） | 迁移路径的 `SQL_DSN` **必须直连**主库，不走事务池 |
+| 事务内调用上游 HTTP | 后台任务/SSE 落库需逐个核查 | 事务包住远程调用会长期占用后端连接，导致 `cl_waiting` 堆积 → 禁止 |
+
+**上线前实测**（只影响 PostgreSQL 路径，SQLite/MySQL/ClickHouse 不受影响，但按 `AGENTS.md` 三库矩阵仍需全跑）：① 1 池副本 + 1 临时网关 Pod（`SQL_MAX_OPEN_CONNS=50`）；② PG 侧 `SELECT name FROM pg_prepared_statements;` 与池控制台 `SHOW CONFIG;` 取实际生效值；③ 压测中执行一次 RDS 主备切换或 `pg_terminate_backend(pid)`，观察是否复现预处理语句报错；④ 报错则按上表降级并重跑 7.9 验证矩阵。未完成该验证前，不得声称连接池方案已落地。
 
 ### 7.5 生产 Docker Compose 配置
 
@@ -2223,6 +2275,7 @@ flowchart TD
 | 上游供应商区域性故障 | 渠道批量自动禁用（status=3）+ 告警 | `RetryTimes` 换渠道 + 优先级分层 + `status_code_mapping` | 切备用渠道 / 改 `model_mapping` | ≤ 60 s（轮询） |
 | Redis 故障 | `newapi_redis_up == 0` | 限流降级内存滑动窗口（需改造），用户/令牌缓存回落 DB | 立即恢复 Tair | 分钟级 |
 | 主库故障 | 连接错误 + RDS 事件 | RDS 主备自动切换；应用重连（`SQL_MAX_LIFETIME=60` 加速收敛） | 确认切换后校验额度一致性 | ≤ 60 s |
+| 连接池层故障（7.4.5） | 池 `cl_waiting` 堆积、`query_wait_timeout` 报错、池 Pod 非就绪 | PDB `minAvailable: 2` + 跨 AZ 3 副本兜住单副本；`database/sql` 自动重连 + `RetryTimes` | `RELOAD` 或滚动修复；必要时切回直连 DSN | 单副本 ≤ 30 s；全层故障分钟级 |
 | 磁盘打满 | 5 s 采样 > 95% → 503 摘流 | 自动拒绝新请求保护进程 | 清磁盘缓存接口 `/api/performance/disk_cache` | 分钟级 |
 | 慢客户端拖垮连接 | `active_connections` + `STREAMING_TIMEOUT` | 120 s（默认）无事件即断；写 deadline `ExtendWriteDeadline` | 调 `USER_SESSION_*` 与限流 | — |
 | 迁移失败 | 启动探针不过 + 日志 `failed to initialize database` | `Restart=unless-stopped` 反复失败 → 告警 | 回滚镜像 + 前向修复（无 down） | 10 min |
@@ -2233,7 +2286,7 @@ flowchart TD
 - **单实例基线**（须由 3.9 的 S1/S2 实测替换）：非流式 800 QPS、并发 SSE 1,500、内存 2 GiB 工作集、fd 需求 = 并发 × 2（客户端 + 上游）+ 余量，故 `nofile=200000`。
 - **区域容量**：峰值按日均 3 倍估算；每区域预留 **1.5 倍单区域全量能力**（保证另一区域故障时单区域可扛全量）。
 - **带宽**：单路流式响应约 20–50 KB/s，1,000 并发 ≈ 40 Mbps，出站流量费用与 ALB LCU 需按此线性预留。
-- **连接数预算**：`SQL_MAX_OPEN_CONNS=300 × 实例数 ≤ RDS max_connections × 0.8`。16 实例时必须配 PgBouncer（或 RDS 代理），否则 4,800 连接会打爆 PG。
+- **连接数预算**：未启用连接池时 `SQL_MAX_OPEN_CONNS=300 × 实例数 ≤ RDS max_connections × 0.8`，16 实例即 `4,800` 连接打爆 PG，**必须**配 PgBouncer 或 RDS 代理。启用 7.4.5 的连接池后改按 I-1/I-2/I-3 三条不变量核算，且要复核 `default_pool_size × 池副本数`（池副本扩容等价于主库连接扩容）。
 - **上游出口**：NAT 固定 EIP 池（≥ 4 个 /28）用于供应商白名单；每渠道独立 host 连接上限，避免单渠道占满 `MaxIdleConnsPerHost=400`。
 
 ### 8.6 灾备演练（季度必做）
@@ -2243,6 +2296,7 @@ flowchart TD
 3. Redis 摘除演练：确认降级路径不返回 5xx 雪崩（当前会 fail-closed，见 R-05）。
 4. 版本回滚演练：从 canary 门禁失败到权重归零，实测止血耗时（目标 < 60 s）。
 5. 上游全体故障演练：mock 上游 100% 5xx，验证退款不重复、额度不超扣、错误日志不写爆磁盘。
+6. 连接池层演练（启用 7.4.5 后必做）：① 删 1 个池副本，验证 `cl_waiting` 无持续堆积、成功率不降；② 对全部池副本 `PAUSE` 60 s，确认网关按 `query_wait_timeout` 快速失败而非全站不可用；③ 池存在时执行 RDS 主备切换，重点复现 7.4.5 的预处理语句报错。
 
 ---
 
@@ -2329,6 +2383,7 @@ flowchart LR
 3. 阿里云 `ap-southeast-6` / `ap-southeast-7` 的具体规格可售性与报价（区域产品覆盖会变化）。
 4. 三数据库真实矩阵验证（SQLite/MySQL/PostgreSQL）与 ClickHouse 冒烟本次 **未执行**，属于 R-26 改进项；本文档所有数据库结论来自代码阅读。
 5. 前端各 feature 的运行时行为与无障碍达标情况未做浏览器实测验证。
+6. 连接池收敛层（7.4.5）的全部结论未经实测：pgx 命名预处理语句在 `pool_mode=transaction` 下是否报错、`default_query_exec_mode` 能否被 `gorm.io/driver/postgres v1.5.9` 透传、`max_prepared_statements` 的实际生效值与所需 PgBouncer 版本，均需在真实 PostgreSQL + PgBouncer 上按 7.4.5 的 4 步验证；`default_pool_size` 的 `20–60` 区间是推导值而非压测值。
 
 ---
 
@@ -2341,7 +2396,7 @@ flowchart LR
 | 数据库 | `SQL_DSN` | 空 → SQLite `one-api.db`（WAL + busy_timeout 30000 + txlock=immediate） | `common/database.go:64`、`model/main.go` | 否（重启） |
 | 日志库 | `LOG_SQL_DSN` | 空 → 复用主库 | `model/main.go:230-238` | 否 |
 | 日志库 | `LOG_SQL_CLICKHOUSE_TTL_DAYS` | **0（不自动删除）** | `model/main.go:413-434` | 否 |
-| 连接池 | `SQL_MAX_IDLE_CONNS` / `SQL_MAX_OPEN_CONNS` / `SQL_MAX_LIFETIME` | 100 / 1000 / 60 | `model/main.go:258-260` | 否 |
+| 连接池 | `SQL_MAX_IDLE_CONNS` / `SQL_MAX_OPEN_CONNS` / `SQL_MAX_LIFETIME` | 100 / 1000 / 60 | 主库 `model/main.go:211-213`、日志库 `model/main.go:258-260` | 否 |
 | 慢查询 | `SQL_SLOW_THRESHOLD_MS` | 200 | `model/gorm_logger.go:20-47` | 否 |
 | 缓存 | `REDIS_CONN_STRING` / `REDIS_POOL_SIZE` | 空（禁用）/ 10 | `common/redis.go:16-54` | 否 |
 | 缓存 | `MEMORY_CACHE_ENABLED` / `SYNC_FREQUENCY` | false / **60** | `main.go:83-86`、`common/init.go` | 否 |

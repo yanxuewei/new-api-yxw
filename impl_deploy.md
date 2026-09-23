@@ -186,6 +186,7 @@ flowchart TB
 | 计算 | ECS 节点池 | `g8i.2xlarge`(8C32G) | 马尼拉 / 曼谷各 ≥ 4（跨 2 AZ）；新加坡备 ≥ 2（PH 备 + TH 备 各 1） | 系统盘 100 G ESSD PL1 + 数据盘 200 G ESSD（`/data` 与 `/app/logs`） | — |
 | 数据 | RDS PostgreSQL 高可用版 | pg 15，`rds.pg.c2.4xlarge` 或 16C64G | **2：马尼拉 1（菲律宾唯一主库）+ 曼谷 1（泰国唯一主库）**，可选每站点 1 只读实例 | 主备跨 AZ、PITR 保留 7 天、每日全量 + WAL 归档到 OSS、`max_connections` 按主站点 + 备 region 连接总和核算 | 99.99% |
 | 数据 | RDS 公网访问（SSL） | 按量 | 2（马尼拉、曼谷各开 1 个公网地址） | **仅新加坡备 region 使用**：`sslmode=verify-full` + RDS CA 校验 + 白名单只放新加坡 VPC 的 NAT EIP；主站点流量一律走内网地址 | 备 region 接管 |
+| 数据 | 连接池收敛层 | RDS 数据库代理（独享型）或 ACK 内自建 PgBouncer 3 副本 | 每站点 1 套（代理随 RDS 售卖；自建池复用 ACK 节点，另加 2 个小规格节点池） | `pool_mode=transaction`，按 7.4.5.1 的 I-2/I-3 核算 `max_client_conn`、`default_pool_size × 副本数`；master 迁移路径直连不走池 | 防连接打爆导致整站不可用 |
 | 缓存 | Tair（Redis 兼容）| 主备版 4 GB（生产建议集群版） | 3（马尼拉 / 曼谷 / 新加坡各 1） | 跨 AZ、密码 + 内网 ACL、`maxmemory-policy allkeys-lru` | 99.99% |
 | 日志 | 云数据库 ClickHouse | 24.8 社区版 2 节点 | 3（马尼拉 / 曼谷 / 新加坡各 1） | 仅 `LOG_SQL_DSN`、`LOG_SQL_CLICKHOUSE_TTL_DAYS=90` | — |
 | 存储 | OSS | 标准 + 低频生命周期 | 3 bucket（马尼拉 / 曼谷 / 新加坡各 1） | 同城冗余 ZRS、版本开启、生命周期 90 天转归档、防盗链 + 签名 URL | 99.995% |
@@ -244,7 +245,7 @@ data:
   RELAY_IDLE_CONN_TIMEOUT: "90"
   STREAMING_TIMEOUT: "300"
   SQL_SLOW_THRESHOLD_MS: "200"
-  SQL_MAX_OPEN_CONNS: "300"         # 需 < RDS 最大连接数 / 实例数
+  SQL_MAX_OPEN_CONNS: "300"         # 需 < RDS 最大连接数 / 实例数；启用 7.4.5 的连接池后语义变为"到池的客户端连接上限"，RDS 侧真实连接由 7.4.5.1 的 I-3 约束
   SQL_MAX_IDLE_CONNS: "60"
   SQL_MAX_LIFETIME: "60"
   REDIS_POOL_SIZE: "40"
@@ -259,6 +260,7 @@ type: Opaque
 stringData:
   # 下列值由 KMS 凭据管家通过 ExternalSecret / RRSA 注入，禁止写进 Git
   # 主站点（马尼拉/曼谷）用本区域 RDS 内网地址；新加坡备 region 必须改用对应主库的 RDS 公网地址 + verify-full（见 7.4.4）
+  # 启用 7.4.5 的连接池后，主站点此项改为指向集群内 pgbouncer Service（或 RDS 代理地址），见 7.4.5.3
   SQL_DSN: "postgresql://newapi:REPLACE_ME@pg-mnl-rw.pg.rds.aliyuncs.com:5432/newapi?sslmode=require"
   LOG_SQL_DSN: "clickhouse://default:REPLACE_ME@clickhouse-mnl.clickhouse.rds.aliyuncs.com:9000/newapi_logs"
   REDIS_CONN_STRING: "redis://:REPLACE_ME@tair-mnl.redis.rds.aliyuncs.com:6379"
@@ -564,6 +566,225 @@ stringData:
 - **不双写**：同一主库同一时刻只允许"主站点"或"备 region"其一写入，切换由 GTM 健康探测 + 主站点 ALB 摘流共同收口；**禁止**在备 region 部署本地数据库、只读副本或任何 DTS 双向链路。
 - **健康判定必须真读写**：GTM 与备 region 的就绪探针不得只打静态接口，`/readyz`（补建后）必须包含一次主库 `SELECT 1`；否则主库不可达时备 region 会被误判为健康并被接入话务。
 - **延迟与流量**：新加坡 → 马尼拉 / 曼谷公网 RTT 约 40–70 ms，接管期写入 P99 抬升可接受；非接管期备 region 只承接 GTM 健康探测与内部验证流量，避免无谓的跨区写。
+
+### 7.4.5 数据库连接池收敛（RDS 代理 / PgBouncer）
+
+网关侧的 `SQL_MAX_OPEN_CONNS` 只能约束**单个进程自己**的连接数（`model/main.go:211-213` 经 `sql.DB.SetMaxOpenConns`，日志库同参数在 `model/main.go:258-260`），无法约束"副本数 × 每副本连接数"的总量。主站点按 7.4.2 扩到 16 副本时，`300 × 16 = 4,800` 条到 RDS PostgreSQL 的连接会直接顶穿实例的 `max_connections`——PG 是"一连接 = 一后端进程"，每进程常驻数 MB 内存，超限后新连接报 `FATAL: too many connections`，且已有连接的性能也会劣化。本节给出收敛层的位置、模式选择、容量换算与 ACK 落地清单。
+
+#### 7.4.5.1 三条必须成立的不变量
+
+设 `N_pod` = 网关副本数，`C_pod` = 单副本 `SQL_MAX_OPEN_CONNS`，`N_pb` = 连接池副本数，`P_pb` = 每池对单库单用户的后端连接上限。
+
+| # | 不变量 | 本方案取值 |
+| --- | --- | --- |
+| I-1 | 应用侧逻辑连接：`C_pod ≥ 峰值单副本并发事务` | `300`（保持不变，语义降级为"到池的客户端连接上限"） |
+| I-2 | 池的客户端总容量：`max_client_conn × N_pb ≥ C_pod × N_pod` | `3000 × 3 ≥ 300 × 16 = 4800` |
+| I-3 | **PG 真实连接：`P_pb × N_pb + 直连与运维连接 ≤ RDS max_connections × 0.8`** | `60 × 3 + 预留 40 ≈ 220 ≤ 800 × 0.8` |
+
+> **最易漏算的是 I-3**：PgBouncer 副本之间**不共享**后端连接，每个副本各自持有一整份 `default_pool_size`。所以后端总连接是 `P_pb × N_pb`，不是 `P_pb`。`default_pool_size` 是"每 (db, user) 组合"的上限，多库（主库 + `LOG_SQL_DSN` 若同实例）与多账号要分别乘。副本扩容前先复算 I-3。
+
+后端连接需求的算法用 Little's law：`P_pb ≈ 峰值 DB 事务数/秒 × 平均事务时长(s) × 1.5`。本项目的计费写已合并（`BATCH_UPDATE_ENABLED`，见 7.4.1），明细日志走 ClickHouse，主库侧属于"短事务、低并发"，实测通常在 `20–60` 条后端连接即饱和；**若 I-3 算出的 `P_pb` 超过 100，先查慢 SQL 与长事务，不要靠加连接解决**。
+
+#### 7.4.5.2 三种收敛方式选型
+
+| 方式 | 位置 | 优点 | 代价 / 风险 | 结论 |
+| --- | --- | --- | --- | --- |
+| **A. RDS PostgreSQL 数据库代理（独享型，内建连接池）** | RDS 侧，应用改连代理地址 | 免运维、与主备切换/只读分离天然集成、SLA 由云产品承担 | 按量/独享规格额外成本；池模式与参数可配项少于自建；跨 region 场景仍需另想 | **默认首选**（单站点内收敛） |
+| **B. 自建 PgBouncer（ACK 内独立 Deployment）** | 网关 Pod 与 RDS 之间 | 参数完全可控、可同时收敛"跨 region 公网"连接、白名单可进一步收紧、可观测自定义 | 多一个要监控/发布/演练的组件；需自行处理 prepared statement 兼容与连接排水 | **需要跨 region 收敛或精细控制时采用**（见 7.4.5.3 清单） |
+| C. PgBouncer sidecar（每网关 Pod 一个） | Pod 内容器 | 无跨 Pod 网络跳数、随应用发布 | **不做全局收敛**：`P_pb × N_pod` 仍随副本数线性增长，I-3 不成立 | 仅用于本地 keepalive，**不作为本方案的收敛层** |
+
+主站点用 A（或 B）二选一即可；新加坡备 region（7.4.4）经公网读写主站点主库，**推荐额外加一层 B**：`2 Pod × 150 = 300` 条客户端连接收敛为 `8–16` 条跨区后端连接，既守住马尼拉/曼谷 RDS 的公网白名单与连接额度，也避免接管瞬间的跨区 TCP 重连风暴。
+
+#### 7.4.5.3 自建 PgBouncer 的 ACK 部署清单
+
+模式统一取 `pool_mode = transaction`（事务结束立即归还后端，收敛比最高）。**HPA 严禁作用于连接池**：池副本数变化会改变后端总连接（I-3），且新池需重新建连，扩缩抖动直接打到主库。固定 3 副本 + 跨 AZ 打散。
+
+```yaml
+# deploy/aliyun/30-pgbouncer.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata: { name: pgbouncer-ini, namespace: new-api }
+data:
+  pgbouncer.ini: |
+    [databases]
+    # 主站点：RDS 内网地址；备 region 改成马尼拉/曼谷的公网地址并启用 server_tls_*
+    newapi = host=pg-mnl-rw.pg.rds.aliyuncs.com port=5432 dbname=newapi
+    [pgbouncer]
+    listen_addr = 0.0.0.0
+    listen_port = 6432
+    unix_socket_dir = /var/run/pgbouncer      # 容器内无本地套接字需求，置空亦可
+    pool_mode = transaction                   # 唯一被本方案认可的收敛模式，理由见 7.4.5.4
+    max_client_conn = 3000                    # 每副本，满足 I-2
+    default_pool_size = 60                    # 每 (db,user)，参与 I-3：60 × 3 副本
+    min_pool_size = 8                         # 抵消 RDS 主备切换后的建连冷启动
+    reserve_pool_size = 5
+    reserve_pool_timeout = 3
+    server_idle_timeout = 60                  # 与网关 SQL_MAX_LIFETIME=60 同量级
+    server_lifetime = 1800                    # 必须 > SQL_MAX_LIFETIME，避免两侧同时回收抖动
+    server_connect_timeout = 5
+    login_timeout = 5
+    query_timeout = 0                         # 交给网关侧 RELAY_RESPONSE_HEADER_TIMEOUT，不在此掐
+    query_wait_timeout = 30                   # 客户端排队上限，防止雪崩时无限堆积
+    server_reset_query_always = 0             # transaction 模式下不可用 DISCARD ALL 类会话清理，见 7.4.5.4
+    max_prepared_statements = 200             # >=1.21 才支持；transaction 模式下转发命名预处理语句
+    ignore_startup_parameters = extra_float_digits,options,client_encoding
+    # ---- 认证：口令哈希算法必须与 RDS 账号的 password_encryption 一致 ----
+    auth_type = md5                           # 若 RDS 为 scram-sha-256，改用 auth_query 或 auth_type=scram
+    auth_file = /etc/pgbouncer/userlist.txt
+    admin_users = pgbouncer_admin
+    stats_users = pgbouncer_stats
+    # ---- TLS：主站点内网可按零信任要求开启；备 region 到主库必须 verify-full ----
+    client_tls_sslmode = disable              # [需补建] 生产开启需挂证书
+    server_tls_sslmode = disable              # 备 region 改 verify-full + server_tls_ca_file
+    stats_period = 30                         # SHOW STATS 聚合周期，配合 7.4.5.5 抓取
+---
+apiVersion: v1
+kind: Secret
+metadata: { name: pgbouncer-users, namespace: new-api }
+type: Opaque
+stringData:
+  # userlist 第 2 字段是 md5<sha256 前的 PG 形式> 或明文，禁止与 new-api 共用高权限账号
+  userlist.txt: |
+    "newapi" "md5REPLACE_ME"
+    "pgbouncer_admin" "md5REPLACE_ME"
+    "pgbouncer_stats" "md5REPLACE_ME"
+  # 口令由 KMS 凭据管家注入（同 7.4.1 的 ExternalSecret / RRSA 机制），禁止入 Git
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pgbouncer
+  namespace: new-api
+  labels: { app: pgbouncer }
+spec:
+  replicas: 3                                 # 固定副本，不参与 HPA（见上文理由）
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxSurge: 1, maxUnavailable: 0 }
+  selector:
+    matchLabels: { app: pgbouncer }
+  template:
+    metadata:
+      labels: { app: pgbouncer }
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9127"            # pgbouncer-exporter sidecar
+    spec:
+      terminationGracePeriodSeconds: 60
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway     # 池副本缺一只降收敛容量，不该阻塞调度
+          labelSelector: { matchLabels: { app: pgbouncer } }
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector: { matchLabels: { app: pgbouncer } }
+      containers:
+        - name: pgbouncer
+          image: registry-vpc.<REGION_ID>.aliyuncs.com/newapi/pgbouncer:1.24.0   # 自建镜像推 ACR 企业版，见 7.4.5.6
+          securityContext: { runAsNonRoot: true, runAsUser: 101, readOnlyRootFilesystem: true }
+          ports: [ { containerPort: 6432, name: pgbouncer } ]
+          resources:
+            requests: { cpu: "500m", memory: 256Mi }   # 单副本承载 ~1500 客户端连接
+            limits:   { cpu: "2",     memory: 512Mi }  # 内存按 max_client_conn × 数 KB 核算，勿低于 limits 触发 OOMKill
+          volumeMounts:
+            - { name: ini, mountPath: /etc/pgbouncer/pgbouncer.ini, subPath: pgbouncer.ini, readOnly: true }
+            - { name: users, mountPath: /etc/pgbouncer/userlist.txt, subPath: userlist.txt, readOnly: true }
+            - { name: run, mountPath: /var/run/pgbouncer }
+          readinessProbe:
+            exec: { command: ["pg_isready", "-h", "127.0.0.1", "-p", "6432", "-U", "pgbouncer_stats"] }
+            periodSeconds: 5
+            failureThreshold: 2
+          livenessProbe:
+            tcpSocket: { port: 6432 }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+        - name: exporter                     # [需补建] 仓库当前无 pgbouncer 指标，接入 ARMS Prometheus 用
+          image: registry-vpc.<REGION_ID>.aliyuncs.com/newapi/pgbouncer-exporter:latest
+          args: ["--pgBouncer.connectionString", "postgres://pgbouncer_stats:REPLACE_ME@127.0.0.1:6432/pgbouncer?sslmode=disable"]
+          ports: [ { containerPort: 9127, name: metrics } ]
+      volumes:
+        - { name: ini, configMap: { name: pgbouncer-ini } }
+        - { name: users, secret: { secretName: pgbouncer-users } }
+        - { name: run, emptyDir: {} }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: pgbouncer, namespace: new-api }
+spec:
+  type: ClusterIP                             # 不要用 headless：pgx 只在启动时解析一次 DNS，副本负载会失衡
+  selector: { app: pgbouncer }
+  ports: [ { name: pgbouncer, port: 6432, targetPort: 6432 } ]
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata: { name: pgbouncer, namespace: new-api }
+spec:
+  minAvailable: 2                             # 单副本驱逐时仍有 2 份池，收敛容量不塌
+  selector: { matchLabels: { app: pgbouncer } }
+```
+
+网关侧只改一行 Secret，其余不变：
+
+```yaml
+# deploy/aliyun/00-namespace-config.yaml（SQL_DSN 片段）
+stringData:
+  # 池化后：DSN 指向集群内 pgbouncer Service，不再直连 RDS
+  SQL_DSN: "postgresql://newapi:REPLACE_ME@pgbouncer.new-api.svc.cluster.local:6432/newapi?sslmode=disable&default_query_exec_mode=cache_statement"
+  #                                    ^^^ 该参数是否被 gorm.io/driver/postgres v1.5.9 透传，须按 7.4.5.4 实测后再定值
+```
+
+RDS 白名单随之收紧：主站点**只放行 PgBouncer Pod 所在 vSwitch/节点网段**（Terway ENI 模式下是 Pod IP 段，见 7.1），`new-api` Pod 不再直连 RDS；运维通道用独立的堡垒机 + 单独白名单条目，不与业务共用。
+
+> **master 例外**：跑 `AutoMigrate` 的 master Deployment（7.4.2 中 `NODE_TYPE=master`）必须用独立 Secret 覆盖 `SQL_DSN` 为 RDS 直连地址，不走事务池——理由见 7.4.5.4 末行。若白名单已按上句收紧，需同时放行该 master Pod 所在网段。
+
+#### 7.4.5.4 transaction 模式与本仓库代码的兼容性红线
+
+`pool_mode = transaction` 的硬约束是"事务之外不存在可信的会话状态"。逐条对照当前代码：
+
+| 用法 | 本仓库现状 | transaction 模式结论 |
+| --- | --- | --- |
+| 命名 prepared statement | 驱动链 `gorm.io/driver/postgres v1.5.9` → `jackc/pgx/v5 v5.9.2`（`go.mod:62,133`），pgx 默认 `QueryExecModeCacheStatement` 会缓存**命名**预处理语句 | **最高风险项**。后端在事务间被换走时，症状是 `prepared statement "pgx_N" does not exist` / `cached plan must not change result type`，且只在 DDL 或后端重连后偶发。缓解三选一：① PgBouncer ≥ 1.21 且 `max_prepared_statements > 0`（清单已给 `200`）；② DSN 降为 `default_query_exec_mode=exec` / `simple_protocol`；③ 该库改 `pool_mode=session`。**必须按下面步骤实测后定值** |
+| `SELECT ... FOR UPDATE` | `model/locking.go:20-25` 的 `lockForUpdate(tx)` 只在事务内 | 兼容 |
+| `pg_advisory_xact_lock` | `model/user.go:399`、`model/option_primary_key_migration.go:106` | 兼容（锁随事务释放）。**若将来改用会话级 `pg_advisory_lock`，事务池会串号，属禁止** |
+| `SET LOCAL search_path` | 仅出现在迁移测试 `model/token_migration_test.go:237`、`model/prefill_group_migration_test.go:232` | 测试路径，不入生产；但**同一限制适用于任何会话级 `SET`/临时表/`LISTEN`/`NOTIFY`，生产代码不得新增** |
+| 启动期 `AutoMigrate` / 迁移 | 仅 master 节点执行（`NODE_TYPE=master`，独立 Deployment，见 7.4.2 的 master 说明） | **迁移必须绕开事务池**：master 的 `SQL_DSN` 直连 RDS（`pool_mode=session` 亦可），避免迁移中的 `SET`/DDL 与池互相干扰；这也是 7.7 发布流程"先升级 master"的前置条件 |
+| 空闲事务长期持有后端 | 后台任务、SSE 落库等长逻辑若误把事务包住远程调用 | 会造成后端饥饿（`cl_waiting` 堆积）。禁止在事务内调用上游 HTTP，属 code review 检查项 |
+
+预处理语句实测步骤（上线前必做，SQLite/MySQL/ClickHouse 路径不受影响，只测 PostgreSQL）：
+
+1. 起 1 个 PgBouncer 副本 + 1 个临时网关 Pod，`SQL_MAX_OPEN_CONNS=50`。
+2. 在 PG 侧执行 `SELECT name FROM pg_prepared_statements;`（能看到 `pgx_N` 即命名预处理语句真的在跑），在 PgBouncer 控制台（`psql -h 127.0.0.1 -p 6432 -U pgbouncer_admin -d pgbouncer`）执行 `SHOW CONFIG;` 与 `SHOW DATABASES;`，确认 `max_prepared_statements` 的实际生效值与版本支持情况。
+3. 压测中触发一次 RDS 主备切换或 `SELECT pg_terminate_backend(pid)` 杀后端，观察是否出现上述报错。
+4. 任一报错 → 按①/②/③ 顺序降级，并重跑发布验证矩阵（7.9）。
+
+> 未在真实 PostgreSQL 上完成本小节验证前，不得声称"连接池方案已落地"（对齐 `AGENTS.md` 的三库验证与 `superpowers:verification-before-completion` 口径）。
+
+#### 7.4.5.5 观测与告警
+
+| 指标 | 来源 | 告警阈值 |
+| --- | --- | --- |
+| 池排队 | exporter `pgbouncer_pools_client_waiting_connections` | `> 0` 持续 2 min → warning；`> 50` → critical（I-3 或 `query_wait_timeout` 前兆） |
+| 后端利用率 | `pgbouncer_pools_server_active_connections / default_pool_size` | 峰值 `> 0.8` → 先查慢 SQL，再考虑提 `P_pb` |
+| 客户端余量 | `SHOW CLIENTS;` / `cl_used` vs `max_client_conn` | `> 0.8 × max_client_conn` → critical |
+| 认证/协议失败 | PgBouncer 日志 `login failed`、`prepared statement`、`unsupported` | 非零即告警（多为 7.4.5.4 的兼容性问题） |
+| 主库真实连接 | RDS 控制台 `active_connections` / `pg_stat_activity` | `> max_connections × 0.8` → critical（对齐 8.5） |
+| 池到 PG 往返 | `SHOW STATS;` 的 `sv_lifetime`、`tx_count` | 突变用于定位主备切换影响面 |
+
+热更新配置用 `RELOAD;`（admin console），副本级变更走滚动发布。**排水**：PgBouncer 无优雅 draining，滚动更新会断该副本上的客户端连接——网关侧靠 `database/sql` 自动重连与 `RetryTimes` 兜底，事务中的请求会失败，因此发布窗口必须与 7.7 的灰度门禁对齐（先 `PAUSE newapi` → 等在途事务归零 → `RECONNECT newapi` → 摘流）。
+
+#### 7.4.5.6 ACK 侧落地注意
+
+1. **镜像**：`pgbouncer` 与 exporter 均需自建镜像入 ACR 企业版（VPC 域名 `registry-vpc.<REGION_ID>.aliyuncs.com`），基座 `postgres:15-alpine` + `apk add pgbouncer`，保留上游签名版本；跨 region 拉取用 ACR 同步规则，三个集群同 `:1.24.0` tag。集群侧用 ACK 免密拉取组件，不要在 Deployment 里写 `imagePullSecrets` 明文。
+2. **网络**：CNI Terway 下 Pod IP 即 VPC IP，RDS 白名单加**PgBouncer Pod 所在 vSwitch 网段**；若节点池扩缩导致网段变化，白名单按 vSwitch 粒度维护，不要逐 IP。
+3. **调度**：池与网关分开节点池（独立 label + taint），避免网关 OOM 或 CPU 压满时连带打挂收敛层；`readOnlyRootFilesystem: true` 需要 `/var/run/pgbouncer` 的 `emptyDir`。
+4. **配置**：`pgbouncer.ini` 与 `userlist.txt` 用 ConfigMap/Secret 卷 `subPath` 挂载，保证文件级不可变；变更即滚动，不 in-place 改。
+5. **可观测**：容器日志走 SLS（同 7.8），exporter 端口 9127 由 ARMS Prometheus 抓取；`SHOW STATS` 的 `query_wait_timeout` 触发次数需在 Grafana 面板与 8.5 压测报告单列。
+6. **备 region 差异**：`server_tls_sslmode=verify-full` + `server_tls_ca_file`（RDS CA 证书经 Secret 挂载），`default_pool_size` 降到 `16`，`client_tls_sslmode` 按需开启，且客户端仍走 `SQL_MAX_OPEN_CONNS ≤ 150` 的公网侧约束（7.4.4）。
 
 ### 7.5 生产 Docker Compose 配置
 
@@ -1000,6 +1221,7 @@ flowchart TD
 | 上游供应商区域性故障 | 渠道批量自动禁用（status=3）+ 告警 | `RetryTimes` 换渠道 + 优先级分层 + `status_code_mapping` | 切备用渠道 / 改 `model_mapping` | ≤ 60 s（轮询） |
 | Redis 故障 | `newapi_redis_up == 0` | 限流降级内存滑动窗口（需改造），用户/令牌缓存回落 DB | 立即恢复 Tair | 分钟级 |
 | 主库故障 | 连接错误 + RDS 事件 | RDS 主备自动切换；应用重连（`SQL_MAX_LIFETIME=60` 加速收敛） | 确认切换后校验额度一致性 | ≤ 60 s |
+| 连接池层故障（PgBouncer / RDS 代理） | 池 `cl_waiting` 堆积、`query_wait_timeout` 报错、池 Pod 非就绪 | PDB `minAvailable: 2` + 跨 AZ 3 副本兜住单副本；应用侧 `database/sql` 自动重连 + `RetryTimes` | `RELOAD`/滚动修复配置，必要时临时把 master 直连切回应急 DSN | ≤ 30 s（单副本）；全层故障需回退直连，分钟级 |
 | 备 region→主库公网链路劣化 | 备 region 探针失败 / RTT 与连接失败率告警 | 备 region Pod 不就绪即不参与 GTM 接管，流量保留在主站点 | 排查公网段或改走 GA 优化回源 | ≤ 5 min |
 | 磁盘打满 | 5 s 采样 > 95% → 503 摘流 | 自动拒绝新请求保护进程 | 清磁盘缓存接口 `/api/performance/disk_cache` | 分钟级 |
 | 慢客户端拖垮连接 | `active_connections` + `STREAMING_TIMEOUT` | 120 s（默认）无事件即断；写 deadline `ExtendWriteDeadline` | 调 `USER_SESSION_*` 与限流 | — |
@@ -1011,7 +1233,7 @@ flowchart TD
 - **单实例基线**（须由 3.9 的 S1/S2 实测替换）：非流式 800 QPS、并发 SSE 1,500、内存 2 GiB 工作集、fd 需求 = 并发 × 2（客户端 + 上游）+ 余量，故 `nofile=200000`。
 - **区域容量**：峰值按日均 3 倍估算；马尼拉 / 曼谷主站点各预留 **1.5 倍单站点全量能力**，且**新加坡备 region 必须具备单站点全量接管能力**（PH 备 + TH 备的可扩容上限 ≥ 被接管站点峰值 × 1.5）。
 - **带宽**：单路流式响应约 20–50 KB/s，1,000 并发 ≈ 40 Mbps，出站流量费用与 ALB LCU 需按此线性预留。
-- **连接数预算**：`(主站点 SQL_MAX_OPEN_CONNS × 实例数) + (备 region SQL_MAX_OPEN_CONNS × 实例数) ≤ RDS max_connections × 0.8`。主站点扩到 16 实例时必须配 PgBouncer（或 RDS 代理），否则 4,800+ 连接会打爆 PG。
+- **连接数预算**：启用 7.4.5 的连接池后，约束从"应用直连"变为三条不变量 I-1/I-2/I-3（见 7.4.5.1）。未启用池时必须满足 `(主站点 SQL_MAX_OPEN_CONNS × 实例数) + (备 region SQL_MAX_OPEN_CONNS × 实例数) ≤ RDS max_connections × 0.8`；主站点扩到 16 实例时 `300 × 16 = 4800` 会打爆 PG，**必须**配 PgBouncer 或 RDS 代理。启用后仍要复核 I-3：`default_pool_size × 池副本数` 才是 PG 真实连接数，池副本扩容等同于主库连接扩容。
 - **上游出口**：NAT 固定 EIP 池（≥ 4 个 /28）用于供应商白名单；每渠道独立 host 连接上限，避免单渠道占满 `MaxIdleConnsPerHost=400`。
 
 ### 8.6 灾备演练（季度必做）
@@ -1021,5 +1243,6 @@ flowchart TD
 3. Redis 摘除演练：确认降级路径不返回 5xx 雪崩（当前会 fail-closed，见 R-05）。
 4. 版本回滚演练：从 canary 门禁失败到权重归零，实测止血耗时（目标 < 60 s）。
 5. 上游全体故障演练：mock 上游 100% 5xx，验证退款不重复、额度不超扣、错误日志不写爆磁盘。
+6. 连接池层演练（启用 7.4.5 后必做）：① 删除 1 个 PgBouncer 副本，验证 `cl_waiting` 无持续堆积、成功率不降；② 对全部池副本 `PAUSE newapi` 60 s，确认网关按 `query_wait_timeout` 快速失败并被 ALB/GTM 判定为劣化而非全站不可用；③ 在池存在时执行 RDS 主备切换，重点观察 7.4.5.4 的预处理语句报错是否复现。
 
 ---
