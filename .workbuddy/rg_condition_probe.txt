@@ -1,0 +1,31 @@
+======== A. 基线（未绑 boundary）========
+BUCKET                   NOTE                       RESULT    DETAIL
+------------------------------------------------------------------------------------------------
+oss-newapi-mnl           生产主桶 rg-ph-mnl             ALLOW     
+oss-newapi-backup-sgp    生产备桶 rg-sg                 ALLOW     
+oss-newapi-nonprod       非生产桶(不存在,对照组)              NOBUCKET  
+
+======== 绑定 newapi-prod-boundary → iac-terraform ========
+{"RequestId":"01A0D8F4-B76C-5D5B-839D-65C9C4DFC3E4"}
+  attached
+
+======== B. 绑定后（RG 条件若生效 → 生产桶应 DENY，非生产桶不受影响）========
+BUCKET                   NOTE                       RESULT    DETAIL
+------------------------------------------------------------------------------------------------
+oss-newapi-mnl           生产主桶 rg-ph-mnl             DENY      0.465741(s) elapsed
+oss-newapi-backup-sgp    生产备桶 rg-sg                 DENY      1.465518(s) elapsed
+oss-newapi-nonprod       非生产桶(不存在,对照组)              NOBUCKET  
+
+======== 回滚：解绑 newapi-prod-boundary ← iac-terraform ========
+{"RequestId":"01A0D8F5-0127-5D1E-929D-76CDD4C156B5"}
+  detached
+
+======== C. 解绑后（应恢复基线）========
+BUCKET                   NOTE                       RESULT    DETAIL
+------------------------------------------------------------------------------------------------
+oss-newapi-mnl           生产主桶 rg-ph-mnl             ALLOW     
+oss-newapi-backup-sgp    生产备桶 rg-sg                 ALLOW     
+oss-newapi-nonprod       非生产桶(不存在,对照组)              NOBUCKET  
+
+======== 用户级绑定复核（应为空）========
+— 空 ✅

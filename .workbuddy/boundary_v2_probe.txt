@@ -1,0 +1,40 @@
+======== 1. 发布 boundary v2（CreatePolicyVersion + SetAsDefault）========
+{"PolicyVersion":{"VersionId":"v2","IsDefaultVersion":true,"PolicyDocument":"{\"Version\":\"1\",\"Statement\":[{\"Effect\":\"Deny\",\"NotAction\":[\"*:Describe*\",\"*:List*\",\"*:Get*\",\"*:Query*\"],\"Resource\":[\"*\"],\"Condition\":{\"StringEquals\":{\"acs:ResourceGroupId\":[\"rg-aek4nyivmmsb6iy\
+  默认版本=v2  {"Version":"1","Statement":[{"Effect":"Deny","NotAction":["*:Describe*","*:List*","*:Get*","*:Query*"],"Resource":["*"],"Condition":{"StringEquals":{"acs:ResourceGroupId":["rg-aek4nyivmmsb6iy","rg-aek4zvb3ldoiyua"]}}}]}
+
+======== 2. 基线实测（未绑）========
+CASE                                 EXPECT  ACTUAL    VERDICT
+--------------------------------------------------------------------------------------------
+生产OSS写 oss-newapi-mnl/probe/         DENY    ALLOW     FAIL 
+生产OSS写 backup-sgp/probe/             DENY    ALLOW     FAIL 
+生产VPC读 DescribeVpcs(mnl)             ALLOW   ALLOW     PASS 
+生产VPC读 DescribeVSwitches(mnl)        ALLOW   ALLOW     PASS 
+生产VPC写 DeleteVSwitch(不存在ID)          DENY    ERR       FAIL {"schemaVersion":"v1","message":"Specified vSwtich instance is not found during 
+生产ECS读 DescribeInstances(mnl)        ALLOW   ALLOW     PASS 
+非生产桶(不存在,对照组)                        ALLOW   ALLOW     PASS 
+--------------------------------------------------------------------------------------------
+PROBE=FAIL(3) (4/7)
+
+======== 3. 绑定 newapi-prod-boundary → iac-terraform ========
+{"RequestId":"01A0D8F6-3F28-5AB8-9DF4-A08ED5EDF2CF"}
+  attached
+
+======== 4. 绑定后实测 ========
+CASE                                 EXPECT  ACTUAL    VERDICT
+--------------------------------------------------------------------------------------------
+生产OSS写 oss-newapi-mnl/probe/         DENY    DENY      PASS 0.401920(s) elapsed
+生产OSS写 backup-sgp/probe/             DENY    DENY      PASS 0.593063(s) elapsed
+生产VPC读 DescribeVpcs(mnl)             ALLOW   ALLOW     PASS 
+生产VPC读 DescribeVSwitches(mnl)        ALLOW   ALLOW     PASS 
+生产VPC写 DeleteVSwitch(不存在ID)          DENY    ERR       FAIL {"schemaVersion":"v1","message":"Specified vSwtich instance is not found during 
+生产ECS读 DescribeInstances(mnl)        ALLOW   ALLOW     PASS 
+非生产桶(不存在,对照组)                        ALLOW   ALLOW     PASS 
+--------------------------------------------------------------------------------------------
+PROBE=FAIL(1) (6/7)
+
+======== 5. 回滚：解绑 ========
+{"RequestId":"01A0D8F6-8D77-5EAC-B3FE-74755761B1A5"}
+  detached
+
+======== 6. 解绑后复核（用户级应为空）========
+  — 空 OK

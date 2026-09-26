@@ -1,0 +1,10 @@
+admin	newapi-admin-identity	Custom
+admin	newapi-enforce-mfa	Custom
+admin	newapi-audit-protect	Custom
+ops	newapi-ops-operator	Custom
+ops	newapi-enforce-mfa	Custom
+ops	newapi-audit-protect	Custom
+cicd-push	newapi-cicd-acr-push	Custom
+cicd-push	newapi-audit-protect	Custom
+iac-terraform	newapi-iac-terraform	Custom
+iac-terraform	newapi-audit-protect	Custom
