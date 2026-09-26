@@ -1,0 +1,10 @@
+admin_group	管理人员组(人)|策略:newapi-admin-identity+audit-protect+enforce-mfa|注意:非生产全量管理,生产仅只读;登录控制台须绑MFA;策略仅组级承载,禁止用户级绑定
+cicd-push_group	CI/CD镜像推送组|策略:newapi-cicd-acr-push+newapi-audit-protect|注意:仅ACR镜像推拉权限;只发AK给流水线,不开控制台;勿并入其它组
+dev-program_group	开发程序身份组(纯AK,无控制台)|策略:newapi-dev-program+newapi-prod-boundary+newapi-prod-oss-guard|注意:生产只读,写全挡;禁开LoginProfile;AK严禁提交git
+dev_group	开发组(人)|策略:newapi-ops-operator+enforce-mfa+audit-protect+newapi-prod-boundary+newapi-prod-oss-guard|注意:非生产读写,生产只读;AK走dev程序组
+fin_group	财务组(人)|策略:AliyunBSSReadOnlyAccess+newapi-audit-protect|注意:仅查账单与费用,无资源写权限;纯控制台无AK;要看资源清单可另加ReadOnlyAccess
+iac-terraform_group	Terraform IaC组|策略:newapi-iac-terraform+newapi-audit-protect|注意:唯一能改生产OSS桶配置的自动化身份,故意不挂prod边界;变更须走流水线,勿手工跑
+ops-prod_group	生产运维组(人)|策略:newapi-ops-operator+enforce-mfa+audit-protect|注意:生产可写不可销毁,可删生产桶对象;优先走IaC,手工变更须补回Terraform;成员暂空
+ops_group	非生产运维组(人)|策略:newapi-ops-operator+enforce-mfa+audit-protect+newapi-prod-boundary+newapi-prod-oss-guard|注意:生产只读,写全挡;须绑MFA;策略仅组级承载
+power_user_group	所有资源组(人)|挂PowerUserAccess,权限近账号级|成员0人|注意:勿长期加人,临时查问题使用
+super_group	主账号身份组(人)|策略:AdministratorAccess等20条|成员:yanxuewei|注意: 这个组不能轻易加人，权限很大，是第二个主账号
