@@ -1,0 +1,846 @@
+[
+ {
+  "QuotaDescription": "单次可购买的包年包月ecs的最大数量",
+  "Consumable": true,
+  "ProductCode": "ecs",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs",
+    "metricKey": "q_prepaid-instance-count-per-once-purchase",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "Period": {},
+  "Adjustable": false,
+  "QuotaActionCode": "q_prepaid-instance-count-per-once-purchase",
+  "QuotaName": "单次可购买的包年包月实例的最大数量",
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_prepaid-instance-count-per-once-purchase",
+  "TotalQuota": 300,
+  "QuotaCategory": "CommonQuota",
+  "ExpireTime": ""
+ },
+ {
+  "QuotaDescription": "该配额已下线， 请在配额中心选择 块存储 查看云盘配额",
+  "Consumable": true,
+  "ProductCode": "ecs",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs",
+    "metricKey": "q_postpaid-yundisk-capacity-cloud_essd",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "Period": {},
+  "Adjustable": false,
+  "QuotaActionCode": "q_postpaid-yundisk-capacity-cloud_essd",
+  "QuotaName": "按量ESSD云盘容量限额(已下线)",
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_postpaid-yundisk-capacity-cloud_essd",
+  "TotalQuota": 65536,
+  "QuotaCategory": "CommonQuota",
+  "ExpireTime": ""
+ },
+ {
+  "QuotaDescription": "该配额已下线， 请在配额中心选择 块存储 查看云盘配额",
+  "Consumable": true,
+  "ProductCode": "ecs",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs",
+    "metricKey": "q_postpaid-yundisk-capacity-cloud_ssd",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "Period": {},
+  "Adjustable": false,
+  "QuotaActionCode": "q_postpaid-yundisk-capacity-cloud_ssd",
+  "QuotaName": "按量SSD云盘容量限额(已下线)",
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_postpaid-yundisk-capacity-cloud_ssd",
+  "TotalQuota": 65536,
+  "QuotaCategory": "CommonQuota",
+  "ExpireTime": ""
+ },
+ {
+  "QuotaDescription": "该配额已下线， 请在配额中心选择 块存储 查看云盘配额",
+  "Consumable": true,
+  "ProductCode": "ecs",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs",
+    "metricKey": "q_postpaid-yundisk-capacity-cloud_efficiency",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "Period": {},
+  "Adjustable": false,
+  "QuotaActionCode": "q_postpaid-yundisk-capacity-cloud_efficiency",
+  "QuotaName": "按量高效云盘容量限额(已下线)",
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_postpaid-yundisk-capacity-cloud_efficiency",
+  "TotalQuota": 65536,
+  "QuotaCategory": "CommonQuota",
+  "ExpireTime": ""
+ },
+ {
+  "QuotaDescription": "该配额已下线",
+  "Consumable": true,
+  "ProductCode": "ecs",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs",
+    "metricKey": "q_axt-invocation-daily",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "Period": {},
+  "Adjustable": false,
+  "QuotaActionCode": "q_axt-invocation-daily",
+  "QuotaName": "云助手每天可执行调用的次数",
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_axt-invocation-daily",
+  "TotalQuota": 5000,
+  "QuotaCategory": "CommonQuota",
+  "ExpireTime": ""
+ },
+ {
+  "QuotaDescription": "当前账户的云助手任务输出大小限制，以KB为单位，超出则截断输出内容",
+  "Consumable": true,
+  "ProductCode": "ecs",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs",
+    "metricKey": "q_axt-task-output-size",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "Period": {},
+  "Adjustable": false,
+  "QuotaActionCode": "q_axt-task-output-size",
+  "QuotaName": "云助手任务输出大小限制",
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_axt-task-output-size",
+  "TotalQuota": 24,
+  "QuotaCategory": "CommonQuota",
+  "ExpireTime": ""
+ },
+ {
+  "QuotaDescription": "当前账户的云助手任务输出保存时长，以天为单位，过期则删除输出内容",
+  "Consumable": true,
+  "ProductCode": "ecs",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs",
+    "metricKey": "q_axt-task-output-life",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "Period": {},
+  "Adjustable": false,
+  "QuotaActionCode": "q_axt-task-output-life",
+  "QuotaName": "云助手任务输出保存时长\t",
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_axt-task-output-life",
+  "TotalQuota": 28,
+  "QuotaCategory": "CommonQuota",
+  "ExpireTime": ""
+ },
+ {
+  "QuotaDescription": "当前账户可以创建的云助手托管实例激活码的最大数量",
+  "Consumable": true,
+  "ProductCode": "ecs",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs",
+    "metricKey": "q_cloud-assistant-activation-count",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "Period": {},
+  "Adjustable": false,
+  "QuotaActionCode": "q_cloud-assistant-activation-count",
+  "QuotaName": "云助手托管实例激活码数上限",
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_cloud-assistant-activation-count",
+  "TotalQuota": 5000,
+  "QuotaCategory": "CommonQuota",
+  "ExpireTime": ""
+ },
+ {
+  "QuotaDescription": "单个激活码可注册的托管实例个数上限",
+  "Consumable": false,
+  "ProductCode": "ecs",
+  "UsageMetric": {},
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "Period": {},
+  "Adjustable": false,
+  "QuotaActionCode": "q_axt-activation-limit",
+  "QuotaName": "单个激活码可注册的托管实例个数上限",
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_axt-activation-limit",
+  "TotalQuota": 1000,
+  "QuotaCategory": "CommonQuota",
+  "ExpireTime": ""
+ },
+ {
+  "QuotaDescription": "当前账户可拥有的弹性网卡（辅助网卡）创建的最大数量",
+  "Consumable": true,
+  "ProductCode": "ecs",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs",
+    "metricKey": "q_elastic-network-interfaces",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_elastic-network-interfaces",
+  "QuotaName": "弹性网卡（辅助网卡）创建限额",
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_elastic-network-interfaces",
+  "TotalQuota": 300,
+  "QuotaCategory": "CommonQuota",
+  "SupportedRange": [
+   500,
+   1000,
+   5000,
+   10000,
+   50000
+  ],
+  "ExpireTime": "",
+  "ApplicableType": "discontinuous",
+  "ApplicableRange": [
+   500,
+   1000,
+   5000,
+   10000,
+   50000
+  ]
+ },
+ {
+  "QuotaDescription": "当前账户可拥有的启动模版的最大数量",
+  "Consumable": true,
+  "ProductCode": "ecs",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs",
+    "metricKey": "q_launch-template-count",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_launch-template-count",
+  "QuotaName": "启动模版创建数量上限",
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_launch-template-count",
+  "TotalQuota": 30,
+  "QuotaCategory": "CommonQuota",
+  "SupportedRange": [
+   50,
+   100,
+   200,
+   500
+  ],
+  "ExpireTime": "",
+  "ApplicableType": "discontinuous",
+  "ApplicableRange": [
+   50,
+   100,
+   200,
+   500
+  ]
+ },
+ {
+  "QuotaDescription": "当前账户可拥有的每个启动模版的版本最大数量",
+  "Consumable": true,
+  "ProductCode": "ecs",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs",
+    "metricKey": "q_launch-template-version-count",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_launch-template-version-count",
+  "QuotaName": "启动模版创建版本数量上限",
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_launch-template-version-count",
+  "TotalQuota": 30,
+  "QuotaCategory": "CommonQuota",
+  "SupportedRange": [
+   50,
+   100,
+   200,
+   500
+  ],
+  "ExpireTime": "",
+  "ApplicableType": "discontinuous",
+  "ApplicableRange": [
+   50,
+   100,
+   200,
+   500
+  ]
+ },
+ {
+  "QuotaDescription": "当前账户在当前地域可创建的云助手命令总数量。",
+  "Consumable": true,
+  "ProductCode": "ecs",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs",
+    "metricKey": "q_axt-command-count",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_axt-command-count",
+  "QuotaName": "云助手命令总数量上限",
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_axt-command-count",
+  "TotalQuota": 500,
+  "QuotaCategory": "CommonQuota",
+  "SupportedRange": [
+   501,
+   50000
+  ],
+  "ExpireTime": "",
+  "ApplicableType": "continuous",
+  "ApplicableRange": [
+   501,
+   50000
+  ]
+ },
+ {
+  "QuotaDescription": "当前账号在当前地域单次InvokeCommand或RunCommand最多可指定的实例数。",
+  "Consumable": false,
+  "ProductCode": "ecs",
+  "UsageMetric": {},
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_task-instance-count",
+  "QuotaName": "命令执行支持实例上限数",
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_task-instance-count",
+  "TotalQuota": 100,
+  "QuotaCategory": "CommonQuota",
+  "SupportedRange": [
+   101,
+   300
+  ],
+  "ExpireTime": "",
+  "ApplicableType": "continuous",
+  "ApplicableRange": [
+   101,
+   300
+  ]
+ },
+ {
+  "QuotaDescription": "单个激活码的有效使用时间。",
+  "Consumable": false,
+  "ProductCode": "ecs",
+  "UsageMetric": {},
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "小时",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_axt-activation-ttl",
+  "QuotaName": "单个激活码的有效使用时间。单位：小时",
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_axt-activation-ttl",
+  "TotalQuota": 4,
+  "QuotaCategory": "CommonQuota",
+  "SupportedRange": [
+   5,
+   876576
+  ],
+  "ExpireTime": "",
+  "ApplicableType": "continuous",
+  "ApplicableRange": [
+   5,
+   876576
+  ]
+ },
+ {
+  "QuotaDescription": "当前账号该地域可注册的托管实例总数",
+  "Consumable": true,
+  "ProductCode": "ecs",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs",
+    "metricKey": "q_axt-managed-instance-count",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_axt-managed-instance-count",
+  "QuotaName": "当前账号该地域可注册的托管实例总数",
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_axt-managed-instance-count",
+  "TotalQuota": 10,
+  "QuotaCategory": "CommonQuota",
+  "SupportedRange": [
+   11,
+   50000
+  ],
+  "ExpireTime": "",
+  "ApplicableType": "continuous",
+  "ApplicableRange": [
+   11,
+   50000
+  ]
+ },
+ {
+  "QuotaDescription": "账号下按量付费ECS实例的按固定带宽计费总公网带宽上限。",
+  "Consumable": true,
+  "ProductCode": "ecs",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs",
+    "metricKey": "q_internet-bandwidth-pay-by-bandwidth-of-postpaid-instance",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "Mbps",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_internet-bandwidth-pay-by-bandwidth-of-postpaid-instance",
+  "QuotaName": "账号下按量付费ECS实例的按固定带宽计费总公网带宽上限",
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_internet-bandwidth-pay-by-bandwidth-of-postpaid-instance",
+  "TotalQuota": 10240,
+  "QuotaCategory": "CommonQuota",
+  "SupportedRange": [
+   15360,
+   20480,
+   25600,
+   30720,
+   40960,
+   51200,
+   61440,
+   71680,
+   81920,
+   92160,
+   102400
+  ],
+  "ExpireTime": "",
+  "ApplicableType": "discontinuous",
+  "ApplicableRange": [
+   15360,
+   20480,
+   25600,
+   30720,
+   40960,
+   51200,
+   61440,
+   71680,
+   81920,
+   92160,
+   102400
+  ]
+ },
+ {
+  "QuotaDescription": "用户该地域下可拥有的弹性供应组总数",
+  "Consumable": true,
+  "ProductCode": "ecs",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs",
+    "metricKey": "q_auto_provisioning_group",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_auto_provisioning_group",
+  "QuotaName": "弹性供应组总数",
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_auto_provisioning_group",
+  "TotalQuota": 500,
+  "QuotaCategory": "CommonQuota",
+  "SupportedRange": [
+   1000,
+   1500,
+   2000
+  ],
+  "ExpireTime": "",
+  "ApplicableType": "discontinuous",
+  "ApplicableRange": [
+   1000,
+   1500,
+   2000
+  ]
+ },
+ {
+  "QuotaDescription": "专有宿主机总数量上限",
+  "Consumable": true,
+  "ProductCode": "ecs",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs",
+    "metricKey": "q_dedicated-hosts",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_dedicated-hosts",
+  "QuotaName": "专有宿主机总数量上限",
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_dedicated-hosts",
+  "TotalQuota": 2,
+  "QuotaCategory": "CommonQuota",
+  "SupportedRange": [
+   2,
+   128
+  ],
+  "ExpireTime": "",
+  "ApplicableType": "continuous",
+  "ApplicableRange": [
+   3,
+   128
+  ]
+ },
+ {
+  "QuotaDescription": "当前账户可拥有的安全组的最大数量",
+  "Consumable": true,
+  "ProductCode": "ecs",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs",
+    "metricKey": "q_security-groups",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_security-groups",
+  "QuotaName": "安全组总数量上限",
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_security-groups",
+  "TotalQuota": 400,
+  "QuotaCategory": "CommonQuota",
+  "SupportedRange": [
+   400,
+   10000
+  ],
+  "ExpireTime": "",
+  "ApplicableType": "continuous",
+  "ApplicableRange": [
+   401,
+   10000
+  ]
+ },
+ {
+  "QuotaDescription": "每个专有网络（VPC）类型的普通安全组能容纳的私网IP地址数量上限",
+  "Consumable": true,
+  "UnadjustableDetail": "limitReached",
+  "ProductCode": "ecs",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs",
+    "metricKey": "q_vpc-normal-security-group-ip-count",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "Period": {},
+  "Adjustable": false,
+  "QuotaActionCode": "q_vpc-normal-security-group-ip-count",
+  "QuotaName": "专有网络普通安全组内的私网IP地址数量上限",
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_vpc-normal-security-group-ip-count",
+  "TotalQuota": 6000,
+  "QuotaCategory": "CommonQuota",
+  "SupportedRange": [
+   6000,
+   6000
+  ],
+  "ExpireTime": "",
+  "ApplicableType": "continuous",
+  "ApplicableRange": [
+   6000,
+   6000
+  ]
+ },
+ {
+  "QuotaDescription": "当前账户可拥有的部署集的最大数量",
+  "Consumable": true,
+  "ProductCode": "ecs",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs",
+    "metricKey": "q_deployment-set-count",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_deployment-set-count",
+  "QuotaName": "部署集数量",
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_deployment-set-count",
+  "TotalQuota": 10,
+  "QuotaCategory": "CommonQuota",
+  "SupportedRange": [
+   10,
+   128
+  ],
+  "ExpireTime": "",
+  "ApplicableType": "continuous",
+  "ApplicableRange": [
+   11,
+   128
+  ]
+ },
+ {
+  "QuotaDescription": "当前账户可以保有的自定义镜像最大数量",
+  "Consumable": true,
+  "ProductCode": "ecs",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs",
+    "metricKey": "q_user-image-count",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_user-image-count",
+  "QuotaName": "当前账户保有自定义镜像数量限额",
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_user-image-count",
+  "TotalQuota": 400,
+  "QuotaCategory": "CommonQuota",
+  "SupportedRange": [
+   400,
+   10000
+  ],
+  "ExpireTime": "",
+  "ApplicableType": "continuous",
+  "ApplicableRange": [
+   401,
+   10000
+  ]
+ },
+ {
+  "QuotaDescription": "每个自定义镜像能够共享用户数最大值",
+  "Consumable": true,
+  "ProductCode": "ecs",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs",
+    "metricKey": "q_user-per-image-shared-user-count",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_user-per-image-shared-user-count",
+  "QuotaName": "每个自定义镜像能够共享用户数限额",
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_user-per-image-shared-user-count",
+  "TotalQuota": 400,
+  "QuotaCategory": "CommonQuota",
+  "SupportedRange": [
+   400,
+   2000
+  ],
+  "ExpireTime": "",
+  "ApplicableType": "continuous",
+  "ApplicableRange": [
+   401,
+   2000
+  ]
+ },
+ {
+  "QuotaDescription": "弹性网卡关联的安全组数量上限",
+  "Consumable": true,
+  "ProductCode": "ecs",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs",
+    "metricKey": "q_security-group-count-per-eni",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "Period": {},
+  "Adjustable": false,
+  "QuotaActionCode": "q_security-group-count-per-eni",
+  "QuotaName": "弹性网卡关联的安全组数量上限",
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_security-group-count-per-eni",
+  "TotalQuota": 10,
+  "QuotaCategory": "CommonQuota",
+  "ExpireTime": ""
+ },
+ {
+  "QuotaDescription": "弹性网卡关联安全组的规则总数量上限",
+  "Consumable": true,
+  "ProductCode": "ecs",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs",
+    "metricKey": "q_security-group-rule-count-per-eni",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "Period": {},
+  "Adjustable": false,
+  "QuotaActionCode": "q_security-group-rule-count-per-eni",
+  "QuotaName": "弹性网卡关联安全组的规则总数量上限",
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_security-group-rule-count-per-eni",
+  "TotalQuota": 1000,
+  "QuotaCategory": "CommonQuota",
+  "ExpireTime": ""
+ }
+]

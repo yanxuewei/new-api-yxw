@@ -130,3 +130,16 @@ Terway 每 Pod 占一个真实 VPC IP；app 段免费 IP 基线 4092，**低于 
 - `acs:ResourceGroupId` 条件键**已实测对 OSS 对象操作与 VPC API 生效**（基线 ALLOW → 绑定 DENY → 解绑 ALLOW）。
 - `NotAction` 支持 `*:Describe*` / `*:List*` / `*:Get*` / `*:Query*` 通配，可用作只读白名单。
 - 很多"读"API 有必填参数（`cms DescribeMetricList`、`vpc DescribeRouteTables`），不能当无参读用。
+
+## 配额中心（§3.4）实操口径 —— 2026-09-26 实测
+
+- **ECS vCPU 配额**＝`ecs-spec` 产品的 **`q_ecs_enterprise_postpay_c`**（按量）/ `q_ecs_enterprise_prepay_c`（包年包月），按「企业级计算实例 g/c/r/u/hf/sn」分组、**按地域独立**（QuotaArn 含 region）。**不存在 "general-purpose 族"**。默认值：按量 50 / 包年包月 100（两地域同）。
+- **地域必须用维度传**：`--Dimensions.1.Key regionId --Dimensions.1.Value <region>`。只传 `--RegionId` → **静默返回 cn-hangzhou 的值**（数字正常、地域全错）。
+- **维度支持因产品而异**：`ecs-spec`/`ecs` 用 `regionId`；`eip/csk/oss/nat/slb/alb` **不支持**该维度（`QUOTA.DIMENSION.UNSUPPORT`）。
+- **申请参数**：`--ProductCode`、`--QuotaActionCode`、**`--DesireValue`**（不是 DesiredValue）、`--Reason`、可选 `--NoticeType 3 --QuotaCategory CommonQuota`。**没有** `--Version`。
+- **状态机**：`Process` → **`Agree`**（不是 Approved）。国际站 CommonQuota 类**自动审批、分钟级生效**（实测 2 分钟）。
+- **`ListQuotaApplications` 的地域字段是 `Dimension`（单数）**，`ListProductQuotas` 才是 `Dimensions`。取错 → 地域全落 '-' → 幂等失效重复提单。
+- **理由必须带可核算容量式**（节点数 × vCPU × 倍数），只写"要 N 核"易被驳回。
+- `kvstore`（Tair）/`rds`（PG）调配额 API 报 **`PARAMETER.ILLEGALL` = 产品未开通**（国际站须逐产品 Activate，见指南 §3.5），开通后配额才可见。
+- **脚本**：`quota_apply.sh`（`check|apply|verify|probe|all`，幂等 + 预演 + 日志到 `.workbuddy/quota/`）· `quota_probe.py`（全量落盘）。现值快照：ALB 60/地域、EIP 20（账号级）、NAT 5/VPC、ACK Pro 100 集群、OSS 100/region、VPC 10（全地域）、vSwitch 150/VPC。
+- **已批复（2026-09-26）**：马尼拉 `q_ecs_enterprise_postpay_c` 50→**64**（`b140e263-6857-467a-b245-58d5a5db4bde`）；新加坡 50→**96**（`e117bf2b-e8e5-4391-817c-86ab71165838`）。证据见 `.deploy/资源配额申请_执行报告.md`。

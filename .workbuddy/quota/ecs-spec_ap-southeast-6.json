@@ -1,0 +1,2269 @@
+[
+ {
+  "QuotaDescription": "当前地域中，您可持有的包年包月的高性能计算实例（hpc、scc）vCPU数量上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_hpc_prepay_c",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "VCPU",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_hpc_prepay_c",
+  "QuotaName": "包年包月的高性能计算实例（hpc、scc）vCPU数量上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_hpc_prepay_c",
+  "TotalQuota": 100,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的包年包月的弹性裸金属服务器实例（ebm）vCPU数量上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_ebm_prepay_c",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "VCPU",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_ebm_prepay_c",
+  "QuotaName": "包年包月的弹性裸金属服务器实例（ebm）vCPU数量上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_ebm_prepay_c",
+  "TotalQuota": 100,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的包年包月的本地存储型实例（d、i）vCPU数量上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_local_storage_prepay_c",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "VCPU",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_local_storage_prepay_c",
+  "QuotaName": "包年包月的本地存储型实例（d、i）vCPU数量上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_local_storage_prepay_c",
+  "TotalQuota": 100,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的包年包月的共享入门级实例（e、t）vCPU数量上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_share_prepay_c",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "VCPU",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_share_prepay_c",
+  "QuotaName": "包年包月的共享入门级实例（e、t）vCPU数量上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_share_prepay_c",
+  "TotalQuota": 100,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的包年包月的内存型实例（re、se）vCPU数量上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_high_mem_prepay_c",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "VCPU",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_high_mem_prepay_c",
+  "QuotaName": "包年包月的内存型实例（re、se）vCPU数量上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_high_mem_prepay_c",
+  "TotalQuota": 100,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的包年包月的限购类实例vCPU数量上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_restrict_prepay_c",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "VCPU",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_restrict_prepay_c",
+  "QuotaName": "包年包月的限购类实例vCPU数量上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_restrict_prepay_c",
+  "TotalQuota": 100,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的按量付费的共享入门级实例（e、t）vCPU数量上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_share_postpay_c",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "VCPU",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_share_postpay_c",
+  "QuotaName": "按量付费的共享入门级实例（e、t）vCPU数量上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_share_postpay_c",
+  "TotalQuota": 50,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的按量付费的高性能计算实例（hpc、scc）vCPU数量上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_hpc_postpay_c",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "VCPU",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_hpc_postpay_c",
+  "QuotaName": "按量付费的高性能计算实例（hpc、scc）vCPU数量上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_hpc_postpay_c",
+  "TotalQuota": 50,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的抢占式的高性能计算实例（hpc、scc）vCPU数量上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_hpc_spot_c",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "VCPU",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_hpc_spot_c",
+  "QuotaName": "抢占式的高性能计算实例（hpc、scc）vCPU数量上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_hpc_spot_c",
+  "TotalQuota": 50,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的按量付费的弹性裸金属服务器实例（ebm）vCPU数量上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_ebm_postpay_c",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "VCPU",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_ebm_postpay_c",
+  "QuotaName": "按量付费的弹性裸金属服务器实例（ebm）vCPU数量上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_ebm_postpay_c",
+  "TotalQuota": 50,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的抢占式的内存型实例（re、se）vCPU数量上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_high_mem_spot_c",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "VCPU",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_high_mem_spot_c",
+  "QuotaName": "抢占式的内存型实例（re、se）vCPU数量上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_high_mem_spot_c",
+  "TotalQuota": 50,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的按量付费的限购类实例vCPU数量上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_restrict_postpay_c",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "VCPU",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_restrict_postpay_c",
+  "QuotaName": "按量付费的限购类实例vCPU数量上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_restrict_postpay_c",
+  "TotalQuota": 50,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的抢占式的弹性裸金属服务器实例（ebm）vCPU数量上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_ebm_spot_c",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "VCPU",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_ebm_spot_c",
+  "QuotaName": "抢占式的弹性裸金属服务器实例（ebm）vCPU数量上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_ebm_spot_c",
+  "TotalQuota": 50,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的抢占式的共享入门级实例（e、t）vCPU数量上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_share_spot_c",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "VCPU",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_share_spot_c",
+  "QuotaName": "抢占式的共享入门级实例（e、t）vCPU数量上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_share_spot_c",
+  "TotalQuota": 50,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的抢占式的限购类实例vCPU数量上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_restrict_spot_c",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "VCPU",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_restrict_spot_c",
+  "QuotaName": "抢占式的限购类实例vCPU数量上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_restrict_spot_c",
+  "TotalQuota": 50,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的抢占式的本地存储型实例（d、i）vCPU数量上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_local_storage_spot_c",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "VCPU",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_local_storage_spot_c",
+  "QuotaName": "抢占式的本地存储型实例（d、i）vCPU数量上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_local_storage_spot_c",
+  "TotalQuota": 50,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的按量付费的本地存储型实例（d、i）vCPU数量上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_local_storage_postpay_c",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "VCPU",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_local_storage_postpay_c",
+  "QuotaName": "按量付费的本地存储型实例（d、i）vCPU数量上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_local_storage_postpay_c",
+  "TotalQuota": 50,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的按量付费的内存型实例（re、se）vCPU数量上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_high_mem_postpay_c",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "VCPU",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_high_mem_postpay_c",
+  "QuotaName": "按量付费的内存型实例（re、se）vCPU数量上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_high_mem_postpay_c",
+  "TotalQuota": 50,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的包年包月的(ebm)gn7/gn7v系列GPU实例卡数上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_gn7v_prepay_g",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "CARD",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_gn7v_prepay_g",
+  "QuotaName": "包年包月的(ebm)gn7/gn7v系列GPU实例卡数上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_gn7v_prepay_g",
+  "TotalQuota": 32,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的包年包月的(ebm)gn8i/gn8is系列GPU实例卡数上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_gn8i_prepay_g",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "CARD",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_gn8i_prepay_g",
+  "QuotaName": "包年包月的(ebm)gn8i/gn8is系列GPU实例卡数上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_gn8i_prepay_g",
+  "TotalQuota": 32,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的按量付费的(ebm)gn7/gn7v系列GPU实例卡数上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_gn7v_postpay_g",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "CARD",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_gn7v_postpay_g",
+  "QuotaName": "按量付费的(ebm)gn7/gn7v系列GPU实例卡数上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_gn7v_postpay_g",
+  "TotalQuota": 32,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的按量付费的(ebm)gn7e/gn7ex系列GPU实例卡数上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_gn7e_postpay_g",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "CARD",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_gn7e_postpay_g",
+  "QuotaName": "按量付费的(ebm)gn7e/gn7ex系列GPU实例卡数上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_gn7e_postpay_g",
+  "TotalQuota": 32,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的按量付费的企业级计算实例（g、c、r、u、hf、sn）vCPU数量上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_enterprise_postpay_c",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "VCPU",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_enterprise_postpay_c",
+  "QuotaName": "按量付费的企业级计算实例（g、c、r、u、hf、sn）vCPU数量上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_enterprise_postpay_c",
+  "TotalQuota": 50,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的包年包月的企业级计算实例（g、c、r、u、hf、sn）vCPU数量上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_enterprise_prepay_c",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "VCPU",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_enterprise_prepay_c",
+  "QuotaName": "包年包月的企业级计算实例（g、c、r、u、hf、sn）vCPU数量上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_enterprise_prepay_c",
+  "TotalQuota": 100,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的抢占式的(ebm)gn6e系列GPU实例卡数上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_gn6e_spot_g",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "CARD",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_gn6e_spot_g",
+  "QuotaName": "抢占式的(ebm)gn6e系列GPU实例卡数上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_gn6e_spot_g",
+  "TotalQuota": 32,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的抢占式的(ebm)gn8i/gn8is系列GPU实例卡数上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_gn8i_spot_g",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "CARD",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_gn8i_spot_g",
+  "QuotaName": "抢占式的(ebm)gn8i/gn8is系列GPU实例卡数上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_gn8i_spot_g",
+  "TotalQuota": 32,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的按量付费的(ebm)gn8i/gn8is系列GPU实例卡数上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_gn8i_postpay_g",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "CARD",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_gn8i_postpay_g",
+  "QuotaName": "按量付费的(ebm)gn8i/gn8is系列GPU实例卡数上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_gn8i_postpay_g",
+  "TotalQuota": 32,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的抢占式的企业级计算实例（g、c、r、u、hf）vCPU数量上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_enterprise_spot_c",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "VCPU",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_enterprise_spot_c",
+  "QuotaName": "抢占式的企业级计算实例（g、c、r、u、hf）vCPU数量上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_enterprise_spot_c",
+  "TotalQuota": 50,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的抢占式的(ebm)gn7/gn7v系列GPU实例卡数上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_gn7v_spot_g",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "CARD",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_gn7v_spot_g",
+  "QuotaName": "抢占式的(ebm)gn7/gn7v系列GPU实例卡数上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_gn7v_spot_g",
+  "TotalQuota": 32,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的按量付费的(ebm)gn6e系列GPU实例卡数上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_gn6e_postpay_g",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "CARD",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_gn6e_postpay_g",
+  "QuotaName": "按量付费的(ebm)gn6e系列GPU实例卡数上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_gn6e_postpay_g",
+  "TotalQuota": 32,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的抢占式的(ebm)gn7e/gn7ex系列GPU实例卡数上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_gn7e_spot_g",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "CARD",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_gn7e_spot_g",
+  "QuotaName": "抢占式的(ebm)gn7e/gn7ex系列GPU实例卡数上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_gn7e_spot_g",
+  "TotalQuota": 32,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的包年包月的(ebm)gn7e/gn7ex系列GPU实例卡数上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_gn7e_prepay_g",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "CARD",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_gn7e_prepay_g",
+  "QuotaName": "包年包月的(ebm)gn7e/gn7ex系列GPU实例卡数上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_gn7e_prepay_g",
+  "TotalQuota": 32,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的抢占式的(ebm)gn6i系列GPU实例卡数上限（不含vGPU）",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_gn6i_spot_g",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "CARD",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_gn6i_spot_g",
+  "QuotaName": "抢占式的(ebm)gn6i系列GPU实例卡数上限（不含vGPU）",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_gn6i_spot_g",
+  "TotalQuota": 32,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的按量付费的(ebm)gn6v系列GPU实例卡数上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_gn6v_postpay_g",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "CARD",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_gn6v_postpay_g",
+  "QuotaName": "按量付费的(ebm)gn6v系列GPU实例卡数上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_gn6v_postpay_g",
+  "TotalQuota": 32,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的包年包月的(ebm)gn6i系列GPU实例卡数上限（不含vGPU）",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_gn6i_prepay_g",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "CARD",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_gn6i_prepay_g",
+  "QuotaName": "包年包月的(ebm)gn6i系列GPU实例卡数上限（不含vGPU）",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_gn6i_prepay_g",
+  "TotalQuota": 32,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的按量付费的(ebm)gn6t系列GPU实例卡数上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_gn6t_postpay_g",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "CARD",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_gn6t_postpay_g",
+  "QuotaName": "按量付费的(ebm)gn6t系列GPU实例卡数上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_gn6t_postpay_g",
+  "TotalQuota": 32,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的抢占式的gn5/gn5i系列GPU实例卡数上限（不含vGPU）",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_gn5_spot_g",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "CARD",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_gn5_spot_g",
+  "QuotaName": "抢占式的gn5/gn5i系列GPU实例卡数上限（不含vGPU）",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_gn5_spot_g",
+  "TotalQuota": 32,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的包年包月的(ebm)gn6t系列GPU实例卡数上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_gn6t_prepay_g",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "CARD",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_gn6t_prepay_g",
+  "QuotaName": "包年包月的(ebm)gn6t系列GPU实例卡数上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_gn6t_prepay_g",
+  "TotalQuota": 32,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的包年包月的(ebm)gn6v系列GPU实例卡数上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_gn6v_prepay_g",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "CARD",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_gn6v_prepay_g",
+  "QuotaName": "包年包月的(ebm)gn6v系列GPU实例卡数上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_gn6v_prepay_g",
+  "TotalQuota": 32,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的按量付费的(ebm)gn6i系列GPU实例卡数上限（不含vGPU）",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_gn6i_postpay_g",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "CARD",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_gn6i_postpay_g",
+  "QuotaName": "按量付费的(ebm)gn6i系列GPU实例卡数上限（不含vGPU）",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_gn6i_postpay_g",
+  "TotalQuota": 32,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的包年包月的(ebm)gn6e系列GPU实例卡数上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_gn6e_prepay_g",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "CARD",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_gn6e_prepay_g",
+  "QuotaName": "包年包月的(ebm)gn6e系列GPU实例卡数上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_gn6e_prepay_g",
+  "TotalQuota": 32,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的抢占式的(ebm)gn6t系列GPU实例卡数上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_gn6t_spot_g",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "CARD",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_gn6t_spot_g",
+  "QuotaName": "抢占式的(ebm)gn6t系列GPU实例卡数上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_gn6t_spot_g",
+  "TotalQuota": 32,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的按量付费的gn5/gn5i系列GPU实例卡数上限（不含vGPU）",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_gn5_postpay_g",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "CARD",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_gn5_postpay_g",
+  "QuotaName": "按量付费的gn5/gn5i系列GPU实例卡数上限（不含vGPU）",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_gn5_postpay_g",
+  "TotalQuota": 32,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的抢占式的(ebm)gn6v系列GPU实例卡数上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_gn6v_spot_g",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "CARD",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_gn6v_spot_g",
+  "QuotaName": "抢占式的(ebm)gn6v系列GPU实例卡数上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_gn6v_spot_g",
+  "TotalQuota": 32,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的抢占式的(ebm)gn8t/(ebm)gn7t系列GPU实例卡数上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_gn8t_spot_g",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "CARD",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_gn8t_spot_g",
+  "QuotaName": "抢占式的(ebm)gn8t/(ebm)gn7t系列GPU实例卡数上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_gn8t_spot_g",
+  "TotalQuota": 32,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的包年包月的gn5/gn5i系列GPU实例卡数上限（不含vGPU）",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_gn5_prepay_g",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "CARD",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_gn5_prepay_g",
+  "QuotaName": "包年包月的gn5/gn5i系列GPU实例卡数上限（不含vGPU）",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_gn5_prepay_g",
+  "TotalQuota": 32,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您以包年包月持有的vgn，sgn等以GRID vgpu加速的实例上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_vgpu_prepay_g",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "CARD",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_vgpu_prepay_g",
+  "QuotaName": "包年包月的GPU虚拟化类（vGPU）实例数量上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_vgpu_prepay_g",
+  "TotalQuota": 32,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您以抢占式持有的vgn，sgn等以GRID vgpu加速的实例上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_vgpu_spot_g",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "CARD",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_vgpu_spot_g",
+  "QuotaName": "抢占式的GPU虚拟化类（vGPU）实例数量上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_vgpu_spot_g",
+  "TotalQuota": 32,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的抢占式的(ebm)gn7i/ebmgn7ix/gn7s的GPU实例卡数上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_gn7i_spot_g",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "CARD",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_gn7i_spot_g",
+  "QuotaName": "抢占式的(ebm)gn7i/ebmgn7ix/gn7s的GPU实例卡数上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_gn7i_spot_g",
+  "TotalQuota": 32,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的按量付费的(ebm)gn8t/(ebm)gn7t系列GPU实例卡数上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_gn8t_postpay_g",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "CARD",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_gn8t_postpay_g",
+  "QuotaName": "按量付费的(ebm)gn8t/(ebm)gn7t系列GPU实例卡数上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_gn8t_postpay_g",
+  "TotalQuota": 32,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的按量付费的(ebm)gn7i/ebmgn7ix/gn7s的GPU实例卡数上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_gn7i_postpay_g",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "CARD",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_gn7i_postpay_g",
+  "QuotaName": "按量付费的(ebm)gn7i/ebmgn7ix/gn7s的GPU实例卡数上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_gn7i_postpay_g",
+  "TotalQuota": 32,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您以按量付费持有的vgn，sgn等以GRID vgpu加速的实例上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_vgpu_postpay_g",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "CARD",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_vgpu_postpay_g",
+  "QuotaName": "按量付费的GPU虚拟化类（vGPU）实例数量上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_vgpu_postpay_g",
+  "TotalQuota": 32,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的包年包月的(ebm)gn7i/ebmgn7ix/gn7s的GPU实例卡数上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_gn7i_prepay_g",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "CARD",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_gn7i_prepay_g",
+  "QuotaName": "包年包月的(ebm)gn7i/ebmgn7ix/gn7s的GPU实例卡数上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_gn7i_prepay_g",
+  "TotalQuota": 32,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的包年包月的(ebm)gn8t/(ebm)gn7t系列GPU实例卡数上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_gn8t_prepay_g",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "CARD",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_gn8t_prepay_g",
+  "QuotaName": "包年包月的(ebm)gn8t/(ebm)gn7t系列GPU实例卡数上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_gn8t_prepay_g",
+  "TotalQuota": 32,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的按量付费的内部规格vCPU数量上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_xpec_postpay_c",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "VCPU",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_xpec_postpay_c",
+  "QuotaName": "按量付费的内部规格vCPU数量上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_xpec_postpay_c",
+  "TotalQuota": 50,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的抢占式的内部规格vCPU数量上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_xpec_spot_c",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "VCPU",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_xpec_spot_c",
+  "QuotaName": "抢占式的内部规格vCPU数量上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_xpec_spot_c",
+  "TotalQuota": 50,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您以按量付费持有的gn7r，ebmgn6ia实例，总卡数上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_ag_postpay_g",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "CARD",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_ag_postpay_g",
+  "QuotaName": "按量付费的arm+GPU类实例GPU卡数上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_ag_postpay_g",
+  "TotalQuota": 32,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您以抢占式持有的gn7r，ebmgn6ia实例，总卡数上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_ag_spot_g",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "CARD",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_ag_spot_g",
+  "QuotaName": "抢占式的arm+GPU类实例GPU卡数上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_ag_spot_g",
+  "TotalQuota": 32,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的包年包月的内部规格vCPU数量上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_xpec_prepay_c",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "VCPU",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_xpec_prepay_c",
+  "QuotaName": "包年包月的内部规格vCPU数量上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_xpec_prepay_c",
+  "TotalQuota": 100,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您以包年包月持有的gn7r，ebmgn6ia实例，总卡数上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_ag_prepay_g",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "CARD",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_ag_prepay_g",
+  "QuotaName": "包年包月的arm+GPU类实例GPU卡数上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_ag_prepay_g",
+  "TotalQuota": 32,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的按量付费的(ebm)gn8v系列GPU实例卡数上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_gn8v_postpay_g",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "CARD",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_gn8v_postpay_g",
+  "QuotaName": "按量付费的(ebm)gn8v系列GPU实例卡数上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_gn8v_postpay_g",
+  "TotalQuota": 32,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的包年包月的(ebm)gn8v系列GPU实例卡数上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_gn8v_prepay_g",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "CARD",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_gn8v_prepay_g",
+  "QuotaName": "包年包月的(ebm)gn8v系列GPU实例卡数上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_gn8v_prepay_g",
+  "TotalQuota": 32,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的抢占式的(ebm)gn8v系列GPU实例卡数上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_gn8v_spot_g",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "CARD",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_gn8v_spot_g",
+  "QuotaName": "抢占式的(ebm)gn8v系列GPU实例卡数上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_gn8v_spot_g",
+  "TotalQuota": 32,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的包年包月的AMD 系列GPU实例卡数上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_amd_prepay_g",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "CARD",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_amd_prepay_g",
+  "QuotaName": "包年包月AMD GPU实例卡数上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_amd_prepay_g",
+  "TotalQuota": 32,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的按量付费的AMD系列GPU实例卡数上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_amd_postpay_g",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "CARD",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_amd_postpay_g",
+  "QuotaName": "按量付费的AMD GPU实例卡数上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_amd_postpay_g",
+  "TotalQuota": 32,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的抢占式的AMD系列GPU实例卡数上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_amd_spot_g",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "CARD",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_amd_spot_g",
+  "QuotaName": "抢占式的AMD GPU实例卡数上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_amd_spot_g",
+  "TotalQuota": 32,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的抢占式的(ebm)gn9t系列GPU实例卡数上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_gn9t_spot_g",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "CARD",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_gn9t_spot_g",
+  "QuotaName": "抢占式的(ebm)gn9t系列GPU实例卡数上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_gn9t_spot_g",
+  "TotalQuota": 32,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的按量付费的(ebm)gn9t系列GPU实例卡数上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_gn9t_postpay_g",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "CARD",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_gn9t_postpay_g",
+  "QuotaName": "按量付费的(ebm)gn9t系列GPU实例卡数上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_gn9t_postpay_g",
+  "TotalQuota": 32,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的包年包月的(ebm)gn9t系列GPU实例卡数上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_gn9t_prepay_g",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "CARD",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_gn9t_prepay_g",
+  "QuotaName": "包年包月的(ebm)gn9t系列GPU实例卡数上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_gn9t_prepay_g",
+  "TotalQuota": 32,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的抢占式的(ebm)gn8te系列GPU实例卡数上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_gn8te_spot_g",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "CARD",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_gn8te_spot_g",
+  "QuotaName": "抢占式的(ebm)gn8te系列GPU实例卡数上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_gn8te_spot_g",
+  "TotalQuota": 32,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的按量付费的(ebm)gn8te系列GPU实例卡数上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_gn8te_postpay_g",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "CARD",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_gn8te_postpay_g",
+  "QuotaName": "按量付费的(ebm)gn8te系列GPU实例卡数上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_gn8te_postpay_g",
+  "TotalQuota": 32,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的包年包月的(ebm)gn8te系列GPU实例卡数上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_gn8te_prepay_g",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "CARD",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_gn8te_prepay_g",
+  "QuotaName": "包年包月的(ebm)gn8te系列GPU实例卡数上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_gn8te_prepay_g",
+  "TotalQuota": 32,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的包年包月的(ebm)gn9g/gn9ge/gn9ga/gn9gc系列GPU实例卡数上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_gn9g_prepay_g",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "CARD",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_gn9g_prepay_g",
+  "QuotaName": "包年包月的(ebm)gn9g/gn9ge/gn9ga/gn9gc系列GPU实例卡数上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_gn9g_prepay_g",
+  "TotalQuota": 32,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的按量付费(ebm)gn9g/gn9ge/gn9ga/gn9gc系列GPU实例卡数上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_gn9g_postpay_g",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "CARD",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_gn9g_postpay_g",
+  "QuotaName": "按量付费的(ebm)gn9g/gn9ge/gn9ga/gn9gc系列GPU实例卡数上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_gn9g_postpay_g",
+  "TotalQuota": 32,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可持有的抢占式的(ebm)gn9g/gn9ge/gn9ga/gn9gc系列GPU实例卡数上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_gn9g_spot_g",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "CARD",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_gn9g_spot_g",
+  "QuotaName": "抢占式的(ebm)gn9g/gn9ge/gn9ga/gn9gc系列GPU实例卡数上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_gn9g_spot_g",
+  "TotalQuota": 0,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "当前地域中，您可创建的弹性保障服务的VCPU数量上限",
+  "Consumable": true,
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {
+   "MetricName": "Usage",
+   "MetricDimensions": {
+    "productCode": "ecs-spec",
+    "metricKey": "q_ecs_elasticassurance_total_c",
+    "regionId": "ap-southeast-6",
+    "label": "none"
+   },
+   "MetricNamespace": "acs_quotas_commonquota"
+  },
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "VCPU",
+  "Period": {},
+  "Adjustable": true,
+  "QuotaActionCode": "q_ecs_elasticassurance_total_c",
+  "QuotaName": "弹性保障可用vCPU数量总上限",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_elasticassurance_total_c",
+  "TotalQuota": 100,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "q_ecs_gn9i_spot_g",
+  "Consumable": false,
+  "UnadjustableDetail": "undefinedQuota",
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {},
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "CARD",
+  "Period": {},
+  "Adjustable": false,
+  "QuotaActionCode": "q_ecs_gn9i_spot_g",
+  "QuotaName": "q_ecs_gn9i_spot_g",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_gn9i_spot_g",
+  "TotalQuota": 32,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "q_ecs_gn9i_postpay_g",
+  "Consumable": false,
+  "UnadjustableDetail": "undefinedQuota",
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {},
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "CARD",
+  "Period": {},
+  "Adjustable": false,
+  "QuotaActionCode": "q_ecs_gn9i_postpay_g",
+  "QuotaName": "q_ecs_gn9i_postpay_g",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_gn9i_postpay_g",
+  "TotalQuota": 32,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ },
+ {
+  "QuotaDescription": "q_ecs_gn9i_prepay_g",
+  "Consumable": false,
+  "UnadjustableDetail": "undefinedQuota",
+  "ProductCode": "ecs-spec",
+  "TotalUsage": 0,
+  "UsageMetric": {},
+  "Dimensions": {
+   "regionId": "ap-southeast-6"
+  },
+  "QuotaUnit": "CARD",
+  "Period": {},
+  "Adjustable": false,
+  "QuotaActionCode": "q_ecs_gn9i_prepay_g",
+  "QuotaName": "q_ecs_gn9i_prepay_g",
+  "QuotaItems": [],
+  "QuotaArn": "acs:quotas:ap-southeast-6:5108890064395960:quota/ecs/q_ecs_gn9i_prepay_g",
+  "TotalQuota": 32,
+  "QuotaCategory": "CommonQuota",
+  "ApplicableType": "continuous"
+ }
+]
