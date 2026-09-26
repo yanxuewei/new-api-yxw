@@ -545,14 +545,6 @@ bash ram_group_annotate.sh verify    # 校验 10/10 一致 + 长度合规
 
 典型：`ops_group` 挂着 `newapi-prod-boundary`（Deny 生产写）。往 `ops_group` 加任何 Allow 都救不回生产写权限。**正确做法是把他加到 `ops-prod_group`，或从 `ops_group` 移除。**
 
-排查命令：
-
-```bash
-# 看某人所属的所有组
-aliyun ram ListGroupsForUser --UserName <u> --region ap-southeast-1
-# 逐个组看挂了什么策略
-aliyun ram ListPoliciesForGroup --GroupName <g> --region ap-southeast-1
-```
 
 ### 6.2 不要给人发 AK
 
