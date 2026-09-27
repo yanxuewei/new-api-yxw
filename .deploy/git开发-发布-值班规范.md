@@ -594,6 +594,8 @@ flowchart LR
 ### 9.1 仓库信息约定
 
 - 国际站 ACR，Region：**菲律宾（马尼拉）`ap-southeast-6`**。
+- 现状实例：`acr-newapi-mnl`（`cri-avfqy9xkqi5bj8ee`）；公网域名 `acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com`，VPC 内网 `acr-newapi-mnl-registry-vpc.ap-southeast-6.cr.aliyuncs.com`。
+- 命名空间四套：`newapi-prod` / `newapi-pre` / `newapi-test` / `newapi-dev`（均 PRIVATE；`AutoCreateRepo=false` → 首次推送前须显式建仓，或用 `push.sh --create-repo`）。
 - 镜像公网地址：`<instance>-registry.ap-southeast-6.cr.aliyuncs.com/<namespace>/<app>`
 - VPC 内网地址（集群拉取必须用）：`<instance>-registry-vpc.ap-southeast-6.cr.aliyuncs.com/<namespace>/<app>`
 - 若为 ACR 企业版：为该 VPC 配置访问入口（VPC Endpoint），命名空间开启**专属**+**不可见**，生产 namespace 禁止匿名拉取。
@@ -612,6 +614,33 @@ flowchart LR
 - 基础镜像漏洞由 Dependabot/Renovate 自动提 PR，每周集中处理。
 - ACR 保留策略：tag 保留最近 30 个 + 全部 release tag；**prod 正在运行的 digest 不可删**（发布前核对）。
 - 每镜像生成 CycloneDX SBOM，随 GitHub Release 附件留存。
+
+### 9.4 本地一键构建与推送（`push.sh`）
+
+仓库根目录 `push.sh` 覆盖「登录 → 构建 → 打标 → 推送 → 汇总」全流程，用于**本地发版/调试**（CI 仍走 `release.yml`）。
+
+```bash
+bash push.sh -n prod -t v1.2.3                  # 构建并推送生产
+bash push.sh -n test -t 20260927 --extra-tags latest
+bash push.sh -n dev --no-build                  # 只推本地已有镜像
+bash push.sh -n pre --build-only                # 只构建不推送
+bash push.sh -n prod -t v1.2.3 --dry-run        # 只打印命令
+```
+
+- 命名空间简写：`prod` → `newapi-prod` · `pre` → `newapi-pre` · `test` → `newapi-test` · `dev` → `newapi-dev`。
+- 默认：registry `acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com`、仓库 `newapi-master`、本地镜像 `new-api:local`、tag `<yyyymmdd>-<git短SHA>`。
+- 认证：`--password` > `ACR_PASSWORD` 环境变量 > 交互式隐藏输入；用户名默认 `yanxuewei@5108890064395960`（阿里云账号全名）。
+- 预检（走 `aliyun` CLI）：确认命名空间下仓库存在、tag 是否占用；**tag 已存在且该仓库开启「tag 不可变」时直接中止**（避免必失败的推送）。仓库不存在时加 `--create-repo` 自动创建（prod 自动带 `--TagImmutability true`）。
+- 计时：逐阶段耗时 + `TOTAL` 汇总；日志 `.deploy/logs/push_<ns>_<tag>_<时间戳>.log`（`.gitignore` 已忽略）。
+- 纪律：**`latest` 不上 prod**（与 §7.2 一致）；本地推送属应急/调试通道，正式发布以 `release.yml` + ops 仓库 PR 为准。
+
+**构建环境前置（本机 macOS，2026-09-27 踩坑后固化）**
+
+- **Docker Desktop 虚拟盘上限须 ≥ 32 GiB**。本机原为 16 GiB，而本项目构建峰值 4–8 GiB（bun 前端 + Go 编译中间层）→ 写 BuildKit ingest 时耗尽，报 `ResourceExhausted: … no space left on device`。当前已调至 **64 GiB**（`~/Library/Group Containers/group.com.docker/settings-store.json` 的 `DiskSizeMiB`，改前先 `docker desktop stop`，改后 `docker desktop start`）。
+- `push.sh` 在 build 阶段**前置磁盘水位检查**：默认低于 4 GiB 告警并打印修复指引、低于 2 GiB 直接阻断；`--prune` 构建前清 BuildKit 缓存、`--min-disk <GiB>` 改阈值、`--skip-disk-check` 跳过。
+- **npm 源默认走国内镜像**（`--npm-registry cn` = `registry.npmmirror.com`）。实测：官方源在容器内 150 s 装不完且频繁 integrity 失败（大包 `lucide-react` / `@lobehub/icons` 截断），国内源 78 s 装完 466 包。切回官方：`--npm-registry official`；也可直接给 URL。**CI 不受影响**（Dockerfile 默认仍用官方源）。
+- `Dockerfile` 使用 BuildKit cache mount：bun 包缓存（`/root/.bun/install/cache`）与 Go 模块/编译缓存（`/go/pkg/mod`、`/root/.cache/go-build`）落在 build cache 而非镜像层 → 峰值磁盘下降且重复构建更快，可用 `docker buildx prune` 回收。
+- **Docker 镜像加速器**在 `~/.docker/daemon.json` 的 `registry-mirrors`（**不在** settings-store.json）：USTC 与网易 163 两家**均已停服**（实测连接立即失败），当前配置为 `docker.m.daocloud.io` + `docker.1ms.run` + `docker.1panel.live`；`defaultKeepStorage` 由 10GB 降到 3GB，防止构建缓存吃满虚拟盘。
 
 ---
 
@@ -805,10 +834,12 @@ git merge upstream/main --no-ff -m "chore(sync): merge upstream @ v1.2.0"
 git switch -c hotfix/1.2.4 v1.2.3
 # 修复后 PR -> main, 2 approve, tag v1.2.4, 再合回 develop
 
-# ACR 登录（本地调试用，CI 用 Secrets）
-docker login yxw-registry.ap-southeast-6.cr.aliyuncs.com -u <acr-user>
-docker build -t yxw-registry.ap-southeast-6.cr.aliyuncs.com/<ns>/<app>:dev .
-docker push yxw-registry.ap-southeast-6.cr.aliyuncs.com/<ns>/<app>:dev
+# ACR 登录与推送（本地调试用，CI 用 Secrets）
+bash push.sh -n dev -t dev-$(git rev-parse --short HEAD)   # 推荐：一键 login+build+push
+# 手工等价命令：
+docker login acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com -u yanxuewei@5108890064395960
+docker build -t acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com/newapi-dev/newapi-master:dev .
+docker push acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com/newapi-dev/newapi-master:dev
 ```
 
 ---
