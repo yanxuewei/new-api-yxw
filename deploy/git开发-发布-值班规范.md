@@ -628,32 +628,46 @@ bash push.sh -n prod -t v1.2.3 --dry-run        # 只打印命令
 ```
 
 - 命名空间简写：`prod` → `newapi-prod` · `pre` → `newapi-pre` · `test` → `newapi-test` · `dev` → `newapi-dev`。
-- 默认：registry `acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com`、仓库 `newapi-master`、本地镜像 `new-api:local`、tag `<yyyymmdd>-<git短SHA>`。
+- 默认：registry `acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com`、仓库 `newapi-master`、本地镜像 `new-api:local`、tag `<yyyymmdd>-<git短SHA>`、**Dockerfile 自动选择**（见下）。
 - 认证：`--password` > `ACR_PASSWORD` 环境变量 > 交互式隐藏输入；用户名默认 `yanxuewei@5108890064395960`（阿里云账号全名）。
 - 预检（走 `aliyun` CLI）：确认命名空间下仓库存在、tag 是否占用；**tag 已存在且该仓库开启「tag 不可变」时直接中止**（避免必失败的推送）。仓库不存在时加 `--create-repo` 自动创建（prod 自动带 `--TagImmutability true`）。
 - 计时：逐阶段耗时 + `TOTAL` 汇总；日志 `deploy/logs/push_<ns>_<tag>_<时间戳>.log`（`.gitignore` 的 `logs` 规则已忽略）。
 - 纪律：**`latest` 不上 prod**（与 §7.2 一致）；本地推送属应急/调试通道，正式发布以 `release.yml` + ops 仓库 PR 为准。
 
-**macOS 本地构建：不改上游 `Dockerfile` 的三种方式**
+**macOS 本地构建：`Dockerfile.mac`（`push.sh` 默认自动选用）**
 
-上游 `Dockerfile` 保持原版（便于跟上游同步）；本地构建增强放在独立的 `Dockerfile.mac`。
+上游 `Dockerfile` 保持原版（便于跟上游同步）；本地构建增强放在独立的 `Dockerfile.mac`。`push.sh` 在**未显式 `-f`** 时，若仓库存在 `Dockerfile.mac` 就自动选它（banner 标注「自动选择」）；`--upstream`（等价 `-f Dockerfile`）强制用上游原版。CI 显式 `-f Dockerfile`，不受影响。
 
-| 方式 | 命令 | `bun install` 1202 包实测 | 需新增文件 |
+`Dockerfile.mac` 与上游的差异仅三处，**产物功能完全等价**：① BuildKit cache mount（bun / Go 缓存不进镜像层）；② `ARG NPM_REGISTRY` 可切 npm 源；③ `ARG GOPROXY` 可切 Go 模块源（默认 `https://goproxy.cn,direct`）。
+
+**两个国内网络必踩的源**（本机实测，2026-09-27）：
+
+| 依赖 | 默认源 | 国内实测 | 修复 |
 | --- | --- | --- | --- |
-| **① 本地增强 Dockerfile（推荐）** | `bash push.sh -n test -t <tag> -f Dockerfile.mac` | **101 s** | 仅 `Dockerfile.mac`（已入库） |
-| ② 上游原版 + 构建期代理 | `bash push.sh -n test -t <tag> --proxy auto` | 889 s | 无 |
-| ③ 上游原版 + 官方源直连 | `bash push.sh -n test -t <tag>` | 1041 s | 无 |
+| npm（`bun install` 1202 包） | `registry.npmjs.org` | 1041 s（能完成但极慢） | `--npm-registry cn` → npmmirror **101 s** |
+| Go（`go mod download`） | `proxy.golang.org` | **http=000 超时 → `RUN go mod download` 报 EOF，构建硬失败** | `--go-proxy cn` → goproxy.cn **200 / 0.6 s** |
 
-- **`Dockerfile.mac`**：声明 `ARG NPM_REGISTRY` + BuildKit cache mount。`push.sh` 默认 `--npm-registry cn`，检测到该 ARG 后自动注入 `--build-arg NPM_REGISTRY=https://registry.npmmirror.com`。
-- **`--proxy <url|auto>`**：`auto` = `http://host.docker.internal:7890`（本机 Clash）。走 Docker **预定义 ARG**（`HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` 及全小写），**Dockerfile 无需声明**即注入；配合 `--no-proxy <list>` 调 NO_PROXY。实测容器内 `host.docker.internal:7890` 可达。
-- ⚠️ **自定义 build-arg 必须声明才生效**：`NPM_REGISTRY` 这类变量若 Dockerfile 里没有 `ARG NPM_REGISTRY`，BuildKit 只打 `not consumed` 警告、**不会注入**。`push.sh` 已自动检测当前 `-f` 指定的 Dockerfile，未声明时跳过注入并在 banner 显示「npm 源: Dockerfile 默认（--npm-registry 未生效…）」。
+⚠️ Go 那条是**硬失败**而非「慢」：错误形态为 `Get "https://storage.googleapis.com/proxy-golang-org-prod/…": EOF`，极易被误读成构建逻辑问题。备选源 `--go-proxy aliyun` = `https://mirrors.aliyun.com/goproxy/,direct`。
+
+**三种方式对照**（同机同 lockfile）：
+
+| 方式 | 命令 | `bun install` | `go mod download` | 需新增文件 |
+| --- | --- | --- | --- | --- |
+| **① `Dockerfile.mac`（默认）** | `bash push.sh -n test -t <tag>` | **101 s** | goproxy.cn（秒级） | 仅 `Dockerfile.mac`（已入库） |
+| ② 上游原版 + 构建期代理 | `bash push.sh -n test -t <tag> --upstream --proxy auto` | 889 s | 走 Clash（实测可通） | 无 |
+| ③ 上游原版直连 | `bash push.sh -n test -t <tag> --upstream` | 1041 s | **失败（EOF）** | 无 |
+
+- **`--proxy <url|auto>`**：`auto` = `http://host.docker.internal:7890`（本机 Clash）。走 Docker **预定义 ARG**（`HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` 及全小写），**Dockerfile 无需声明**即注入；配合 `--no-proxy <list>` 调 NO_PROXY。实测容器内 `host.docker.internal:7890` 可达，经它访问 `proxy.golang.org` 返回 200 / 0.68 s。这是**一个文件都不改**的唯一通用换源手段。
+- ⚠️ **自定义 build-arg 必须声明才生效**（`--proxy` 用的预定义变量除外）：`NPM_REGISTRY` / `GOPROXY` 这类变量若 Dockerfile 里没有对应 `ARG`，BuildKit 只打 `not consumed` 警告、**不会注入**。`push.sh` 已自动检测当前 `-f` 指定的 Dockerfile，未声明时跳过注入并在 banner 显示「…未生效：Dockerfile 未声明 ARG …」。
 - 三种方式的**磁盘前提相同**（见下），与是否改 Dockerfile 无关。
 
 **构建环境前置（本机 macOS，2026-09-27 踩坑后固化）**
 
 - **Docker Desktop 虚拟盘上限须 ≥ 32 GiB**。本机原为 16 GiB，而本项目构建峰值 4–8 GiB（bun 前端 + Go 编译中间层）→ 写 BuildKit ingest 时耗尽，报 `ResourceExhausted: … no space left on device`。当前已调至 **64 GiB**（`~/Library/Group Containers/group.com.docker/settings-store.json` 的 `DiskSizeMiB`，改前先 `docker desktop stop`，改后 `docker desktop start`）。
 - `push.sh` 在 build 阶段**前置磁盘水位检查**：默认低于 4 GiB 告警并打印修复指引、低于 2 GiB 直接阻断；`--prune` 构建前清 BuildKit 缓存、`--min-disk <GiB>` 改阈值、`--skip-disk-check` 跳过。
-- **npm 源**（`--npm-registry cn|official|<url>`，默认 `cn` = `registry.npmmirror.com`）。同机同 lockfile、1202 包实测：npmmirror **101 s** / 官方源直连 **1041 s** / 官方源走 Clash 代理 **889 s**。切回官方：`--npm-registry official`。**CI 不受影响**（走上游 `Dockerfile`，默认官方源）。
+- **npm 源**（`--npm-registry cn|official|<url>`，默认 `cn` = `registry.npmmirror.com`）。同机同 lockfile、1202 包实测：npmmirror **101 s** / 官方源直连 **1041 s** / 官方源走 Clash 代理 **889 s**。切回官方：`--npm-registry official`。
+- **Go 模块源**（`--go-proxy cn|aliyun|official|<url>`，默认 `cn` = `https://goproxy.cn,direct`）。默认 `proxy.golang.org` 在本机不可达 → `go mod download` **报 EOF 硬失败**（详见上表），这是本地构建最常见的失败原因。切回官方：`--go-proxy official`。
+- **CI 不受影响**：CI 显式 `-f Dockerfile`（上游原版，无 `ARG NPM_REGISTRY`/`ARG GOPROXY`），走各源默认值；境外 runner 无墙问题。
 - `Dockerfile.mac` 使用 BuildKit cache mount：bun 包缓存（`/root/.bun/install/cache`）与 Go 模块/编译缓存（`/go/pkg/mod`、`/root/.cache/go-build`）落在 build cache 而非镜像层 → 峰值磁盘下降且重复构建更快，可用 `docker buildx prune` 回收。**上游 `Dockerfile` 无此项**——只影响速度与峰值磁盘，不影响能否构建。
 - **Docker 镜像加速器**在 `~/.docker/daemon.json` 的 `registry-mirrors`（**不在** settings-store.json）：USTC 与网易 163 两家**均已停服**（实测连接立即失败），当前配置为 `docker.m.daocloud.io` + `docker.1ms.run` + `docker.1panel.live`；`defaultKeepStorage` 由 10GB 降到 3GB，防止构建缓存吃满虚拟盘。
 

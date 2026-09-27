@@ -32,6 +32,7 @@ TAG=""
 REPO_NAME="${ACR_REPO_NAME:-newapi-master}"
 LOCAL_IMAGE="${ACR_LOCAL_IMAGE:-new-api:local}"
 DOCKERFILE="Dockerfile"
+DOCKERFILE_EXPLICIT=0     # 是否由 -f/--dockerfile 或 --upstream 显式指定
 CONTEXT="."
 PLATFORM="linux/amd64"
 EXTRA_TAGS=""
@@ -53,6 +54,9 @@ MIN_FREE_GIB=4
 # --npm-registry official 可切回 registry.npmjs.org，或直接给具体 URL
 NPM_REGISTRY_SEL="${ACR_NPM_REGISTRY:-cn}"
 NPM_REGISTRY_SKIPPED=0
+# Go 模块源：本地默认走 goproxy.cn（官方源 proxy.golang.org 国内多数网络不可达 → go mod download EOF）
+GO_PROXY_SEL="${ACR_GO_PROXY:-cn}"
+GO_PROXY_SKIPPED=0
 # 构建期代理：auto = 本机 Clash。注入 Docker 预定义 ARG，因此**无需改 Dockerfile**
 BUILD_PROXY="${ACR_BUILD_PROXY:-}"
 NO_PROXY_LIST="${ACR_NO_PROXY:-localhost,127.0.0.1,.aliyuncs.com}"
@@ -213,7 +217,10 @@ push.sh — new-api 镜像 build/推送 ACR 一键脚本
   -h, --help              显示帮助
 
 构建
-  -f, --dockerfile <path> 默认 Dockerfile
+  -f, --dockerfile <path> 默认自动选择：仓库存在 Dockerfile.mac 时用它（本地增强版：
+                          BuildKit cache mount + 可切 npm/GOPROXY），否则用 Dockerfile。
+                          显式 -f 则以你给的为准。
+      --upstream          强制使用上游原版 Dockerfile（等价 -f Dockerfile）
   -c, --context <path>    构建上下文，默认仓库根目录
   -p, --platform <plat>   默认 linux/amd64
       --build-arg K=V     （可重复）
@@ -230,6 +237,11 @@ push.sh — new-api 镜像 build/推送 ACR 一键脚本
                           | official（registry.npmjs.org）| 任意 URL
                           注意：仅当 Dockerfile 声明了 `ARG NPM_REGISTRY` 才生效；
                           上游原版 Dockerfile 无该 ARG 时会自动跳过并提示改用 --proxy
+      --go-proxy <v>      go mod download 的模块源：cn（默认，https://goproxy.cn,direct）
+                          | aliyun（mirrors.aliyun.com/goproxy/,direct）
+                          | official（留空 = proxy.golang.org）| 任意 URL
+                          注意：仅当 Dockerfile 声明了 `ARG GOPROXY` 才生效；
+                          上游原版 Dockerfile 无该 ARG，改用 --proxy auto 走代理
 
 注册表
       --registry <host>   默认 acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com
@@ -248,7 +260,8 @@ while [[ $# -gt 0 ]]; do
     -t|--tag)         TAG="${2:-}"; shift 2 ;;
     -r|--repo)        REPO_NAME="${2:-}"; shift 2 ;;
     -i|--image)       LOCAL_IMAGE="${2:-}"; shift 2 ;;
-    -f|--dockerfile)  DOCKERFILE="${2:-}"; shift 2 ;;
+    -f|--dockerfile)  DOCKERFILE="${2:-}"; DOCKERFILE_EXPLICIT=1; shift 2 ;;
+    --upstream)       DOCKERFILE="Dockerfile"; DOCKERFILE_EXPLICIT=1; shift ;;
     -c|--context)     CONTEXT="${2:-}"; shift 2 ;;
     -p|--platform)    PLATFORM="${2:-}"; shift 2 ;;
     --extra-tags)     EXTRA_TAGS="${2:-}"; shift 2 ;;
@@ -269,6 +282,7 @@ while [[ $# -gt 0 ]]; do
     --min-disk)       MIN_FREE_GIB="${2:-4}"; shift 2 ;;
     --skip-disk-check) DISK_CHECK=0; shift ;;
     --npm-registry)   NPM_REGISTRY_SEL="${2:-}"; shift 2 ;;
+    --go-proxy)       GO_PROXY_SEL="${2:-}"; shift 2 ;;
     --proxy)          BUILD_PROXY="${2:-}"; shift 2 ;;
     --no-proxy)       NO_PROXY_LIST="${2:-}"; shift 2 ;;
     --skip-precheck)  PRE_CHECK=0; shift ;;
@@ -294,6 +308,14 @@ case "$NS_INPUT" in
 esac
 
 cd "$REPO_ROOT" || exit 1
+
+# ── 默认 Dockerfile 自动选择 ─────────────────────────────────────────────
+# 未显式 -f/--upstream 时：仓库存在 Dockerfile.mac（本地增强版：cache mount +
+# 可切 npm/GOPROXY）就用它，否则回落上游 Dockerfile。CI 用 -f Dockerfile 显式指定不受影响。
+DOCKERFILE_AUTO=0
+if [[ "$DOCKERFILE_EXPLICIT" != "1" && -f "${REPO_ROOT}/Dockerfile.mac" ]]; then
+  DOCKERFILE="Dockerfile.mac"; DOCKERFILE_AUTO=1
+fi
 
 # 默认 tag：<yyyymmdd>-<git短SHA>，非法字符归一为 '-'
 sanitize_tag() { printf '%s' "$1" | sed 's/[^A-Za-z0-9_.-]/-/g'; }
@@ -322,16 +344,28 @@ case "$NPM_REGISTRY_SEL" in
   official|npmjs|npm|none|off|"") NPM_REGISTRY_SEL="" ;;
 esac
 
+# Go 模块源归一：cn → goproxy.cn；aliyun → 阿里云；official/none → 留空走 Go 内建默认
+case "$GO_PROXY_SEL" in
+  cn|CN|china|goproxy|goproxy.cn) GO_PROXY_SEL="https://goproxy.cn,direct" ;;
+  aliyun|ali|mirrors)             GO_PROXY_SEL="https://mirrors.aliyun.com/goproxy/,direct" ;;
+  official|golang|none|off|"")    GO_PROXY_SEL="" ;;
+esac
+
 # 构建期代理归一：auto/clash/local → 本机 Clash
 case "$BUILD_PROXY" in
   auto|AUTO|clash|local) BUILD_PROXY="http://host.docker.internal:7890" ;;
 esac
 
-# Dockerfile 是否声明了 ARG NPM_REGISTRY —— 只有声明了，--build-arg 才会被消费
+# Dockerfile 是否声明了某 ARG —— 只有声明了，--build-arg 才会被 BuildKit 消费
+dockerfile_declares_arg() {  # $1=ARG 名
+  [[ -f "$DOCKERFILE" ]] || return 1
+  grep -qE "^[[:space:]]*ARG[[:space:]]+$1([[:space:]]|=|$)" "$DOCKERFILE" 2>/dev/null
+}
+
 DOCKERFILE_ARG_NPMREG=0
-if [[ -f "$DOCKERFILE" ]] && grep -qE '^[[:space:]]*ARG[[:space:]]+NPM_REGISTRY' "$DOCKERFILE" 2>/dev/null; then
-  DOCKERFILE_ARG_NPMREG=1
-fi
+dockerfile_declares_arg NPM_REGISTRY && DOCKERFILE_ARG_NPMREG=1
+DOCKERFILE_ARG_GOPROXY=0
+dockerfile_declares_arg GOPROXY && DOCKERFILE_ARG_GOPROXY=1
 
 if [[ "$DO_BUILD" == "1" ]]; then
   if [[ -n "$NPM_REGISTRY_SEL" ]]; then
@@ -341,6 +375,14 @@ if [[ "$DO_BUILD" == "1" ]]; then
       # 未声明 ARG：传了也是 BuildKit 的一条 "not consumed" 警告，直接跳过
       NPM_REGISTRY_SKIPPED=1
       NPM_REGISTRY_SEL=""
+    fi
+  fi
+  if [[ -n "$GO_PROXY_SEL" ]]; then
+    if [[ "$DOCKERFILE_ARG_GOPROXY" == "1" ]]; then
+      BUILD_ARGS="${BUILD_ARGS} --build-arg GOPROXY=${GO_PROXY_SEL}"
+    else
+      GO_PROXY_SKIPPED=1
+      GO_PROXY_SEL=""
     fi
   fi
   # 代理注入：HTTP_PROXY/HTTPS_PROXY 属 Docker 预定义 ARG，Dockerfile 不需要 ARG 声明
@@ -841,6 +883,14 @@ diagnose_build_failure() {
       vmkb="$(docker_vm_free_kb || printf '0')"
       print_disk_fix_hint "$lim" "$(kb_to_gib "$vmkb")"
       ;;
+    *"proxy.golang.org"*|*"storage.googleapis.com"*|*"go mod download"*|*"sum.golang.org"*)
+      err "根因：Go 模块下载失败 —— 走的是官方源 proxy.golang.org（承载于 storage.googleapis.com），"
+      log "   该域名国内多数网络不可达且**不报 403，而是直接 EOF/超时**，故易被误判为「构建逻辑问题」。"
+      log "   实测：proxy.golang.org 直连超时（http=000）；goproxy.cn 200 / 0.6s。"
+      log "  修复① 用声明了 ARG GOPROXY 的 Dockerfile（不加 -f 即默认 Dockerfile.mac）"
+      log "  修复② 显式切源：--go-proxy cn（goproxy.cn）| aliyun（mirrors.aliyun.com/goproxy/）"
+      log "  修复③ 一个文件都不改：--proxy auto（走本机 Clash，已实测可通官方源）"
+      ;;
     *"failed to authorize"*|*"pull access denied"*|*"manifest unknown"*|*"dial tcp"*|*"i/o timeout"*|*"no such host"*)
       warn "根因倾向：基础镜像拉取失败（网络 / 代理 / 私有仓库凭证）"
       log "  排查：手工复现 docker pull <基础镜像>; 检查 Docker Desktop → Settings → Resources → Proxies"
@@ -857,6 +907,13 @@ build_env_report() {
   if [[ "${NPM_REGISTRY_SKIPPED:-0}" == "1" ]]; then
     warn "--npm-registry 未生效：Dockerfile 未声明 ARG NPM_REGISTRY（BuildKit 不消费未声明的 build-arg）"
     log "   → 不改 Dockerfile 的替代方案：--proxy auto（走本机 Clash）"
+  fi
+  if [[ "${GO_PROXY_SKIPPED:-0}" == "1" ]]; then
+    warn "--go-proxy 未生效：Dockerfile 未声明 ARG GOPROXY（BuildKit 不消费未声明的 build-arg）"
+    log "   → 该 Dockerfile 会走 Go 内建默认源 proxy.golang.org —— 国内多数网络不可达，"
+    log "     go mod download 会以 EOF/timeout 失败。选其一："
+    log "      ① 用自带 ARG GOPROXY 的 Dockerfile：--upstream 旁边的 Dockerfile.mac（不加 -f 即默认）"
+    log "      ② 不改文件，走代理：--proxy auto（本机 Clash 已实测可通 proxy.golang.org）"
   fi
   if [[ -n "$BUILD_PROXY" ]]; then
     log "构建期代理：${BUILD_PROXY}    NO_PROXY=${NO_PROXY_LIST}"
@@ -954,13 +1011,24 @@ head_banner() {
   _out "============================================================"
   _out " new-api 镜像构建与推送 · ${NS}"
   _out " 目标: ${REMOTE_REF}"
-  _out " Dockerfile: ${DOCKERFILE}"
+  if [[ "${DOCKERFILE_AUTO:-0}" == "1" ]]; then
+    _out " Dockerfile: ${DOCKERFILE}（自动选择；--upstream 用上游原版）"
+  else
+    _out " Dockerfile: ${DOCKERFILE}"
+  fi
   if [[ -n "$NPM_REGISTRY_SEL" ]]; then
     _out " npm 源: ${NPM_REGISTRY_SEL}"
   elif [[ "${NPM_REGISTRY_SKIPPED:-0}" == "1" ]]; then
     _out " npm 源: Dockerfile 默认（--npm-registry 未生效：Dockerfile 未声明 ARG NPM_REGISTRY）"
   else
     _out " npm 源: Dockerfile 默认"
+  fi
+  if [[ -n "$GO_PROXY_SEL" ]]; then
+    _out " go 模块源: ${GO_PROXY_SEL}"
+  elif [[ "${GO_PROXY_SKIPPED:-0}" == "1" ]]; then
+    _out " go 模块源: Dockerfile 默认（--go-proxy 未生效：Dockerfile 未声明 ARG GOPROXY）"
+  else
+    _out " go 模块源: Dockerfile 默认"
   fi
   _out " 构建代理: ${BUILD_PROXY:-未启用}"
   _out " 日志: ${LOG}"

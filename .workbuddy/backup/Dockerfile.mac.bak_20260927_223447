@@ -1,15 +1,6 @@
-# 本地 macOS / 国内网络构建增强版（上游 Dockerfile 保持原样，便于同步）
-#
-# 与上游 Dockerfile 的差异仅三处，产物功能完全等价：
-#   1. bun 包缓存 / Go 模块+编译缓存改用 BuildKit cache mount → 不进镜像层，
-#      显著降低构建峰值磁盘占用，并加速重复构建（`docker buildx prune` 可回收）。
-#   2. `ARG NPM_REGISTRY`：可切换 npm 源（国内默认 npmmirror）。
-#   3. `ARG GOPROXY`：可切换 Go 模块源（默认 goproxy.cn），避免 proxy.golang.org 国内 EOF。
-#
 # 依赖 BuildKit 的 --mount=type=cache（Docker Engine 23+ / Docker Desktop 默认启用；
-# GitHub Actions 用 docker/setup-buildx-action 亦满足）。
-# 常用：bash push.sh -n test -t <tag>            （push.sh 默认自动选本文件）
-#       对齐上游：bash push.sh -n test -t <tag> --upstream
+# GitHub Actions 用 docker/setup-buildx-action 亦满足）。缓存落在 build cache 而非镜像层，
+# 可用 `docker buildx prune` 回收 → 显著降低构建峰值磁盘占用，并加速重复构建。
 
 FROM oven/bun:1.4.0@sha256:5ff609364c049b54eb0ff560ec96319729a972078ef2c755d758f0c6ef89c2d6 AS builder
 
@@ -37,13 +28,6 @@ FROM golang:1.26.1-alpine@sha256:2389ebfa5b7f43eeafbd6be0c3700cc46690ef842ad962f
 ENV GO111MODULE=on CGO_ENABLED=0 GOWORK=off
 # 模块缓存与编译缓存显式固定（golang 官方镜像默认即此两处），供下面的 cache mount 挂载
 ENV GOMODCACHE=/go/pkg/mod GOCACHE=/root/.cache/go-build
-
-# Go 模块代理：默认 proxy.golang.org（storage.googleapis.com 承载）在国内多数网络不可达，
-# 表现为 `RUN go mod download` 报 `... E0F`/timeout（EOF）。
-# 故默认走 goproxy.cn；如需官方源：--build-arg GOPROXY= （空值 = Go 内建默认）。
-# push.sh 的 --go-proxy cn|official|<url> 会覆盖此值。
-ARG GOPROXY=https://goproxy.cn,direct
-ENV GOPROXY=${GOPROXY}
 
 ARG TARGETOS
 ARG TARGETARCH
