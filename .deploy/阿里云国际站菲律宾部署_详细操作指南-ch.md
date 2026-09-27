@@ -14,12 +14,12 @@
 
 每个操作事项统一四段结构：
 
-| 段落 | 含义 |
-| --- | --- |
-| **操作步骤** | 可直接照做的控制台点击路径 + 等价 CLI/SQL 命令。控制台界面文案按国际站简体中文界面的标准术语给出 |
-| **验证方法** | 做完后跑什么命令、看什么页面、期望看到什么输出（期望值明确写出） |
-| **验证不通过的修复** | 定位顺序 + 具体修复动作 |
-| **坑与注意事项** | 每条都写「现象 → 后果 → 改进措施」三段，不写空话 |
+| 段落           | 含义                                                     |
+| ------------ | ------------------------------------------------------ |
+| **操作步骤**     | 可直接照做的控制台点击路径 + 等价 CLI/SQL 命令。控制台界面文案按国际站简体中文界面的标准术语给出 |
+| **验证方法**     | 做完后跑什么命令、看什么页面、期望看到什么输出（期望值明确写出）                       |
+| **验证不通过的修复** | 定位顺序 + 具体修复动作                                          |
+| **坑与注意事项**   | 每条都写「现象 → 后果 → 改进措施」三段，不写空话                            |
 
 **三条硬性纪律**
 
@@ -146,7 +146,7 @@
 | --- | --- | --- | --- | --- |
 | 1 | 马尼拉「云数据库 ClickHouse 社区版 24.8，2 节点」承载 `LOG_SQL_DSN` | 云数据库 ClickHouse 国际站支持地域列表**不含马尼拉**（有新加坡/东京/吉隆坡/雅加达/法兰克福/伦敦/美国 + 中国地域） | D1 任务 9 直接做不出来，日志库整条链路悬空，连带 M1 里程碑不过 | 见 §4.5 **四路决策树（图 6）**（A: 新加坡 ClickHouse + 云企业网；B: 容器服务 ACK 自建 ClickHouse；C: 降级用 PostgreSQL 独立库/分区表） |
 | 2 | ACK「Kubernetes 1.31+」 | 容器服务 Kubernetes 版 ACK 当前仅可创建 **1.34 / 1.35 / 1.36**；**1.31 已于 2025-09-30 EOL、1.33 已于 2026-05-31 EOL** | 按 1.31 写 YAML/Operator 版本会选不到；用 EOL 版本上线，安全补丁停发 | 统一 **1.35**（保守）或 1.36；一次只升一个次版本 |
-| 3 | 节点规格 `g8i.2xlarge（8C32G）` | **g8i 在马尼拉无公开可用性承诺**，马尼拉机型目录明显小于新加坡 | 节点池创建时选不到机型 / 单可用区无库存 → D2 卡住 | §5.4 先跑 `DescribeAvailableResource` 再定机型；节点池**配多机型 + 双可用区** |
+| 3 | 节点规格 `g9i.2xlarge（8C32G）`（原 `g8i.2xlarge`） | **g8i 全系未在马尼拉上架**（2026-09-25 API 实测，详见 `控制台核实四问_结论.md`） | 节点池创建时选不到机型 / 单可用区无库存 → D2 卡住 | §5.4 先跑 `DescribeAvailableResource` 再定机型；节点池**配多机型 + 双可用区** |
 | 4 | 「备地域经 RDS 公网地址 + **TLS(verify-full)** + IP 白名单读写马尼拉主库」 | RDS SSL 证书 **CN/SAN 绑定的是开启 SSL 时所选的那个连接地址**（通常是内网地址）；且经 PgBouncer 时证书由代理出具 | `verify-full` 握手失败：`server certificate for "pgm-xxx.pg.rds.aliyuncs.com" does not match host name "pgm-xxxo..."` → 备地域完全连不上主库，M4 不过 | §4.2 / §6.1（**图 9**）**证书地址必须选公网地址**；走 PgBouncer 时降级 `verify-ca` + 代理侧独立证书；给出三条可选路径 |
 | 5 | 「ALB `requestTimeout=180s`」+ SSE 长流式 | 负载均衡 ALB 监听的 `idleTimeout`/`requestTimeout` 取值范围 **[1,600] 秒**，默认 60 | 超过 600 秒的单请求 **ALB 无法承载**，无解；默认 60s 会切断长回答 | §6.3 显式设 `requestTimeout: 600` + 网关 15–20s SSE ping 保活；明确写清 600s 硬上限 |
 | 6 | 「安全组入向禁止 0.0.0.0/0，仅放行 **WAF/DCDN 回源段**」 | 国际站 Web 应用防火墙 WAF 3.0 对 **ALB 支持「云原生接入（透明集成）」且支持马尼拉**，此模式下**不产生新回源网段** | 按 CNAME 思路去配回源网段白名单 = 白做，且网段会变，漏一条就大面积 5xx | §8.3 优先 **WAF 云原生接入 ALB**；仅全站加速 DCDN 才需要 `DescribeDcdnL2Ips` 白名单 |
@@ -479,7 +479,7 @@ aliyun ram ListUsers --access-key-id <ops_AK> ...     # Expect Forbidden
 - **坑｜「全局安全」里的 MFA 开关管不住 AccessKey**。**后果**：AK 泄露即可全云接管——这是国际站最常见的账号被劫持路径。**改进**：AK 全部加**来源 IP 白名单条件**（`acs:SourceIp`），运维 AK 只允许从堡垒机/VPN 出口 IP 使用；配 §14 的 90 天 AK 轮换。
 - **坑｜给 CI 用了 `admin` 或主账号 AK**。**后果**：CI 日志泄露 = 全站沦陷。**改进**：CI 用 `cicd-push`，且优先改用 OIDC/STS 临时凭据。
 
-### 3.4 G2 / G10 · 资源配额申请（2–3 工作日，关键路径）
+### 3.4 G2 / G10 · 资源配额申请（国际站该类配额自动审批、**分钟级生效** —— 2026-09-26 实测）
 
 **操作步骤**
 
@@ -489,10 +489,12 @@ aliyun ram ListUsers --access-key-id <ops_AK> ...     # Expect Forbidden
 export REGION=ap-southeast-6
 aliyun ecs DescribeAccountAttributes --RegionId $REGION
 aliyun quotas ListProducts | grep -i -E "ecs|slb|vpc|rds|kvstore"
-aliyun quotas ListProductQuotas --ProductCode ecs --RegionId $REGION
+# 注意：ecs-spec 必须显式传地域维度；只传 --RegionId 会返回 cn-hangzhou 的假数据
+aliyun quotas ListProductQuotas --ProductCode ecs-spec \
+  --Dimensions.1.Key regionId --Dimensions.1.Value $REGION --MaxResults 100
 ```
 
-2. **关键认知修正**：ECS vCPU 配额现在是 **「按实例规格族分组的 vCPU 上限，按地域计」**，不再是「按具体机型」。所以你要申请的是 **通用型（general-purpose）族的 vCPU 配额**。
+2. **关键认知修正**：ECS vCPU 配额现在是 **「按实例规格族分组的 vCPU 上限，按地域计」**，不再是「按具体机型」。所以你要申请的是 **`ecs-spec` 产品的 `q_ecs_enterprise_postpay_c`** —— 配额中心里**没有** general-purpose 族，该项按「按量付费企业级计算实例（g/c/r/u/hf/sn）」分组；`g9i` 属 g 系列，就是这一条。
 3. **配额中心（Quota Center）**（`quotas.console.alibabacloud.com`）→ **产品配额** → 选择产品 → **选择地域** → 找到配额行 → **「操作」→「申请」**：
    - 批次 1（`ap-southeast-6`）：ECS vCPU ≥ 64、ALB × 2、弹性公网 IP ≥ 10、NAT 网关 × 1、云数据库 RDS（PostgreSQL 高可用版 16C64G）、Tair 4GB、OSS × 1、VPC/交换机
    - 批次 2（`ap-southeast-1`，即 **G10**）：ECS vCPU ≥ **96**、ALB、弹性公网 IP ≥ 6、ACK Pro
@@ -500,27 +502,41 @@ aliyun quotas ListProductQuotas --ProductCode ecs --RegionId $REGION
 
 ```bash
 aliyun quotas CreateQuotaApplication \
-  --ProductCode ecs --Version 2014-05-26 \
-  --QuotaActionCode <上一步读到的 code> \
-  --DesiredValue 96 \
-  --Reason "new-api AI gateway prod launch, standby region takeover capacity >= 1.5x peak" \
-  --DomainRegions.1.RegionId ap-southeast-1
+  --ProductCode ecs-spec \
+  --QuotaActionCode q_ecs_enterprise_postpay_c \
+  --DesireValue 96 \
+  --Reason "standby takeover capacity >= 1.5x peak: 16 pods x 1.5 = 24 pods x 4 vCPU = 96" \
+  --Dimensions.1.Key regionId --Dimensions.1.Value ap-southeast-1 \
+  --NoticeType 3 --QuotaCategory CommonQuota
 
-aliyun quotas ListQuotaApplications            # 轮询审批状态
+aliyun quotas ListQuotaApplications --ProductCode ecs-spec   # 轮询审批状态
 ```
 
-**验证方法**：`ListQuotaApplications` 返回 `Status: Approved`；再跑一次步骤 1 的 `ListProductQuotas`，`TotalAllowedQuota` ≥ 申请值。**把工单号写进 §12 里程碑证据。**
+
+
+> **参数名三处坑**：是 `--DesireValue`（**无 d**），**没有** `--Version`，地域必须用
+> `--Dimensions.1.Key regionId --Dimensions.1.Value <region>`（不是 `--DomainRegions`）。
+
+**验证方法**：`ListQuotaApplications` 返回 `Status: Agree`（中间态 `Process`；**不是 `Approved`**，且地域字段是 `Dimension` 单数，不是 `Dimensions`）；再跑一次步骤 1 的 `ListProductQuotas`，`TotalQuota` ≥ 申请值。**把工单号写进 §12 里程碑证据。**
 
 **验证不通过的修复**
 
 - 被驳回（`Declined`）→ 看 `RejectReason`，通常是「未说明业务场景 / 峰值依据不足」。**改进**：申请理由里给出**可核算的容量式**：`主站 4→16 副本 × 8 vCPU = 128，节点池 min4/max8 ⇒ 64 vCPU；备站 2→24 副本 ⇒ 96 vCPU`，比单写"要 96 核"通过率高得多。
-- 长时间 `Approving` → **另提交工单催办**（配额审批与工单是两套流程，只等一个会漏）。
+- 长时间 `Processing`（`Approving`）→ **另提交工单催办**（配额审批与工单是两套流程，只等一个会漏）。
 
 **坑与注意事项**
 
 - **坑｜默认配额不公开**。阿里云国际站帮助中心中文文档（alibabacloud.com/help，可切换简体中文界面语言）没有给新账号默认 vCPU 数。**后果**：按国内站经验估算 → 创建节点池时报 `QuotaExceeded` 且发生在 D2，返工 2–3 天。**改进**：§3.4 步骤 1 的实时读取是**强制前置动作**，T-5 完成并把数字记进方案表。
-- **坑｜新加坡 96 vCPU 未批 → SLA 直接不成立**。备 region 接管上限 = 主站峰值 16 × 1.5 = **24 副本 = 192 vCPU Pod 需求**（按 request 2 vCPU 时是 48 vCPU，按 limit 4 vCPU 时是 96 vCPU）。**后果**：M4 验收项「接管容量 ≥ 峰值 ×1.5」不可能达成。**改进**：未批复时按方案裁剪预案 #5 走，但**必须书面记录 SLA 降级**；同时确认「冷备也不省配额」（方案 R49 已强调）。
+- **坑｜新加坡 96 vCPU 未批 → SLA 直接不成立**。备 region 接管上限 = 主站峰值 16 副本 × 1.5 = **24 副本**；按 **limit 4 vCPU** 口径 = **96 vCPU**（按 request 2 vCPU 口径是 48 vCPU，但配额须按 limit 预留）⇔ 节点池 **12 × 8 vCPU = 96**。**后果**：M4 验收项「接管容量 ≥ 峰值 ×1.5」不可能达成。**改进**：未批复时按方案裁剪预案 #5 走，但**必须书面记录 SLA 降级**；同时确认「冷备也不省配额」（方案 R49 已强调）。
 - **坑｜配额是按 region 独立的**。马尼拉批了 ≠ 新加坡有。**改进**：两批工单分开提，**先马尼拉后新加坡但同日发起**。
+
+> **2026-09-26 实测闭环**：批次 1/2 的 ECS vCPU 申请（马尼拉 **50 → 64**、新加坡 **50 → 96**）均 **`Agree`**，约 **2 分钟**生效；其余 7 类资源现值已 ≥ 需求、**无需申请**。工单号与原始证据见 `.deploy/资源配额申请_执行报告.md`。
+
+> **2026-09-26 实测闭环**：批次 1/2 的 ECS vCPU 申请（马尼拉 **50 → 64**、新加坡 **50 → 96**）均 **`Agree`**，约 **2 分钟**生效；其余 7 类资源现值已 ≥ 需求、**无需申请**。工单号与原始证据见 `.deploy/资源配额申请_执行报告.md`。
+
+> **2026-09-26 实测闭环**：批次 1/2 的 ECS vCPU 申请（马尼拉 **50 → 64**、新加坡 **50 → 96**）均 **`Agree`**，约 **2 分钟**生效；其余 7 类资源现值已 ≥ 需求、**无需申请**。工单号与原始证据见 `.deploy/资源配额申请_执行报告.md`。
+
+> **2026-09-26 实测闭环**：批次 1/2 的 ECS vCPU 申请（马尼拉 **50 → 64**、新加坡 **50 → 96**）均 **`Agree`**，约 **2 分钟**生效；其余 7 类资源现值已 ≥ 需求、**无需申请**。工单号与原始证据见 `.deploy/资源配额申请_执行报告.md`。
 
 ### 3.5 G7 · 逐个开通云产品（当日）
 
@@ -1213,7 +1229,7 @@ aliyun ecs DescribeAvailableResource --RegionId ap-southeast-6 --DestinationReso
  | jq -r '.AvailableZones.AvailableZone[]|.AvailableResources.AvailableResource[]|.SupportedResources.SupportedResource[]|select(.Status=="Available")|.Value' \
  | sort -u > /tmp/mnl_types.txt
 
-for t in ecs.g8i.2xlarge ecs.g8a.2xlarge ecs.g7.2xlarge ecs.g6.2xlarge ecs.g8y.2xlarge ecs.c8i.2xlarge; do
+for t in ecs.g9i.2xlarge ecs.g8ine.2xlarge ecs.g9ae.2xlarge ecs.u2i.2xlarge ecs.g8i.2xlarge ecs.g8a.2xlarge; do
   grep -q "$t" /tmp/mnl_types.txt && echo "OK   $t" || echo "MISS $t"; done
 # 对新加坡同样跑一遍（目录通常更大，但 96 vCPU 配额是另一码事，见 §3.4）
 ```
@@ -1224,7 +1240,7 @@ for t in ecs.g8i.2xlarge ecs.g8a.2xlarge ecs.g7.2xlarge ecs.g6.2xlarge ecs.g8y.2
 | 项 | 值 |
 | --- | --- |
 | 名称 | `np-mnl-app` |
-| 实例规格 | **多机型**：`g8i.2xlarge` 可用则首位，否则 `g7.2xlarge` / `g8a.2xlarge` / `g6.2xlarge`（**至少 2–3 个**） |
+| 实例规格 | **多机型**：`g9i.2xlarge` 首位 + `g8ine.2xlarge` / `g9ae.2xlarge`（**至少 2–3 个**；`g8i.2xlarge` 已实测未上架，勿再列入） |
 | 系统盘 | ESSD 云盘 **PL1** 100 GiB |
 | 数据盘 | ESSD 云盘 300 GiB（**挂给容器运行时**，见坑 3） |
 | 镜像 | **Alibaba Cloud Linux 3 容器优化版（container-optimized）**（或 ContainerOS） |
@@ -1274,7 +1290,7 @@ kubectl run chk --privileged --rm -it --image=busybox --restart=Never -- sh -c '
 
 **坑与注意事项**
 
-- **坑 1｜把 `g8i.2xlarge` 当既定事实**（方案 R28/R15 全表都基于它，但马尼拉无公开可用性承诺）。**后果**：D4 现场改机型 → **单实例容量基线（任务 43）与压测结论（任务 33/44）全部作废要重跑**。**改进**：机型验证是 **D2 强制动作**，结果回填方案；所有文档用 `${ECS_INSTANCE_TYPE}` 变量。
+- **坑 1｜把 `g8i.2xlarge` 当既定事实**（方案 R28/R15 全表都基于它；**2026-09-25 实测已确认 g8i 全系未在马尼拉上架** —— 不是「承诺不足」，是「根本没上架」）。**后果**：D4 现场改机型 → **单实例容量基线（任务 43）与压测结论（任务 33/44）全部作废要重跑**。**改进**：机型验证是 **D2 强制动作**，结果回填方案；所有文档用 `${ECS_INSTANCE_TYPE}` 变量。
 - **坑 2｜ESSD PL 与容量耦合**：PL1 ≥20 GiB、**PL2 ≥461 GiB**、PL3 ≥1261 GiB。**后果**：300G 盘上 PL2 会被要求提到 461G，成本模型变。**改进**：300G 用 PL1；要 PL2 就重算 §9.6 成本表。
 - **坑 3｜数据盘没给 containerd 用**（镜像 + 容器可写层写在 100G 系统盘）。**后果**：拉十几个大镜像 + 日志后**系统盘满 → 节点 `disk-pressure` → Pod 被驱逐 → 雪崩**。AI 网关镜像层大，这是高发事故。**改进**：数据盘格式化后挂 `/var/lib/containerd`（脚本里先 `systemctl stop containerd` 再 `mv`），或使用节点池"数据盘用作容器运行时目录"选项（新版本 ACK 提供）。
 - **坑 4｜单可用区建池**。**后果**：可用区故障时副本全灭，方案 R15「单 AZ 故障仍有 2 副本」不成立。**改进**：池覆盖双可用区 + §7.3 拓扑打散。
@@ -1952,7 +1968,7 @@ aliyun cs CreateCluster --header "Content-Type=application/json" --body "$(cat c
 ```bash
 cat <<'EOF' > nodepool-sg.json
 {"nodepool_info":{"name":"np-sg-ph-standby"},
- "scaling_group":{"instance_types":["ecs.g8i.2xlarge","ecs.g8a.2xlarge","ecs.g7.2xlarge"],
+ "scaling_group":{"instance_types":["ecs.g9i.2xlarge","ecs.g8ine.2xlarge","ecs.g9ae.2xlarge"],
    "vswitch_ids":["${VSW_SG_APP_A}","${VSW_SG_APP_B}"],"system_disk_category":"cloud_essd","system_disk_size":100,
    "data_disks":[{"category":"cloud_essd","size":300}],"desired_size":2,"min_size":2,"max_size":12,
    "instance_charge_type":"PostPaid","internet_max_bandwidth_out":0,
@@ -2121,10 +2137,10 @@ aliyun ecs DescribeAvailableResource --RegionId ap-southeast-6 --DestinationReso
   --InstanceChargeType PostPaid --IoOptimized optimized --NetworkCategory vpc --ResourceType instance \
   | jq -r '.AvailableZones.AvailableZone[] | .ZoneId as $z | .AvailableResources.AvailableResource[] \
            | .SupportedResources.SupportedResource[] | select(.Status=="Available") | [$z,.Value] | @tsv' \
-  | grep -E "g8i|g8a|g7|c8i" | sort
+  | grep -E "g9i|g8ine|g9ae|u2i|c9i" | sort
 ```
 
-从输出里挑 ≥3 个可用机型，写进节点池 `instance_types`（顺序即优先级）。**若 `g8i.2xlarge` 不在列表里，不要坚持改配置单**，直接换机型并把 §2.1 request/limit 按实际 vCPU 重算。
+从输出里挑 ≥3 个可用机型，写进节点池 `instance_types`（顺序即优先级）。**已实测 `g8i.2xlarge` 不在列表里（g8i 全系未上架）**，不要坚持改配置单，直接换机型并把 §2.1 request/limit 按实际 vCPU 重算。首选 `g9i.2xlarge`（8C32G，与 g8i.2xlarge 同核数同内存比）。
 
 2. 创建节点池（容器服务管理控制台 → 左侧菜单「集群」→「节点池」→「创建节点池」；body 结构同 §6.4 Step 2，差异：`desired_size:4`、`min_size:4`、`max_size:8`、`site=ph-mnl`、`instance_types` 用第 1 步结果）。
 
@@ -2306,7 +2322,7 @@ CREATE DATABASE newapi_perf    TEMPLATE newapi_owner_dev OWNER newapi_perf_app;
 | 实例 | Pod 内 emptyDir | 复用 RDS MySQL（临时）或 ACK 内 `bitnami/mysql` | 主站 RDS `newapi_perf` | 见 §4.5 决策树 |
 | 用例 | 安装/升级 | 全回归 | 全回归 + 压测 | 写日志 + TTL + 降级 |
 
-4. perf 环境用 2×`g8i.xlarge` 独立节点池（`taint: dedicated=perf:NoSchedule`），压测流量不污染 prod。
+4. perf 环境用 2×`g9i.xlarge` 独立节点池（`taint: dedicated=perf:NoSchedule`），压测流量不污染 prod。
 
 #### 验证方法
 
@@ -2714,7 +2730,7 @@ sequenceDiagram
 
 1. GTM（国际站**标准版（Standard）/ 旗舰版（Ultimate）**两档，P1-19）实例 `gtm-newapi-ph`。
 2. **访问池**：主池 `pool-mnl` = 马尼拉 ALB 的 DNS 名称；备池 `pool-sg` **暂不加入**（备 region 未通过 M4 前不得进池）。
-3. 访问策略：就近延迟（用户 → 主池），健康探测 `GET /api/status`，间隔 15s，超时 5s，连续 3 次失败判定不可用，切换 TTL 设 **60s**（`Ttl=60`，越小切换越快但 DNS 查询压力越大）。
+3. 访问策略：**池间语义 = 主备 + 自动切换，不是多主池按延迟分摊** —— 主地址池集合 = `pool-mnl`；备地址池集合 = `pool-sg`（D8 前留空，D8 起**常驻但权重 0**，由"自动切换"或人工切池接管）。**`pool-sg` 绝不能填入主地址池集合**，否则 GTM 会按延迟/权重把菲律宾用户分摊到新加坡（RTT 30–45 ms，比马尼拉 5–15 ms 慢 2–3 倍）。**可用 IP 最小数量阈值 = 1**：马尼拉 ALB 多 AZ 只有 2 个 IP，阈值设 2 会让单 AZ 抖动直接把主池整池判不可用 → 误切跨区。健康探测 `GET /api/status`，间隔 15s，超时 5s，连续 3 次失败判定不可用，切换 TTL 设 **60s**（`Ttl=60`，越小切换越快但 DNS 查询压力越大）。
 4. 业务域名 `api.likha.com` **CNAME 到 GTM 接入域名**。
 
 #### 验证方法
@@ -3172,8 +3188,8 @@ aliyun cas DescribeUserCertificateList --ShowSize 50 | jq -r '.CertificateList[]
 
 | 资源 | 规格 | 数量 | 单价 | 月成本 | 弹性敏感度 |
 | --- | --- | --- | --- | --- | --- |
-| ECS 马尼拉 | g8i.2xlarge | 4–8 | 【核实】 | | 高（HPA 直接放大） |
-| ECS 新加坡 | g8i.2xlarge | 2–12 | | | **极高**（接管时 6×） |
+| ECS 马尼拉 | g9i.2xlarge（g8i 全系未上架，实测） | 4–8 | ✅ 已核实 | 已批 64 vCPU | 高（HPA 直接放大） |
+| ECS 新加坡 | g9i.2xlarge（机型以 D2 实测为准） | 2–12 | 已批 96 vCPU | | **极高**（接管时 6×） |
 | RDS PostgreSQL | 16C64G 高可用系列 | 1 | | | 低 |
 | Tair | 4GB 主备 | 2 | | | 低 |
 | ClickHouse | 见 §4.5 选定方案 | 1 | | | 中（跨区流量另计） |

@@ -4,14 +4,14 @@
 
 ## 1. 证书真源与就绪状态（D1 收口）
 
-| 项 | 值 / 状态 |
-| --- | --- |
-| 证书 | `*.likha.com` 通配符（DigiCert/GlobalSign/Rapid 付费，国际站无免费 DV，P0-7） |
-| SAN 必须覆盖 | `api.likha.com`, `ops.likha.com`, `*.likha.com`（裸域另加 SAN 或 301 → api） |
-| CAS CertId | `${CERT_ID}`（D6 回填） |
-| 私钥位置 | 仅 CAS/KMS（`new-api/prod/tls-wildcard`），**禁止落 Git/ConfigMap/本地磁盘**；导出仅限轮换窗口并即时销毁 |
-| 有效期 | 2026-02-25 起最长约 199/200 天，1 年订单拆两张 ~6 个月 → **必须开托管自动续期 + 自动部署** |
-| 到期告警 | notAfter < 今 + 30 天 → 告警到 §10.8 值班通道；每里程碑人工复核一次 |
+| 项          | 值 / 状态                                                                          |
+| ---------- | ------------------------------------------------------------------------------- |
+| 证书         | `*.likha.com` 通配符（DigiCert/GlobalSign/Rapid 付费，国际站无免费 DV，P0-7）                  |
+| SAN 必须覆盖   | `api.likha.com`, `ops.likha.com`, `*.likha.com`（裸域另加 SAN 或 301 → api）           |
+| CAS CertId | `${CERT_ID}`（D6 回填）                                                             |
+| 私钥位置       | 仅 CAS/KMS（`new-api/prod/tls-wildcard`），**禁止落 Git/ConfigMap/本地磁盘**；导出仅限轮换窗口并即时销毁 |
+| 有效期        | 2026-02-25 起最长约 199/200 天，1 年订单拆两张 ~6 个月 → **必须开托管自动续期 + 自动部署**                 |
+| 到期告警       | notAfter < 今 + 30 天 → 告警到 §10.8 值班通道；每里程碑人工复核一次                                 |
 
 ## 2. 部署目标资源清单（D6 任务 40 逐条执行并回填资源 ID）
 

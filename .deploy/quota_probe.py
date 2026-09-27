@@ -19,7 +19,7 @@ import argparse
 import io
 import json
 import os
-import re
+import re/Users/yanxuewei/git_code/new-api-yxw/deploy/aliyun/ph/albconfig.yaml.tpl
 import subprocess
 import sys
 import time
