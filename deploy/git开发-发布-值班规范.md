@@ -631,15 +631,30 @@ bash push.sh -n prod -t v1.2.3 --dry-run        # 只打印命令
 - 默认：registry `acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com`、仓库 `newapi-master`、本地镜像 `new-api:local`、tag `<yyyymmdd>-<git短SHA>`。
 - 认证：`--password` > `ACR_PASSWORD` 环境变量 > 交互式隐藏输入；用户名默认 `yanxuewei@5108890064395960`（阿里云账号全名）。
 - 预检（走 `aliyun` CLI）：确认命名空间下仓库存在、tag 是否占用；**tag 已存在且该仓库开启「tag 不可变」时直接中止**（避免必失败的推送）。仓库不存在时加 `--create-repo` 自动创建（prod 自动带 `--TagImmutability true`）。
-- 计时：逐阶段耗时 + `TOTAL` 汇总；日志 `.deploy/logs/push_<ns>_<tag>_<时间戳>.log`（`.gitignore` 已忽略）。
+- 计时：逐阶段耗时 + `TOTAL` 汇总；日志 `deploy/logs/push_<ns>_<tag>_<时间戳>.log`（`.gitignore` 的 `logs` 规则已忽略）。
 - 纪律：**`latest` 不上 prod**（与 §7.2 一致）；本地推送属应急/调试通道，正式发布以 `release.yml` + ops 仓库 PR 为准。
+
+**macOS 本地构建：不改上游 `Dockerfile` 的三种方式**
+
+上游 `Dockerfile` 保持原版（便于跟上游同步）；本地构建增强放在独立的 `Dockerfile.mac`。
+
+| 方式 | 命令 | `bun install` 1202 包实测 | 需新增文件 |
+| --- | --- | --- | --- |
+| **① 本地增强 Dockerfile（推荐）** | `bash push.sh -n test -t <tag> -f Dockerfile.mac` | **101 s** | 仅 `Dockerfile.mac`（已入库） |
+| ② 上游原版 + 构建期代理 | `bash push.sh -n test -t <tag> --proxy auto` | 889 s | 无 |
+| ③ 上游原版 + 官方源直连 | `bash push.sh -n test -t <tag>` | 1041 s | 无 |
+
+- **`Dockerfile.mac`**：声明 `ARG NPM_REGISTRY` + BuildKit cache mount。`push.sh` 默认 `--npm-registry cn`，检测到该 ARG 后自动注入 `--build-arg NPM_REGISTRY=https://registry.npmmirror.com`。
+- **`--proxy <url|auto>`**：`auto` = `http://host.docker.internal:7890`（本机 Clash）。走 Docker **预定义 ARG**（`HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` 及全小写），**Dockerfile 无需声明**即注入；配合 `--no-proxy <list>` 调 NO_PROXY。实测容器内 `host.docker.internal:7890` 可达。
+- ⚠️ **自定义 build-arg 必须声明才生效**：`NPM_REGISTRY` 这类变量若 Dockerfile 里没有 `ARG NPM_REGISTRY`，BuildKit 只打 `not consumed` 警告、**不会注入**。`push.sh` 已自动检测当前 `-f` 指定的 Dockerfile，未声明时跳过注入并在 banner 显示「npm 源: Dockerfile 默认（--npm-registry 未生效…）」。
+- 三种方式的**磁盘前提相同**（见下），与是否改 Dockerfile 无关。
 
 **构建环境前置（本机 macOS，2026-09-27 踩坑后固化）**
 
 - **Docker Desktop 虚拟盘上限须 ≥ 32 GiB**。本机原为 16 GiB，而本项目构建峰值 4–8 GiB（bun 前端 + Go 编译中间层）→ 写 BuildKit ingest 时耗尽，报 `ResourceExhausted: … no space left on device`。当前已调至 **64 GiB**（`~/Library/Group Containers/group.com.docker/settings-store.json` 的 `DiskSizeMiB`，改前先 `docker desktop stop`，改后 `docker desktop start`）。
 - `push.sh` 在 build 阶段**前置磁盘水位检查**：默认低于 4 GiB 告警并打印修复指引、低于 2 GiB 直接阻断；`--prune` 构建前清 BuildKit 缓存、`--min-disk <GiB>` 改阈值、`--skip-disk-check` 跳过。
-- **npm 源默认走国内镜像**（`--npm-registry cn` = `registry.npmmirror.com`）。实测：官方源在容器内 150 s 装不完且频繁 integrity 失败（大包 `lucide-react` / `@lobehub/icons` 截断），国内源 78 s 装完 466 包。切回官方：`--npm-registry official`；也可直接给 URL。**CI 不受影响**（Dockerfile 默认仍用官方源）。
-- `Dockerfile` 使用 BuildKit cache mount：bun 包缓存（`/root/.bun/install/cache`）与 Go 模块/编译缓存（`/go/pkg/mod`、`/root/.cache/go-build`）落在 build cache 而非镜像层 → 峰值磁盘下降且重复构建更快，可用 `docker buildx prune` 回收。
+- **npm 源**（`--npm-registry cn|official|<url>`，默认 `cn` = `registry.npmmirror.com`）。同机同 lockfile、1202 包实测：npmmirror **101 s** / 官方源直连 **1041 s** / 官方源走 Clash 代理 **889 s**。切回官方：`--npm-registry official`。**CI 不受影响**（走上游 `Dockerfile`，默认官方源）。
+- `Dockerfile.mac` 使用 BuildKit cache mount：bun 包缓存（`/root/.bun/install/cache`）与 Go 模块/编译缓存（`/go/pkg/mod`、`/root/.cache/go-build`）落在 build cache 而非镜像层 → 峰值磁盘下降且重复构建更快，可用 `docker buildx prune` 回收。**上游 `Dockerfile` 无此项**——只影响速度与峰值磁盘，不影响能否构建。
 - **Docker 镜像加速器**在 `~/.docker/daemon.json` 的 `registry-mirrors`（**不在** settings-store.json）：USTC 与网易 163 两家**均已停服**（实测连接立即失败），当前配置为 `docker.m.daocloud.io` + `docker.1ms.run` + `docker.1panel.live`；`defaultKeepStorage` 由 10GB 降到 3GB，防止构建缓存吃满虚拟盘。
 
 ---

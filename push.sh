@@ -52,6 +52,10 @@ MIN_FREE_GIB=4
 # npm 源：本地默认走国内镜像（官方源在国内拉大包易超时/integrity 失败）；
 # --npm-registry official 可切回 registry.npmjs.org，或直接给具体 URL
 NPM_REGISTRY_SEL="${ACR_NPM_REGISTRY:-cn}"
+NPM_REGISTRY_SKIPPED=0
+# 构建期代理：auto = 本机 Clash。注入 Docker 预定义 ARG，因此**无需改 Dockerfile**
+BUILD_PROXY="${ACR_BUILD_PROXY:-}"
+NO_PROXY_LIST="${ACR_NO_PROXY:-localhost,127.0.0.1,.aliyuncs.com}"
 DRY_RUN=0
 PLAIN=0
 VERBOSE=0
@@ -60,8 +64,12 @@ INSTANCE_ID="${ACR_INSTANCE_ID:-cri-avfqy9xkqi5bj8ee}"
 
 # 脚本位于仓库根目录；REPO_ROOT = 脚本所在目录（即仓库根）
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# 日志仍集中放 .deploy/logs（.gitignore 的 `logs` 规则已覆盖）
-LOG_DIR="${REPO_ROOT}/.deploy/logs"
+# 日志集中放 deploy/logs（.gitignore 的 `logs` 规则已覆盖）；兼容旧的 .deploy/logs
+if [[ -d "${REPO_ROOT}/deploy" ]]; then
+  LOG_DIR="${REPO_ROOT}/deploy/logs"
+else
+  LOG_DIR="${REPO_ROOT}/.deploy/logs"
+fi
 ALIYUN="${HOME}/.workbuddy/binaries/aliyun-cli/aliyun"
 PY="${HOME}/.workbuddy/binaries/python/versions/3.13.12/bin/python3"
 [[ -x "$PY" ]] || PY="$(command -v python3 2>/dev/null)"
@@ -209,6 +217,10 @@ push.sh — new-api 镜像 build/推送 ACR 一键脚本
   -c, --context <path>    构建上下文，默认仓库根目录
   -p, --platform <plat>   默认 linux/amd64
       --build-arg K=V     （可重复）
+      --proxy <url|auto>  构建期 HTTP(S) 代理。注入 Docker **预定义 ARG**
+                          （HTTP_PROXY/HTTPS_PROXY/NO_PROXY…），Dockerfile 无需声明。
+                          auto = http://host.docker.internal:7890（本机 Clash）
+      --no-proxy <list>   NO_PROXY 列表，默认 localhost,127.0.0.1,.aliyuncs.com
       --no-cache          构建禁用缓存
       --pull              构建前拉取基础镜像新版本
       --prune             构建前清理 BuildKit 构建缓存（镜像/容器/卷不受影响）
@@ -216,6 +228,8 @@ push.sh — new-api 镜像 build/推送 ACR 一键脚本
       --skip-disk-check   跳过构建前的 Docker 磁盘水位检查
       --npm-registry <v>  bun install 的 npm 源：cn（默认，registry.npmmirror.com）
                           | official（registry.npmjs.org）| 任意 URL
+                          注意：仅当 Dockerfile 声明了 `ARG NPM_REGISTRY` 才生效；
+                          上游原版 Dockerfile 无该 ARG 时会自动跳过并提示改用 --proxy
 
 注册表
       --registry <host>   默认 acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com
@@ -223,7 +237,7 @@ push.sh — new-api 镜像 build/推送 ACR 一键脚本
       --password <pwd>    不推荐（会进 shell history）；建议 ACR_PASSWORD 环境变量
       --instance <id>     默认 cri-avfqy9xkqi5bj8ee
 
-日志: .deploy/logs/push_<命名空间>_<tag>_<时间戳>.log
+日志: deploy/logs/push_<命名空间>_<tag>_<时间戳>.log
 EOF
 }
 
@@ -255,6 +269,8 @@ while [[ $# -gt 0 ]]; do
     --min-disk)       MIN_FREE_GIB="${2:-4}"; shift 2 ;;
     --skip-disk-check) DISK_CHECK=0; shift ;;
     --npm-registry)   NPM_REGISTRY_SEL="${2:-}"; shift 2 ;;
+    --proxy)          BUILD_PROXY="${2:-}"; shift 2 ;;
+    --no-proxy)       NO_PROXY_LIST="${2:-}"; shift 2 ;;
     --skip-precheck)  PRE_CHECK=0; shift ;;
     --no-cache)       NO_CACHE="--no-cache"; shift ;;
     --pull)           PULL_BASE="--pull"; shift ;;
@@ -305,8 +321,37 @@ case "$NPM_REGISTRY_SEL" in
   cn|CN|china|npmmirror)          NPM_REGISTRY_SEL="https://registry.npmmirror.com" ;;
   official|npmjs|npm|none|off|"") NPM_REGISTRY_SEL="" ;;
 esac
-if [[ -n "$NPM_REGISTRY_SEL" && "$DO_BUILD" == "1" ]]; then
-  BUILD_ARGS="${BUILD_ARGS} --build-arg NPM_REGISTRY=${NPM_REGISTRY_SEL}"
+
+# 构建期代理归一：auto/clash/local → 本机 Clash
+case "$BUILD_PROXY" in
+  auto|AUTO|clash|local) BUILD_PROXY="http://host.docker.internal:7890" ;;
+esac
+
+# Dockerfile 是否声明了 ARG NPM_REGISTRY —— 只有声明了，--build-arg 才会被消费
+DOCKERFILE_ARG_NPMREG=0
+if [[ -f "$DOCKERFILE" ]] && grep -qE '^[[:space:]]*ARG[[:space:]]+NPM_REGISTRY' "$DOCKERFILE" 2>/dev/null; then
+  DOCKERFILE_ARG_NPMREG=1
+fi
+
+if [[ "$DO_BUILD" == "1" ]]; then
+  if [[ -n "$NPM_REGISTRY_SEL" ]]; then
+    if [[ "$DOCKERFILE_ARG_NPMREG" == "1" ]]; then
+      BUILD_ARGS="${BUILD_ARGS} --build-arg NPM_REGISTRY=${NPM_REGISTRY_SEL}"
+    else
+      # 未声明 ARG：传了也是 BuildKit 的一条 "not consumed" 警告，直接跳过
+      NPM_REGISTRY_SKIPPED=1
+      NPM_REGISTRY_SEL=""
+    fi
+  fi
+  # 代理注入：HTTP_PROXY/HTTPS_PROXY 属 Docker 预定义 ARG，Dockerfile 不需要 ARG 声明
+  if [[ -n "$BUILD_PROXY" ]]; then
+    for _v in HTTP_PROXY HTTPS_PROXY http_proxy https_proxy; do
+      BUILD_ARGS="${BUILD_ARGS} --build-arg ${_v}=${BUILD_PROXY}"
+    done
+    for _v in NO_PROXY no_proxy; do
+      BUILD_ARGS="${BUILD_ARGS} --build-arg ${_v}=${NO_PROXY_LIST}"
+    done
+  fi
 fi
 
 REMOTE_REPO="${REGISTRY}/${NS}/${REPO_NAME}"
@@ -449,7 +494,7 @@ acr_precheck() {
         die "创建仓库失败（AutoCreateRepo=false 时须显式建仓）"
       fi
     else
-      warn "  CI/推送前需先建仓：加 --create-repo，或用 .deploy/acr_namespace_init.sh / 控制台创建"
+      warn "  CI/推送前需先建仓：加 --create-repo，或用 deploy/acr_namespace_init.sh / 控制台创建"
     fi
     return 0
   fi
@@ -807,11 +852,33 @@ diagnose_build_failure() {
   esac
 }
 
+# 构建环境提示：--npm-registry 是否真生效 / 构建期代理是否可达
+build_env_report() {
+  if [[ "${NPM_REGISTRY_SKIPPED:-0}" == "1" ]]; then
+    warn "--npm-registry 未生效：Dockerfile 未声明 ARG NPM_REGISTRY（BuildKit 不消费未声明的 build-arg）"
+    log "   → 不改 Dockerfile 的替代方案：--proxy auto（走本机 Clash）"
+  fi
+  if [[ -n "$BUILD_PROXY" ]]; then
+    log "构建期代理：${BUILD_PROXY}    NO_PROXY=${NO_PROXY_LIST}"
+    case "$BUILD_PROXY" in
+      *host.docker.internal*)
+        if (exec 3<>/dev/tcp/127.0.0.1/7890) 2>/dev/null; then
+          log "  本机 127.0.0.1:7890 可达"
+        else
+          warn "  ⚠ 本机 127.0.0.1:7890 连不上 → 构建期代理不会生效"
+          warn "    先启动 Clash，或指定其他端口：--proxy http://host.docker.internal:<port>"
+        fi
+        ;;
+    esac
+  fi
+}
+
 # ============================ 阶段 3：构建 ============================
 do_build() {
   if [[ "$DO_BUILD" != "1" ]]; then begin_stage "build"; finish_stage "SKIP" "--no-build"; return 0; fi
   begin_stage "build"
   check_docker_disk
+  build_env_report
   local rc=0
   if [[ "${USE_BUILDX:-0}" == "1" && "$PLATFORM" != *","* ]]; then
     # 单平台：buildx --load 直接落到本地镜像列表
@@ -887,7 +954,15 @@ head_banner() {
   _out "============================================================"
   _out " new-api 镜像构建与推送 · ${NS}"
   _out " 目标: ${REMOTE_REF}"
-  _out " npm 源: ${NPM_REGISTRY_SEL:-registry.npmjs.org（默认）}"
+  _out " Dockerfile: ${DOCKERFILE}"
+  if [[ -n "$NPM_REGISTRY_SEL" ]]; then
+    _out " npm 源: ${NPM_REGISTRY_SEL}"
+  elif [[ "${NPM_REGISTRY_SKIPPED:-0}" == "1" ]]; then
+    _out " npm 源: Dockerfile 默认（--npm-registry 未生效：Dockerfile 未声明 ARG NPM_REGISTRY）"
+  else
+    _out " npm 源: Dockerfile 默认"
+  fi
+  _out " 构建代理: ${BUILD_PROXY:-未启用}"
   _out " 日志: ${LOG}"
   _out "============================================================"
 }
