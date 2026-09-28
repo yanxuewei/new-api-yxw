@@ -36,7 +36,9 @@
 - 禁用变量名（macOS 只读内建）：`GROUPS`(=20) · `UID` · `EUID` · `PPID` · `RANDOM` · `SECONDS` · `PIPESTATUS` · `BASH_*` · `LINENO`。
 - **权限探测严禁子串匹配**（`AccessDenied` 会出现在事件正文）；不能用不存在的资源 ID 探测（存在性校验先于鉴权）→ 用幂等写。
 - **NAT / EIP 口径（2026-09-28 实测）**：`CreateNatGateway` 必带 `--NatType Enhanced`（唯一合法值，漏掉报 `MissingParameter`）；`AssociateEipAddress` 的 `InstanceType` 必须是 **`Nat`**（写 `NatGateway` 会返回误导性的 `Invalid.DirectEip.BindType`）；`0.0.0.0/0 → NAT` 路由**由系统自动加**，勿手工加；VPC 系 API 分页用 `--PageSize`（不是 `--MaxResults`）；路由条目 next hop 在 `.NextHops.NextHop[0]`（非顶层）。
-- ⚠️ **ap-southeast-6 端点偶发 `context deadline exceeded`** → 任何写操作必须包**重试 ≥3 次**并校验返回是合法 JSON，否则会**静默漏建资源**（实测 EIP 绑定、SNAT 查询、首条 SNAT 创建各失败过一次）。
+- **资源 ID 前缀不代表地域**（2026-09-28 证伪一条误判）：`5ts`=马尼拉 / `t4n`=新加坡 纯属 ID 池分配巧合 → 判「残留 / 串区」必须实查 API，勿靠前缀猜（曾误判新加坡 VPC `vpc-t4nimmwvruexbnene0a3r` 为深圳残留，实为真实 SG VPC）。
+- **NAT 写入有秒级时序**：`AssociateEipAddress` 返回后**立刻** `CreateSnatEntry` 报 `OperationUnsupported.EipInBinding` / `EipNatGWCheck`（EIP 刚绑未生效），数秒后自动可成 → 写操作一律包重试。脚本：`deploy/task6_nat_eip.sh`（马尼拉）· `deploy/task12_nat_eip_sg.sh`（新加坡），二者均已实跑通过。
+- ⚠️ **VPC 端点两端皆偶发抖动**（mnl `ap-southeast-6` + sg `ap-southeast-1`）→ 任何写操作必须包**重试 ≥3 次**并校验返回是合法 JSON，否则会**静默漏建资源**（实测命中：EIP 绑定、SNAT 表查询、首条 SNAT 创建、`DescribeSnatTableEntries` 返回非 JSON）。
 - ⚠️ **脚本日志勿与 API 输出混流**：`say "+ cmd"` 若写进重定向文件会污染 JSON → jq 假失败。日志走 `exec 3>&2`，数据落文件。
 - **`aliyun` CLI 3.5.1 命令口径（2026-09-28 全量实测，写命令前先看这里）**：
   - 参数名：**只有 `--ProductCode`**（`--Product` 报 not valid）；`quotas` 分页是 `--MaxResults`（`--PageSize` 报 not valid）；`--QuotaCategory` 合法值 **`CommonQuota`**（`Common` 报 `InvalidQuotaCategory`）。
