@@ -35,6 +35,14 @@
 - 函数日志必须 `>&2`（否则 `ID=$(f)` 把日志吞进变量）；macOS grep 用 `-E 'A|B'`（不认 `\|`）。
 - 禁用变量名（macOS 只读内建）：`GROUPS`(=20) · `UID` · `EUID` · `PPID` · `RANDOM` · `SECONDS` · `PIPESTATUS` · `BASH_*` · `LINENO`。
 - **权限探测严禁子串匹配**（`AccessDenied` 会出现在事件正文）；不能用不存在的资源 ID 探测（存在性校验先于鉴权）→ 用幂等写。
+- **`aliyun` CLI 3.5.1 命令口径（2026-09-28 全量实测，写命令前先看这里）**：
+  - 参数名：**只有 `--ProductCode`**（`--Product` 报 not valid）；`quotas` 分页是 `--MaxResults`（`--PageSize` 报 not valid）；`--QuotaCategory` 合法值 **`CommonQuota`**（`Common` 报 `InvalidQuotaCategory`）。
+  - **配额按产品码分流**：vCPU / 规格类配额在 **`--ProductCode ecs-spec`**（`q_ecs_enterprise_postpay_c` = vCPU 额度，马尼拉 64 · 新加坡 96）；`--ProductCode ecs` 只回 26 条通用配额，**查不到 vCPU**。两者都必须带 `--Dimensions.1.Key regionId --Dimensions.1.Value <region>`，否则回 `cn-hangzhou` 假数据。
+  - **`Status: Agree` 只在 `ListQuotaApplications` 返回**（申请值字段是 `DesireValue`）；`ListProductQuotas` 的对象**没有 Status 字段**。用 `ListProductQuotas | select(.Status=="Agree")` 过滤 → 空集且 **exit 0**，脚本会**假通过**；巡检一律加 `jq -e` 或校验非空输出。
+  - ClickHouse 列实例是 **`DescribeDBInstances`**，返回 `{"Data":{"DBInstances":[...],"TotalCount":n}}`；**不存在 `DescribeDBClusters`**（exit 2）。
+  - jq 路径：`vpc DescribeVpcs` → `.Vpcs.Vpc[]`；`DescribeVSwitches` → `.VSwitches.VSwitch[]`；`quotas` → `.Quotas[]`（**不是** `.Quotas.Quota[]`）。跨字段必须 `[] | [a,b,c] | @tsv`，写成 `[][a,b]` 会报 `Cannot index object`。
+  - 退出码：错 API 名 / 错参数名 = **2**；jq 语法错 = **3**；`jq`（无 `-e`）遇空集 = **0**（静默）。
+  - `ram ListUsers` 是全局服务，不带 `--region` 也通；`resourcemanager` / `bssopenapi` 仍须 `--region ap-southeast-1`。
 
 ## 资源组
 `rg-ph-mnl` `rg-aek4nyivmmsb6iy`｜`rg-sg` `rg-aek4zvb3ldoiyua`｜`rg-nonprod` `rg-aek4hk3prqgqjcy`｜`rg-shared` `rg-aek3yypouljf4ry`｜默认组**禁放** new-api 资源。
