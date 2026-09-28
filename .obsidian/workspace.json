@@ -83,7 +83,8 @@
       }
     ],
     "direction": "horizontal",
-    "width": 382.5
+    "width": 382.5,
+    "collapsed": true
   },
   "right": {
     "id": "af0ce2fcda294e7a",
@@ -200,17 +201,17 @@
   },
   "active": "f6cece173f6c7071",
   "lastOpenFiles": [
-    "deploy/logs/verify_0_6_20260928-175026/c8_ram.json",
-    "deploy/logs/verify_0_6_20260928-175026/c7_q.json",
-    "deploy/logs/verify_0_6_20260928-175026/c6_app.json",
-    "deploy/logs/verify_0_6_20260928-175026/c5_ck.json",
-    "deploy/logs/verify_0_6_20260928-175026/c4_oss.json",
-    "deploy/logs/verify_0_6_20260928-175026/c3_vsw.json",
-    "deploy/logs/verify_0_6_20260928-175026/c2_vpc.json",
-    "deploy/logs/verify_0_6_20260928-175026/c1_sts.json",
-    "deploy/logs/verify_0_6_20260928-175026",
-    "deploy/logs/verify_0_6_20260928-174417/c8_ram.json",
-    "deploy/logs/verify_0_6_20260928-174417/c7_q.json",
+    "deploy/logs/verify_0_6_20260928-175425/c8_ram.json",
+    "deploy/logs/verify_0_6_20260928-175425/c7_q.json",
+    "deploy/logs/verify_0_6_20260928-175425/c6_app.json",
+    "deploy/logs/verify_0_6_20260928-175425/c5_ck.json",
+    "deploy/logs/verify_0_6_20260928-175425/c4_oss.json",
+    "deploy/logs/verify_0_6_20260928-175425/c3_vsw.json",
+    "deploy/logs/verify_0_6_20260928-175425/c2_vpc.json",
+    "deploy/logs/verify_0_6_20260928-175425/c1_sts.json",
+    "deploy/logs/verify_0_6_20260928-175425",
+    "deploy/logs/verify_0_6_20260928-175402/c8_ram.json",
+    "deploy/logs/verify_0_6_20260928-175402/c7_q.json",
     "deploy/部署方案修订记录-v2.3.md",
     "deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md",
     "deploy/用户设置指南-for-operator.md",

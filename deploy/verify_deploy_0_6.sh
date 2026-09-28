@@ -14,6 +14,9 @@
 #        · vCPU 额度  → `--ProductCode ecs-spec --QuotaCategory CommonQuota`
 #          （`--ProductCode ecs` 只回 26 条通用配额，查不到 vCPU；`--Product` / `--PageSize` / `--QuotaCategory Common` 均非法）
 #   4) ClickHouse 列实例是 `DescribeDBInstances`（**不存在** `DescribeDBClusters`，写了报 is not a valid api）。
+#   5) `vpc DescribeVpcs` 默认 PageSize=10 且必须显式给；取值按 `EXPECT_VPC_ID` 过滤定位，
+#      不要退回 `.Vpcs.Vpc[0]` —— 该地域 VPC 多于 1 个时下标 0 可能命中非目标对象，
+#      比对口径错了却仍可能报 PASS。
 #
 # 用法：
 #   WSL（fanyan 默认环境）：
@@ -102,15 +105,29 @@ c1_identity() {
 # 2/8 VPC
 # =============================================================================
 c2_vpc() {
-  hr; echo "2/8  VPC  ·  vpc DescribeVpcs --RegionId $REGION"
-  local id cidr name rc=0
-  if ! ali c2_vpc vpc DescribeVpcs --RegionId "$REGION" >/dev/null; then
+  hr; echo "2/8  VPC  ·  vpc DescribeVpcs --RegionId $REGION --PageSize 50"
+  local id cidr name rc=0 total f
+  if ! ali c2_vpc vpc DescribeVpcs --RegionId "$REGION" --PageSize 50 >/dev/null; then
     bad "调用失败：$(errline c2_vpc)"; rec fail; return
   fi
-  id="$(jqget c2_vpc '.Vpcs.Vpc[0].VpcId')"     || { bad "VpcId 取值为空"; rec fail; return; }
-  cidr="$(jqget c2_vpc '.Vpcs.Vpc[0].CidrBlock' || echo '?')"
-  name="$(jqget c2_vpc '.Vpcs.Vpc[0].VpcName'   || echo '?')"
-  [[ "$id" == "$EXPECT_VPC_ID" ]]     || rc=1
+
+  echo "     实测（VpcId / CidrBlock / VpcName）："
+  jq -r '.Vpcs.Vpc[]|[.VpcId,.CidrBlock,.VpcName]|@tsv' "$OUTDIR/c2_vpc.json" 2>/dev/null \
+    | awk -F'\t' '{printf "       %-26s %-14s %s\n", $1, $2, $3}'
+
+  # DescribeVpcs 默认 PageSize=10，不显式给会静默少返回；命中目标后仍要确认没被截断
+  total="$(jq -r '.TotalCount // empty' "$OUTDIR/c2_vpc.json" 2>/dev/null)"
+  if [[ "$total" =~ ^[0-9]+$ && "$total" -gt 50 ]]; then
+    warn "该地域共 $total 个 VPC，超过 PageSize=50 单页上限，本清单不完整"
+  fi
+
+  # 按期望 ID 定位，不再硬取 .Vpcs.Vpc[0]：多于 1 个 VPC 时下标可能命中非目标对象
+  f='.Vpcs.Vpc[]|select(.VpcId=="'"$EXPECT_VPC_ID"'")'
+  if ! id="$(jqget c2_vpc "$f|.VpcId")"; then
+    bad "未找到期望 VPC $EXPECT_VPC_ID（见上方实测清单）"; rec fail; return
+  fi
+  cidr="$(jqget c2_vpc "$f|.CidrBlock" || echo '?')"
+  name="$(jqget c2_vpc "$f|.VpcName"   || echo '?')"
   [[ "$cidr" == "$EXPECT_VPC_CIDR" ]] || rc=1
   [[ "$name" == "$EXPECT_VPC_NAME" ]] || rc=1
   if [[ $rc -eq 0 ]]; then
