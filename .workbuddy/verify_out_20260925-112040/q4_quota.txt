@@ -1,0 +1,1 @@
+{"Message":"successful","RequestId":"01A0D694-79B7-37F2-AA31-718A821E5665","Data":{"SiteMonitorVersion":"V2","SecondMonitor":false,"SiteMonitorQuotaTaskUsed":0,"SiteMonitorOperatorQuotaQuota":0,"SiteMonitorTaskQuota":200,"SiteMonitorIdcQuota":5},"Code":"200","Success":true}

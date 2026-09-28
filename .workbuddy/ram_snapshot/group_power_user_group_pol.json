@@ -1,0 +1,1 @@
+{"Policies":{"Policy":[{"PolicyType":"System","Description":"提供对阿里云服务和资源的完全访问权限，但不允许管理 RAM 身份及其权限，管理资源目录和资源共享关系，或是修改资金账号信息。","AttachDate":"2026-09-25T03:21:42Z","DefaultVersion":"v2","PolicyName":"PowerUserAccess"}]},"RequestId":"01A0DBB4-F021-5657-BCCB-682A4B9CB34E"}

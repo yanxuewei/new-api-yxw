@@ -1,0 +1,26 @@
+{
+  "Version": "1",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "cr:GetRepository", "cr:ListRepository",
+        "cr:PullRepository", "cr:PushRepository",
+        "cr:GetNamespace", "cr:ListNamespace"
+      ],
+      "Resource": [
+        "acs:cr:*:*:repository/newapi/*",
+        "acs:cr:*:*:repository/*/newapi/*",
+        "acs:cr:*:*:namespace/newapi*"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "cr:GetAuthorizationToken", "cr:GetInstance",
+        "cr:ListInstance", "cr:GetInstanceEndpoint", "cr:GetRegion"
+      ],
+      "Resource": ["*"]
+    }
+  ]
+}

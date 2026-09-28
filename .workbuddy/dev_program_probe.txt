@@ -1,0 +1,85 @@
+######## dev-zhangzijun ########
+CASE                                               EXPECT  ACTUAL  VERDICT
+------------------------------------------------------------------------------------------------------
+sts GetCallerIdentity             身份有效             ALLOW   ALLOW   PASS 
+vpc DescribeVpcs(mnl)             生产只读放行           ALLOW   ALLOW   PASS 
+vpc DescribeVSwitches(mnl)        生产只读放行           ALLOW   ALLOW   PASS 
+ecs DescribeInstances(mnl)        生产只读放行           ALLOW   ALLOW   PASS 
+cr ListInstance(mnl)              Allow cr:List*   ALLOW   ALLOW   PASS 
+actiontrail DescribeTrails        Allow Describe*  ALLOW   ALLOW   PASS 
+actiontrail LookupEvents          Allow Lookup*    ALLOW   ALLOW   PASS 
+vpc DescribeEipAddresses(mnl)     生产只读放行           ALLOW   ALLOW   PASS 
+vpc ModifyVpcAttribute(PROD)      boundary 挡生产写    DENY    DENY    PASS User not authorized to operate on the specified resource, or this 
+oss delete PROD oss-newapi-mnl    oss-guard 挡      DENY    DENY    PASS 
+oss delete PROD backup-sgp        oss-guard 挡      DENY    DENY    PASS 
+oss delete NONPROD(桶不存在)        非生产放行              ALLOW   ALLOW   PASS 
+ram ListUsers                     显式 Deny ram:*    DENY    DENY    PASS You are not authorized to do this action. Resource: acs:ram:*:5108
+ram CreateAccessKey(自己)          显式 Deny ram:*     DENY    DENY    PASS You are not authorized to do this action. Resource: acs:ram:*:5108
+------------------------------------------------------------------------------------------------------
+dev-zhangzijun: PASS (14/14)
+
+######## dev-xiangdong ########
+CASE                                               EXPECT  ACTUAL  VERDICT
+------------------------------------------------------------------------------------------------------
+sts GetCallerIdentity             身份有效             ALLOW   ALLOW   PASS 
+vpc DescribeVpcs(mnl)             生产只读放行           ALLOW   ALLOW   PASS 
+vpc DescribeVSwitches(mnl)        生产只读放行           ALLOW   ALLOW   PASS 
+ecs DescribeInstances(mnl)        生产只读放行           ALLOW   ALLOW   PASS 
+cr ListInstance(mnl)              Allow cr:List*   ALLOW   ALLOW   PASS 
+actiontrail DescribeTrails        Allow Describe*  ALLOW   ALLOW   PASS 
+actiontrail LookupEvents          Allow Lookup*    ALLOW   ALLOW   PASS 
+vpc DescribeEipAddresses(mnl)     生产只读放行           ALLOW   ALLOW   PASS 
+vpc ModifyVpcAttribute(PROD)      boundary 挡生产写    DENY    DENY    PASS User not authorized to operate on the specified resource, or this 
+oss delete PROD oss-newapi-mnl    oss-guard 挡      DENY    DENY    PASS 
+oss delete PROD backup-sgp        oss-guard 挡      DENY    DENY    PASS 
+oss delete NONPROD(桶不存在)        非生产放行              ALLOW   ALLOW   PASS 
+ram ListUsers                     显式 Deny ram:*    DENY    DENY    PASS You are not authorized to do this action. Resource: acs:ram:*:5108
+ram CreateAccessKey(自己)          显式 Deny ram:*     DENY    DENY    PASS You are not authorized to do this action. Resource: acs:ram:*:5108
+------------------------------------------------------------------------------------------------------
+dev-xiangdong: PASS (14/14)
+
+
+【对照 1】解绑 boundary（保留 oss-guard + 最小策略）→ 预期仍 DENY
+======================================================================================================
+boundary 已解绑
+======================================================================================================
+######## boundary 已解绑 ########
+CASE                                               EXPECT  ACTUAL  VERDICT
+------------------------------------------------------------------------------------------------------
+oss delete PROD oss-newapi-mnl                     DENY    DENY    PASS 
+oss delete PROD backup-sgp                         DENY    DENY    PASS 
+vpc ModifyVpcAttribute(PROD)                       DENY    DENY    PASS User not authorized to operate on the specified resource, or this 
+------------------------------------------------------------------------------------------------------
+boundary 已解绑: PASS (3/3)
+
+
+【对照 2】再解绑 oss-guard（只剩最小策略）→ 预期仍 DENY（因 ① 本就不授生产写）
+======================================================================================================
+仅剩 newapi-dev-program
+======================================================================================================
+######## 仅剩 newapi-dev-program ########
+CASE                                               EXPECT  ACTUAL  VERDICT
+------------------------------------------------------------------------------------------------------
+oss delete PROD oss-newapi-mnl                     DENY    DENY    PASS 
+oss delete PROD backup-sgp                         DENY    DENY    PASS 
+vpc ModifyVpcAttribute(PROD)                       DENY    DENY    PASS User not authorized to operate on the specified resource, or this 
+------------------------------------------------------------------------------------------------------
+仅剩 newapi-dev-program: PASS (3/3)
+
+
+【恢复】绑回两条边界 → 预期 DENY
+======================================================================================================
+边界已恢复
+======================================================================================================
+######## 边界已恢复 ########
+CASE                                               EXPECT  ACTUAL  VERDICT
+------------------------------------------------------------------------------------------------------
+oss delete PROD oss-newapi-mnl                     DENY    DENY    PASS 
+oss delete PROD backup-sgp                         DENY    DENY    PASS 
+vpc ModifyVpcAttribute(PROD)                       DENY    DENY    PASS User not authorized to operate on the specified resource, or this 
+------------------------------------------------------------------------------------------------------
+边界已恢复: PASS (3/3)
+
+最终组策略：
+   ['newapi-dev-program', 'newapi-prod-boundary', 'newapi-prod-oss-guard']
+TOTAL=PASS

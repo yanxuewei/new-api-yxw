@@ -1,0 +1,41 @@
+{
+  "Version": "1",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "cr:ListNamespace"
+      ],
+      "Resource": [
+        "acs:cr:*:*:repository/cri-avfqy9xkqi5bj8ee/*"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "cr:GetRepository",
+        "cr:ListRepository",
+        "cr:PullRepository",
+        "cr:PushRepository",
+        "cr:GetNamespace"
+      ],
+      "Resource": [
+        "acs:cr:*:*:repository/cri-avfqy9xkqi5bj8ee/newapi*",
+        "acs:cr:*:*:repository/cri-avfqy9xkqi5bj8ee/newapi*/*"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "cr:GetAuthorizationToken",
+        "cr:GetInstance",
+        "cr:ListInstance",
+        "cr:GetInstanceEndpoint",
+        "cr:GetRegion"
+      ],
+      "Resource": [
+        "*"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+----------------------------------------------------------------------------
+== 关键动作实测（AK 直连）==
+----------------------------------------------------------------------------
+USER            CASE                                                       EXPECT  ACTUAL  VERDICT
+------------------------------------------------------------------------------------------------------------
+cicd-push       cr ListInstance      [策略 Allow cr:* Instance, Resource=*]  ALLOW   ALLOW   PASS 
+cicd-push       cr GetInstance       [策略 Allow]                            ALLOW   ALLOW   PASS 
+cicd-push       ram ListUsers         [策略未授权 → 隐式拒绝]                       DENY    DENY    PASS {"schemaVersion":"v1","message":"You are not authorized to do this action. Resource: acs:ram:*:510889006439596
+iac-terraform   vpc DescribeVpcs     [策略 Allow vpc:*]                      ALLOW   ALLOW   PASS 
+iac-terraform   ram CreateUser       [策略显式 Deny]                           DENY    DENY    PASS {"schemaVersion":"v1","message":"You are not authorized to do this action. Resource: acs:ram:*:510889006439596
+iac-terraform   actiontrail DescribeTrails [策略未授权]                         DENY    DENY    PASS {"schemaVersion":"v1","message":"This principal has no permission.","error_code":"NoPermission","status_code":
+iac-terraform   OSS del actiontrail/ [audit-protect 显式 Deny，零副作用]          DENY    DENY    PASS 1.520834(s) elapsed
+iac-terraform   OSS del probe/       [策略 Allow oss:*，非审计前缀对照]              ALLOW   ALLOW   PASS 
+------------------------------------------------------------------------------------------------------------
+SMOKE=PASS  (8/8)

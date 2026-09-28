@@ -1,0 +1,30 @@
+=== 绑定探针前基线（iac-terraform 现有权限）===
+  CASE                                           EXPECT  ACTUAL  VERDICT
+  ----------------------------------------------------------------------------
+  生产 VPC 幂等写 (ModifyVpcAttribute)                ALLOW   ALLOW   PASS
+  生产 VPC 只读 (DescribeVpcs)                       ALLOW   ALLOW   PASS
+  生产桶 写对象 probe/                                 ALLOW   ALLOW   PASS
+  生产桶 删对象 probe/                                 ALLOW   ALLOW   PASS
+  生产桶 读 rds-backup/                              ALLOW   ALLOW   PASS
+  审计前缀 写 actiontrail/ (audit-protect)            DENY    DENY    PASS
+  ----------------------------------------------------------------------------
+  PROBE=PASS (6/6)
+
+=== 临时挂 newapi-ops-operator 到 iac-terraform（模拟 ops-prod_group 组合）===
+  attached; 等 15s 生效
+
+=== 挂载后实测 ===
+  CASE                                           EXPECT  ACTUAL  VERDICT
+  ----------------------------------------------------------------------------
+  生产 VPC 幂等写 (ModifyVpcAttribute)                ALLOW   ALLOW   PASS
+  生产 VPC 只读 (DescribeVpcs)                       ALLOW   ALLOW   PASS
+  生产桶 写对象 probe/                                 ALLOW   ALLOW   PASS
+  生产桶 删对象 probe/                                 ALLOW   ALLOW   PASS
+  生产桶 读 rds-backup/                              ALLOW   ALLOW   PASS
+  审计前缀 写 actiontrail/ (audit-protect)            DENY    DENY    PASS
+  ----------------------------------------------------------------------------
+  PROBE=PASS (6/6)
+
+=== 解绑还原 ===
+  detached
+  iac-terraform 用户级绑定：空 OK
