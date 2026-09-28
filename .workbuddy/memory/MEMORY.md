@@ -35,6 +35,9 @@
 - 函数日志必须 `>&2`（否则 `ID=$(f)` 把日志吞进变量）；macOS grep 用 `-E 'A|B'`（不认 `\|`）。
 - 禁用变量名（macOS 只读内建）：`GROUPS`(=20) · `UID` · `EUID` · `PPID` · `RANDOM` · `SECONDS` · `PIPESTATUS` · `BASH_*` · `LINENO`。
 - **权限探测严禁子串匹配**（`AccessDenied` 会出现在事件正文）；不能用不存在的资源 ID 探测（存在性校验先于鉴权）→ 用幂等写。
+- **NAT / EIP 口径（2026-09-28 实测）**：`CreateNatGateway` 必带 `--NatType Enhanced`（唯一合法值，漏掉报 `MissingParameter`）；`AssociateEipAddress` 的 `InstanceType` 必须是 **`Nat`**（写 `NatGateway` 会返回误导性的 `Invalid.DirectEip.BindType`）；`0.0.0.0/0 → NAT` 路由**由系统自动加**，勿手工加；VPC 系 API 分页用 `--PageSize`（不是 `--MaxResults`）；路由条目 next hop 在 `.NextHops.NextHop[0]`（非顶层）。
+- ⚠️ **ap-southeast-6 端点偶发 `context deadline exceeded`** → 任何写操作必须包**重试 ≥3 次**并校验返回是合法 JSON，否则会**静默漏建资源**（实测 EIP 绑定、SNAT 查询、首条 SNAT 创建各失败过一次）。
+- ⚠️ **脚本日志勿与 API 输出混流**：`say "+ cmd"` 若写进重定向文件会污染 JSON → jq 假失败。日志走 `exec 3>&2`，数据落文件。
 - **`aliyun` CLI 3.5.1 命令口径（2026-09-28 全量实测，写命令前先看这里）**：
   - 参数名：**只有 `--ProductCode`**（`--Product` 报 not valid）；`quotas` 分页是 `--MaxResults`（`--PageSize` 报 not valid）；`--QuotaCategory` 合法值 **`CommonQuota`**（`Common` 报 `InvalidQuotaCategory`）。
   - **配额按产品码分流**：vCPU / 规格类配额在 **`--ProductCode ecs-spec`**（`q_ecs_enterprise_postpay_c` = vCPU 额度，马尼拉 64 · 新加坡 96）；`--ProductCode ecs` 只回 26 条通用配额，**查不到 vCPU**。两者都必须带 `--Dimensions.1.Key regionId --Dimensions.1.Value <region>`，否则回 `cn-hangzhou` 假数据。

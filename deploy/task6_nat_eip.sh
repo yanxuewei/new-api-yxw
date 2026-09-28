@@ -8,10 +8,16 @@
 #   bash deploy/task6_nat_eip.sh
 #   DRY_RUN=1 bash deploy/task6_nat_eip.sh      # 只打印动作，不调用写 API
 #
-# 相对文档原文的三处必要修正（均已实测确认）：
+# 相对文档原文的必要修正（均已实测确认）：
 #   1) CreateNatGateway 缺 --NatType（该参数「必填」，唯一合法值 Enhanced）
-#   2) 需补路由表条目 0.0.0.0/0 → NAT（文档通篇无此步骤；缺它 app 段不走 NAT）
+#   2) AssociateEipAddress 的 InstanceType 必须是 Nat，文档写的 NatGateway 非法
+#      （非法值会返回误导性的 Invalid.DirectEip.BindType，极易误判为 EIP 类型问题）
 #   3) 补 --ResourceGroupId rg-aek4nyivmmsb6iy（项目约定：默认组禁放 new-api 资源）
+#
+# 实测澄清（与文档表述相反，勿再手工加）：
+#   - 创建 Enhanced 公网 NAT 网关时，系统**自动**在路由表加 `0.0.0.0/0 → NatGateway`，
+#     Description 为 "Created with NAT gateway(<id>) by system."。故路由条目无需手工创建；
+#     本脚本保留一个只读校验（存在即跳过），仅用于发现异常情况。
 #
 # 实现注意：日志走 fd 3（原始 stderr），API 原始输出一律落文件，
 #           避免「+ 命令」行污染 JSON 导致 jq 解析失败（前一版踩过）。
@@ -41,12 +47,31 @@ say() { printf '%s\n' "$*" >&3; }
 hr()  { say "------------------------------------------------------------"; }
 step(){ say ""; say ">>> $*"; hr; }
 
-# api <outfile> <cmd...>   —— 日志到 fd3，API 输出落 outfile
+# api <outfile> <cmd...>   —— 日志到 fd3，API 输出落 outfile；失败自动重试 3 次
+# ⚠️ ap-southeast-6 端点实测存在偶发 Client.Timeout / context deadline exceeded；
+#    不加重试会**静默漏建资源**（EIP-02 绑定、SNAT 表查询各踩过一次）。
 api() {
   local out="$1"; shift
   printf '+ %s\n' "$*" >&3
   if [[ "$DRY_RUN" == "1" ]]; then printf '{"_dry_run":true}\n' > "$out"; return 0; fi
-  "$@" > "$out" 2>&1
+  local i
+  for i in 1 2 3; do
+    if "$@" > "$out" 2>&1 && jq -e . "$out" >/dev/null 2>&1; then return 0; fi
+    say "  !! 第 ${i} 次调用失败，2s 后重试：$(head -c 160 "$out" | tr '\n' ' ')"
+    sleep 2
+  done
+  say "  !! 已重试 3 次仍失败：$*"
+  return 1
+}
+
+# apiget <cmd...>  —— 只回传 stdout（带重试），用于命令替换
+apiget() {
+  local out="" i
+  for i in 1 2 3; do
+    out=$("$@" 2>&1) && printf '%s' "$out" && return 0
+    sleep 2
+  done
+  printf '%s' "$out"; return 1
 }
 
 # ---------------------------------------------------------------------------
@@ -132,21 +157,23 @@ EIP_POOL_CSV=$(IFS=,; printf '%s' "${EIP_IPS[*]}")
 # ---- 3. 绑定 NAT -----------------------------------------------------------
 step "3. 绑定 4 个 EIP 到 NAT 网关"
 for aid in "${ALLOC_IDS[@]}"; do
-  cur=$(aliyun vpc DescribeEipAddresses --RegionId "$REGION" --AllocationId "$aid" 2>/dev/null \
+  cur=$(apiget aliyun vpc DescribeEipAddresses --RegionId "$REGION" --AllocationId "$aid" \
         | jq -r '.EipAddresses.EipAddress[0]|"\(.Status)|\(.InstanceType // "-")|\(.InstanceId // "-")"' | tr -d '\r')
-  if [[ "$cur" == "InUse|NatGateway|${NAT_ID}" ]]; then
-    say "  ${aid}: 已绑定且指向本 NAT，跳过"
+  if [[ "$cur" == InUse*"${NAT_ID}"* ]]; then
+    say "  ${aid}: 已绑定且指向本 NAT，跳过（$cur）"
     continue
   fi
   api "$OUTDIR/03-assoc-${aid}.json" aliyun vpc AssociateEipAddress --RegionId "$REGION" \
-    --AllocationId "$aid" --InstanceType NatGateway --InstanceId "$NAT_ID"
+    --AllocationId "$aid" --InstanceType Nat --InstanceId "$NAT_ID"
   cat "$OUTDIR/03-assoc-${aid}.json" >&3
 done
 
 # ---- 4. SNAT 条目（pub + app 共 4 个交换机，条目内 4 EIP 成池） ------------
 step "4. SNAT 条目：pub-a / pub-b / app-a / app-b，条目内 4 EIP 成池"
-SNAT_TABLE=$(aliyun vpc DescribeNatGateways --RegionId "$REGION" --NatGatewayId "$NAT_ID" 2>/dev/null \
-  | jq -r '.NatGateways.NatGateway[0].SnatTableIds.SnatTableId[0]' | tr -d '\r')
+SNAT_TABLE=$(apiget aliyun vpc DescribeNatGateways --RegionId "$REGION" --NatGatewayId "$NAT_ID" \
+  | jq -r '.NatGateways.NatGateway[0].SnatTableIds.SnatTableId[0] // empty' | tr -d '\r')
+[[ -n "$SNAT_TABLE" && "$SNAT_TABLE" != "null" ]] \
+  || { say "!! SNAT 表 ID 为空（查询失败），终止以免建出无主条目"; exit 1; }
 say "SNAT_TABLE=$SNAT_TABLE"
 api "$OUTDIR/04-snat-before.json" aliyun vpc DescribeSnatTableEntries --RegionId "$REGION" --SnatTableId "$SNAT_TABLE" --PageSize 50
 
@@ -160,8 +187,14 @@ for vsw in "$PUB_A" "$PUB_B" "$APP_A" "$APP_B"; do
   cat "$OUTDIR/04-snat-${vsw}.json" >&3
 done
 
-# ---- 5. 路由表 0.0.0.0/0 → NAT（文档漏项，必须补） ------------------------
-step "5. 路由表 ${RTB} 增加 0.0.0.0/0 → ${NAT_ID}"
+# 复核：SNAT 条目数必须 = 4（4 个交换机）
+api "$OUTDIR/04-snat-after.json" aliyun vpc DescribeSnatTableEntries --RegionId "$REGION" --SnatTableId "$SNAT_TABLE" --PageSize 50
+n_snat=$(jq -r '[.SnatTableEntries.SnatTableEntry[]?]|length' "$OUTDIR/04-snat-after.json" 2>/dev/null | tr -d '\r')
+say "SNAT 条目数=$n_snat（期望 4）"
+[[ "${n_snat:-0}" == "4" ]] || say "!! SNAT 条目数不符，需人工复核"
+
+# ---- 5. 路由表 0.0.0.0/0 → NAT（系统自动创建；此处仅校验） -----------------
+step "5. 校验路由表 ${RTB} 的 0.0.0.0/0 → NAT（应为系统自动创建）"
 api "$OUTDIR/05-route-before.json" aliyun vpc DescribeRouteEntryList --RegionId "$REGION" --RouteTableId "$RTB" --MaxResult 50
 hasrt=$(jq -r '[.RouteEntrys.RouteEntry[]?|select(.DestinationCidrBlock=="0.0.0.0/0")]|length' \
         "$OUTDIR/05-route-before.json" 2>/dev/null | tr -d '\r')
@@ -187,7 +220,8 @@ api "$OUTDIR/06-snat.json" aliyun vpc DescribeSnatTableEntries --RegionId "$REGI
 jq -r '.SnatTableEntries.SnatTableEntry[]?|"SNAT \(.SnatEntryId)  vsw=\(.SourceVSwitchId)  ips=\(.SnatIp)  \(.Status)"' "$OUTDIR/06-snat.json" 2>/dev/null
 
 api "$OUTDIR/06-route.json" aliyun vpc DescribeRouteEntryList --RegionId "$REGION" --RouteTableId "$RTB" --MaxResult 50
-jq -r '.RouteEntrys.RouteEntry[]?|"ROUTE \(.DestinationCidrBlock) → \(.NextHopType):\(.NextHopId // "-")  \(.Status)"' "$OUTDIR/06-route.json" 2>/dev/null
+# 注意：NextHopType/NextHopId 位于 .NextHops.NextHop[0]，非顶层（顶层取会得到 null）
+jq -r '.RouteEntrys.RouteEntry[]?|"ROUTE \(.DestinationCidrBlock) → \(.NextHops.NextHop[0].NextHopType // "local"):\(.NextHops.NextHop[0].NextHopId // "-")  \(.Status)  \(.Description // "")"' "$OUTDIR/06-route.json" 2>/dev/null
 
 # ---- 7. EIP 台账（8 EIP 一张表，坑 1） -------------------------------------
 step "7. 写 EIP 台账 ${LEDGER}"
