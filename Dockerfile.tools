@@ -1,0 +1,39 @@
+# ============================================================
+# new-api 调试增强镜像
+#
+# 背景：官方 calciumion/new-api 的运行时基镜像是 debian:bookworm-slim，
+#       只装了 ca-certificates / tzdata / libasan8 / wget，
+#       容器内没有 ps / top / tree / pstree / curl / ss 等排障工具。
+#
+# 用法：
+#   docker build -f Dockerfile.tools -t new-api-yxw:tools .
+#   然后 docker-compose.yml 里把 image 从
+#     calciumion/new-api:latest  改成  new-api-yxw:tools
+#   再 docker compose up -d  （容器会被重建，但数据在 pg 卷 / ./data 里，不受影响）
+#
+# 升级上游镜像时：改下面 FROM 的 tag，重新 build 即可。
+#
+# 说明：
+#   - procps    -> ps / top / free / vmstat / sysctl
+#   - psmisc    -> pstree / killall / fuser
+#   - iproute2  -> ss / ip          net-tools -> netstat / ifconfig
+#   - vim-tiny  -> 命令名是 vi（/usr/bin/vim.tiny），镜像里没有 vim 这个名字；
+#                  需要 vim 本体请换 vim / vim-nox（体积约 +30MB）
+# ============================================================
+FROM calciumion/new-api:latest
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        procps \
+        psmisc \
+        tree \
+        less \
+        curl \
+        iproute2 \
+        net-tools \
+        vim-tiny \
+    && rm -rf /var/lib/apt/lists/*
+
+# 继承上游的 WORKDIR /data 与 ENTRYPOINT ["/new-api"]，此处显式写出便于阅读
+WORKDIR /data
+ENTRYPOINT ["/new-api"]
