@@ -1,0 +1,10 @@
+admin	newapi-admin-identity	Custom	COVERED	admin_group
+admin	newapi-enforce-mfa	Custom	COVERED	admin_group
+admin	newapi-audit-protect	Custom	COVERED	admin_group
+ops	newapi-ops-operator	Custom	COVERED	ops_group
+ops	newapi-enforce-mfa	Custom	COVERED	ops_group
+ops	newapi-audit-protect	Custom	COVERED	ops_group
+cicd-push	newapi-cicd-acr-push	Custom	COVERED	cicd-push_group
+cicd-push	newapi-audit-protect	Custom	COVERED	cicd-push_group
+iac-terraform	newapi-iac-terraform	Custom	COVERED	iac-terraform_group
+iac-terraform	newapi-audit-protect	Custom	COVERED	iac-terraform_group

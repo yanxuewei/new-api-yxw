@@ -1,0 +1,27 @@
+# G6 配置模板 · 云解析 DNS 预建记录（对应指南 §3.8 / §4.8 任务 2）
+# 原则：本文件只放"模板 + 占位符"，GTM 接入域名在 §8.4（任务 21）产出后回填；不含任何密钥。
+# 应用方式：云解析 DNS 控制台 → 公网权威解析 → likha.com，或 aliyun AddDomainRecord。
+# ⚠ api 记录 TTL 必须 60（坑 §4.8：TTL 600 会让切换演练误判 GTM 故障）；对外承诺的切换指标见 gtm-address-pool.md。
+
+zone: likha.com
+records:
+  - name: api                      # 业务域名：GTM 接管切换的入口
+    type: CNAME
+    value: ${GTM_ACCESS_DOMAIN}    # 占位：§8.4 任务 21 产出的 GTM 接入域名，禁止直接 CNAME 到 ALB DNS（那样 GTM 失效）
+    ttl: 60
+    note: 主池=马尼拉 ALB；备池=新加坡 ALB（M4 接管演练通过前不入池）
+
+  - name: ops                      # 运维域名：只对内网/堡垒机开放，不经公网解析暴露入口细节
+    type: CNAME
+    value: ${BASTION_OR_VPN_ENTRY} # 占位：§8.5 任务 46 运维访问面产出后回填
+    ttl: 600
+    note: 不挂 WAF/GTM；访问控制靠安全组 + RAM/RBAC（§8.5）
+
+  - name: static                   # 静态子域（可选）：仅当启用 DCDN 全站加速时生效
+    type: CNAME
+    value: ${DCDN_ACCELERATED_DOMAIN}  # 占位：如未启用 DCDN 则删除本条并记录决策
+    ttl: 600
+    note: 启用后必须用 DescribeDcdnL2Ips 同步回源网段进安全组（security-groups.md 条件规则）
+
+# 裸域说明（§3.7 坑）：*.likha.com 不覆盖 likha.com 本身。
+# 裸域统一 301 → api.likha.com，在 ALB/DCDN 层实现，不在 DNS 层做 CNAME（CNAME 不能用于裸域）。
