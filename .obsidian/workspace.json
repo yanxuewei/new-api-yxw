@@ -205,7 +205,7 @@
       }
     ],
     "direction": "horizontal",
-    "width": 267.5
+    "width": 319.5
   },
   "left-ribbon": {
     "hiddenItems": {
@@ -221,6 +221,7 @@
   },
   "active": "729df3220eedf670",
   "lastOpenFiles": [
+    "deploy/sed4v9xDJ",
     "deploy/task6_nat_eip.sh",
     "deploy/logs/verify_0_6_20260928-175425/c8_ram.json",
     "deploy/logs/verify_0_6_20260928-175425/c7_q.json",
@@ -231,7 +232,6 @@
     "deploy/logs/verify_0_6_20260928-175425/c2_vpc.json",
     "deploy/logs/verify_0_6_20260928-175425/c1_sts.json",
     "deploy/logs/verify_0_6_20260928-175425",
-    "deploy/logs/verify_0_6_20260928-175402/c8_ram.json",
     "deploy/部署方案修订记录-v2.3.md",
     "deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md",
     "deploy/用户设置指南-for-operator.md",
