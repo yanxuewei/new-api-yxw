@@ -3,6 +3,28 @@
 > 详版口径与全部坑 → `.workbuddy/memory/REFERENCE.md`；过程流水 → `YYYY-MM-DD.md`。
 > 权限权威 `deploy/用户设置指南.md`；切换方案 `deploy/DCDN回源层切换_方案.md`。
 
+## 执行环境（2026-09-28 起 · 优先级最高）
+**本项目所有命令默认在 WSL Ubuntu 里跑**，不用宿主 Git Bash / PowerShell（fanyan 指定）。
+- 调用：`wsl -d Ubuntu -u root -- bash -c "..."`；**带引号/多行脚本先 Write 成文件再 `bash /mnt/e/.../x.sh`**（直传会被 wsl.exe 拆坏）。cwd 自动继承并转换。
+- ⚠️ **`/mnt/e` 下的文本是 CRLF** → WSL 里 `grep`/`awk`/命令替换读进来残留 `\r`，比对/拼接**必然假失败**（实测 `go.mod` 的 `go 1.25.1` 读成 `1.25.1\r`）。**一律接 `tr -d '\r'`**。
+- ⚠️ **`bash -c` 不读 `/etc/profile.d/`**，且 `go env -w` 是 per-user（写 `$HOME/.config/go/env`）→ root 与 fanyan 各需一份。
+- ✅ **Go 已开箱可用（2026-09-28 验收）**：`go1.25.1`（与 `go.mod` 完全一致）+ `GOPROXY=https://goproxy.cn,direct`；`bash -c` 下也能直接用（靠 `/usr/local/bin/go` 符号链接）。实测 `go get gin@latest` 拉全部依赖 **3.0s**（`proxy.golang.org` 则完全不通）。脚本 `E:\WSL\setup-wsl-dev-env.sh`（幂等）。
+- ⚠️ **WSL 内暂无 `node`/`npm`/`bun`/`kubectl`/`helm`**（原生版未装）；关掉 Windows PATH 注入后，**Windows 侧那套 node/npm/bun 也不再「假可用」** → 需要时须装 Linux 版（`web/` 前端用 bun）。`aliyun` CLI / `ossutil` 同样只在 macOS 侧。
+- ✅ **PATH 污染已清（2026-09-28）**：`/etc/wsl.conf` 已加 `[interop] appendWindowsPath = false`（备份 `/etc/wsl.conf.bak-20260928-105604`）；PATH 中 `/mnt/` 条目 **42 → 0**，`cmd.exe` 不再可调，`/mnt/c` 挂载仍保留。3 个容器 `restart: always`，WSL 重启后自动恢复。
+- 路径：宿主 `E:\git_code\new-api-yxw` = WSL `/mnt/e/git_code/new-api-yxw`。
+- **WSL 已就绪**：git 2.34 · python3.10 + pip26 · docker 29.8（含 compose v5.5）· curl/wget/rsync/unzip。已跑容器 `new-api`(:3000 healthy) · `postgres:15` · `redis`。
+- ⚠️ **Go 已装在 `/usr/local/go`，但 `/usr/local/go/bin` 不在 PATH** → `go` 命令找不到；`GOPROXY` 也未设。
+- ⚠️ **WSL 里 `proxy.golang.org` 彻底不通**（curl 返回 000）→ 构建**必须** `GOPROXY=https://goproxy.cn,direct`（与 macOS 侧 §Docker构建 同一个坑）。其余 github / npm / 阿里云镜像 / ACR 公网域名均 200。
+- ⚠️ **PATH 被 Windows 严重污染**（`/etc/wsl.conf` 无 `[interop]` 段 → `appendWindowsPath` 默认 true，灌入 50+ 条 `/mnt/c|d|e/...`）：在 WSL 里 `npm` 会解析到 **Windows 版**、`node` 反而找不到。根治 = `/etc/wsl.conf` 加 `[interop] appendWindowsPath=false`（**需 `wsl --shutdown`，会重启上述容器**）。
+- 缺：`make` `jq` `helm` `kubectl` `bun`。
+- 磁盘：`/tmp`(ext4) 2.9 GB/s vs `/mnt/e` 421 MB/s；小文件差距更大（历史实测 78×）→ **编译/装依赖别放 `/mnt/e`**。宿主 28 核 / WSL 15 GiB。
+- ✅ **阿里云工具链已在 WSL 就绪（2026-09-28）**：`aliyun` CLI **3.5.1** + `ossutil` **2.2.1**，均在 `/usr/local/bin/`。
+  - 凭证：`~/.aliyun/config.json` + `~/.ossutilconfig`（权限 600），**root 与 fanyan 各一份**；`site=international`、默认 region `ap-southeast-6`。
+  - ⚠️ **凭证别依赖 `.bashrc` 的 export**：Ubuntu `.bashrc` 第 6 行 `case $- in` 守卫会让**非交互 shell 提前 return** → 实测 `bash -c` / `bash -lc` 读到的 `ALIBABA_CLOUD_ACCESS_KEY_ID` 长度都是 **0**，只有 `bash -lic`（强制交互）才拿得到。**故一律走 CLI 配置文件**（与 shell 解耦）。
+  - 实测通过：`sts get-caller-identity` → `acs:ram::5108890064395960:user/yanxuewei` · `resourcemanager list-resource-groups`（含 `rg-ph-mnl` = `rg-aek4nyivmmsb6iy`）· `bssopenapi query-account-balance` · `ossutil ls`（3 桶）。
+  - **CLI 3.x 用 kebab-case**：`aliyun sts get-caller-identity`、`aliyun resourcemanager list-resource-groups`。`safety-policy` 默认 `enabled=false`（不阻塞脚本）。
+  - 脚本：`E:\WSL\setup-aliyun-toolchain.sh`（装）· `E:\WSL\configure-aliyun-creds.sh {china|international}`（配，密钥不经命令行、不打印）。
+
 ## 账号 / 端点
 账号 `5108890064395960`；主 region `ap-southeast-6`（马尼拉，仅 6a/6b），备 `ap-southeast-1`（新加坡）。
 `aliyun` CLI `~/.workbuddy/binaries/aliyun-cli/aliyun`（非交互 `zsh -i -c`）；OSS 用 `ossutil` v2。
