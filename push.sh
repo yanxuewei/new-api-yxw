@@ -35,6 +35,9 @@ DOCKERFILE="Dockerfile"
 DOCKERFILE_EXPLICIT=0     # 是否由 -f/--dockerfile 或 --upstream 显式指定
 CONTEXT="."
 PLATFORM="linux/amd64"
+# buildx 支持时关闭 provenance/SBOM attestation：否则推送的是 OCI index，ACR 里会多一条
+# 2KB、unknown/unknown、类型"自定义"的清单（不影响拉取运行，但污染大小统计与部分扫描工具）
+BUILDX_ATTEST_OFF=""
 EXTRA_TAGS=""
 BUILD_ARGS=""
 DO_BUILD=1
@@ -222,7 +225,9 @@ push.sh — new-api 镜像 build/推送 ACR 一键脚本
                           显式 -f 则以你给的为准。
       --upstream          强制使用上游原版 Dockerfile（等价 -f Dockerfile）
   -c, --context <path>    构建上下文，默认仓库根目录
-  -p, --platform <plat>   默认 linux/amd64
+  -p, --platform <plat>   默认 linux/amd64。若走 buildx，会自动加 --provenance=false
+                          --sbom=false：否则推送的是 OCI index，ACR 里会多一条 2KB、
+                          unknown/unknown、类型"自定义"的清单
       --build-arg K=V     （可重复）
       --proxy <url|auto>  构建期 HTTP(S) 代理。注入 Docker **预定义 ARG**
                           （HTTP_PROXY/HTTPS_PROXY/NO_PROXY…），Dockerfile 无需声明。
@@ -424,7 +429,13 @@ do_precheck() {
       if [[ "$DRY_RUN" == "1" ]]; then warn "docker daemon 未运行（dry-run 继续）";
       else die "docker daemon 未运行（先启动 Docker Desktop）"; fi
     fi
-    if docker buildx version >/dev/null 2>&1; then USE_BUILDX=1; fi
+    if docker buildx version >/dev/null 2>&1; then
+      USE_BUILDX=1
+      # buildx >= 0.10 才有关闭 attestation 的开关；先探测再传，避免老版本 unknown flag 直接构建失败
+      if docker buildx build --help 2>/dev/null | grep -q -- '--provenance'; then
+        BUILDX_ATTEST_OFF="--provenance=false --sbom=false"
+      fi
+    fi
   fi
 
   # Dockerfile / 上下文
@@ -452,6 +463,7 @@ do_precheck() {
   log "参数：namespace=${NS} tag=${TAG} repo=${REPO_NAME} platform=${PLATFORM}"
   log "本地镜像：${LOCAL_IMAGE}    目标镜像：${REMOTE_REF}"
   log "构建方式：$([[ "${USE_BUILDX:-0}" == "1" ]] && echo 'buildx --load' || echo 'docker build')  build=${DO_BUILD} push=${DO_PUSH} login=${DO_LOGIN}"
+  log "attestation：$([[ -n "$BUILDX_ATTEST_OFF" ]] && echo '已关闭 provenance/sbom' || echo 'N/A（docker build 或老版 buildx 不产生）')"
 
   # ACR 侧预检（可选）
   if [[ "$PRE_CHECK" == "1" ]]; then
@@ -940,6 +952,7 @@ do_build() {
   if [[ "${USE_BUILDX:-0}" == "1" && "$PLATFORM" != *","* ]]; then
     # 单平台：buildx --load 直接落到本地镜像列表
     run docker buildx build --platform "$PLATFORM" --load \
+      $BUILDX_ATTEST_OFF \
       -f "$DOCKERFILE" -t "$LOCAL_IMAGE" $NO_CACHE $PULL_BASE $BUILD_ARGS "$CONTEXT_ABS" || rc=$?
   else
     [[ "$PLATFORM" == *","* ]] && warn "多平台构建不支持本地加载，改用 docker build（仅本机架构）"
