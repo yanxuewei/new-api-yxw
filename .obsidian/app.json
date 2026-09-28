@@ -1,1 +1,18 @@
-{}
+{
+  "showInlineTitle": false,
+  "vimMode": false,
+  "showLineNumber": true,
+  "readableLineLength": false,
+  "alwaysUpdateLinks": true,
+  "showUnsupportedFiles": true,
+  "promptDelete": false,
+  "foldHeading": true,
+  "spellcheck": false,
+  "pdfExportSettings": {
+    "includeName": false,
+    "pageSize": "Letter",
+    "landscape": false,
+    "margin": "0",
+    "downscalePercent": 100
+  }
+}

@@ -345,7 +345,7 @@ curl -sS -o /dev/null -w "%{http_code}\n" https://oss-newapi-mnl.oss-ap-southeas
 ```bash
 # 1. 复核地域结论：CK 购买页地域选择器能否选到菲律宾（马尼拉）【控制台核实】（截图清单第 14 项）
 # 2. 复核决策落盘：确认 LOG_SQL_DSN 规划指向新加坡本地 CK（Day1 仅决策，实例在任务 29 购）
-aliyun clickhouse DescribeDBClusters --RegionId ap-southeast-1 2>/dev/null | jq '.DBInstances' || true
+aliyun clickhouse DescribeDBInstances --RegionId ap-southeast-1 2>/dev/null | jq '.Data.TotalCount' || true
 # （马尼拉侧应无 CK 可购；新加坡侧集群在任务 29 创建后此处应可见）
 ```
 
@@ -552,7 +552,7 @@ aliyun r-kvstore ModifyInstanceParameter --InstanceId ${TAIR_SG_ID} \
 #    logtail-ds + 日志服务 SLS 的 sls-newapi-sg，/app/logs/*.log 与 stdout 双路（stdout 兜底）
 ```
 
-【控制台】CK 实例创建仅购买页可完成：社区版、≥2 节点、专有网络 `vpc-t4nimmwvruexbnene0a3r`；建好后可用 `aliyun clickhouse DescribeDBClusters --RegionId ap-southeast-1` 复核状态。
+【控制台】CK 实例创建仅购买页可完成：社区版、≥2 节点、专有网络 `vpc-t4nimmwvruexbnene0a3r`；建好后可用 `aliyun clickhouse DescribeDBInstances --RegionId ap-southeast-1` 复核状态。
 `[图 D1-B-29｜拍摄对象：CK 实例节点数与白名单配置页；打码：实例连接地址]`
 
 期望输出：Tair 返回 `InstanceId`（`r-t4n...`）；CK 实例状态 Activated。CK 建表 + 写入按任务 9 的 TTL DDL 基线执行（`newapi_logs`，PARTITION BY toDate(ts)，TTL 90 天）。
