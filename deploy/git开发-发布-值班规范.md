@@ -486,7 +486,7 @@ sequenceDiagram
 
 ### 8.3 核心发布 workflow 示例（`release.yml` 关键片段）
 
-```yml
+```yaml
 name: release
 on:
   push:
