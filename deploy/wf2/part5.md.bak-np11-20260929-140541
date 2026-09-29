@@ -103,9 +103,8 @@ kubectl -n new-api annotate ingress new-api-canary alb.ingress.kubernetes.io/can
 kubectl -n new-api patch hpa hpa-new-api-stable --type=merge -p '{"spec":{"minReplicas":12}}'
 # 或临时绕 HPA（记录并 30 分钟内恢复）
 kubectl -n new-api scale deploy/new-api-stable 12
-# 节点不够 → 调高节点池自动伸缩上限（开伸缩后【禁止】再改 scaling_group.desired_size）
-aliyun cs ModifyClusterNodePool --ClusterId ${ACK_MNL_ID} --NodepoolId ${NP_MNL} --region ap-southeast-6 \
-  --body '{"auto_scaling":{"enable":true,"type":"cpu","min_instances":4,"max_instances":8}}'
+# 节点不够 → 调高节点池的期望节点数（desired_size）
+aliyun cs ModifyClusterNodePool --ClusterId ${ACK_MNL_ID} --NodepoolId ${NP_MNL} --body '{"scaling_group":{"desired_size":8}}'
 ```
 
 **坑**：手工 `scale` 与 HPA/GitOps 三方打架（GitOps 会把它 sync 回去）。改进：预案里**一律用 HPA `minReplicas`**，不改 Deployment。
@@ -206,7 +205,7 @@ aliyun rds DescribeDBInstanceSSL --DBInstanceId ${RDS_MNL_ID} | jq '{SSLEnabled,
 aliyun cs DescribeClusterDetail --ClusterId ${ACK_MNL_ID} \
   | jq '{state,current_version,cluster_spec,profile,parameters:(.parameters|map(select(.key|test("RRSA|EndpointPublicAccess|SnatEntry"))))}'
 aliyun cs ListClusterNodePools --ClusterId ${ACK_MNL_ID} \
-  | jq -r '.nodepools[]|[.nodepool_info.nodepool_id,.auto_scaling.enable,.auto_scaling.min_instances,.auto_scaling.max_instances]|@tsv'
+  | jq -r '.nodepools[]|[.nodepool_info.nodepool_id,.auto_scaling.enable,.scaling_group.min_instances,.scaling_group.max_instances]|@tsv'
 
 # ---- ALB / 证书 / WAF ----
 aliyun alb GetListenerAttribute --ListenerId ${LID} | jq '{IdleTimeout,RequestTimeout,SecurityPolicyId}'

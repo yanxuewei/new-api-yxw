@@ -4,44 +4,111 @@
     "type": "split",
     "children": [
       {
-        "id": "c61469379079cbe3",
-        "type": "tabs",
+        "id": "bb46e284243583ac",
+        "type": "split",
         "children": [
           {
-            "id": "f6cece173f6c7071",
-            "type": "leaf",
-            "state": {
-              "type": "markdown",
-              "state": {
-                "file": "deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md",
-                "mode": "preview",
-                "source": false
+            "id": "7d7b45c35d8d64dc",
+            "type": "split",
+            "dimension": 40.905542544886806,
+            "children": [
+              {
+                "id": "c61469379079cbe3",
+                "type": "tabs",
+                "dimension": 36.40350877192983,
+                "children": [
+                  {
+                    "id": "f6cece173f6c7071",
+                    "type": "leaf",
+                    "state": {
+                      "type": "markdown",
+                      "state": {
+                        "file": "deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md",
+                        "mode": "preview",
+                        "source": true
+                      },
+                      "icon": "lucide-file",
+                      "title": "阿里云国际站菲律宾部署_详细操作指南-v2.0"
+                    }
+                  }
+                ]
               },
-              "icon": "lucide-file",
-              "title": "阿里云国际站菲律宾部署_详细操作指南-v2.0"
-            }
-          }
-        ]
-      },
-      {
-        "id": "f111b736659545fc",
-        "type": "tabs",
-        "children": [
+              {
+                "id": "54aa6aafb295ed4a",
+                "type": "tabs",
+                "dimension": 63.59649122807017,
+                "children": [
+                  {
+                    "id": "74c2c0cef545cd40",
+                    "type": "leaf",
+                    "state": {
+                      "type": "markdown",
+                      "state": {
+                        "file": "deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md",
+                        "mode": "preview",
+                        "source": true
+                      },
+                      "icon": "lucide-file",
+                      "title": "阿里云国际站菲律宾部署_详细操作指南-v2.0"
+                    }
+                  }
+                ]
+              }
+            ],
+            "direction": "vertical"
+          },
           {
-            "id": "729df3220eedf670",
-            "type": "leaf",
-            "state": {
-              "type": "markdown",
-              "state": {
-                "file": "deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md",
-                "mode": "preview",
-                "source": false
+            "id": "7a132fbf59c4c6f9",
+            "type": "split",
+            "dimension": 59.0944574551132,
+            "children": [
+              {
+                "id": "5da66b33f5bbf458",
+                "type": "tabs",
+                "dimension": 40.75235109717868,
+                "children": [
+                  {
+                    "id": "729df3220eedf670",
+                    "type": "leaf",
+                    "state": {
+                      "type": "markdown",
+                      "state": {
+                        "file": "deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md",
+                        "mode": "preview",
+                        "source": false
+                      },
+                      "icon": "lucide-file",
+                      "title": "阿里云国际站菲律宾部署_详细操作指南-v2.0"
+                    }
+                  }
+                ]
               },
-              "icon": "lucide-file",
-              "title": "阿里云国际站菲律宾部署_详细操作指南-v2.0"
-            }
+              {
+                "id": "264054e36225ad52",
+                "type": "tabs",
+                "dimension": 59.24764890282132,
+                "children": [
+                  {
+                    "id": "08c6983e34278324",
+                    "type": "leaf",
+                    "state": {
+                      "type": "markdown",
+                      "state": {
+                        "file": "deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md",
+                        "mode": "preview",
+                        "source": false
+                      },
+                      "icon": "lucide-file",
+                      "title": "阿里云国际站菲律宾部署_详细操作指南-v2.0"
+                    }
+                  }
+                ]
+              }
+            ],
+            "direction": "vertical"
           }
-        ]
+        ],
+        "direction": "horizontal"
       }
     ],
     "direction": "vertical"
@@ -130,16 +197,6 @@
             }
           },
           {
-            "id": "e371d46ccd534f0a",
-            "type": "leaf",
-            "state": {
-              "type": "git-view",
-              "state": {},
-              "icon": "git-pull-request",
-              "title": "Source Control"
-            }
-          },
-          {
             "id": "c618358b62e79d6e",
             "type": "leaf",
             "state": {
@@ -205,7 +262,7 @@
       }
     ],
     "direction": "horizontal",
-    "width": 319.5
+    "width": 353.5
   },
   "left-ribbon": {
     "hiddenItems": {
@@ -219,19 +276,27 @@
       "bases:新建数据库": false
     }
   },
-  "active": "729df3220eedf670",
+  "active": "74c2c0cef545cd40",
   "lastOpenFiles": [
-    "deploy/logs/task12_20260928-183807/sg_rows.txt",
-    "deploy/logs/task12_20260928-183807/06-route.json",
-    "deploy/logs/task12_20260928-183807/06-snat.json",
-    "deploy/logs/task12_20260928-183807/06-eip.json",
-    "deploy/logs/task12_20260928-183807/06-nat.json",
-    "deploy/logs/task12_20260928-183807/05-route-before.json",
-    "deploy/logs/task12_20260928-183807/04-snat-after.json",
-    "deploy/logs/task12_20260928-183807/04-snat-vsw-t4n3dthz1ma6tp7bqor6h.json",
-    "deploy/logs/task12_20260928-183807/04-snat-vsw-t4nbvsnvo4z52sumr9sck.json",
-    "deploy/logs/task12_20260928-183807/04-snat-vsw-t4nhtsfk2z79e1ggvlhdz.json",
-    "deploy/logs/task12_20260928-183807/04-snat-vsw-t4ncxa4gqgamhl0o8e6yq.json",
+    "deploy/zhuoyanplus域名证书.jpg",
+    "deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md.tmp.27564.1790671132582",
+    "deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md.tmp.27564.1790671113999",
+    "deploy/logs/task15_20260929-153704/final_attr.json",
+    "deploy/logs/task15_20260929-153704/final_net.json",
+    "deploy/logs/task15_20260929-153704/final_params.json",
+    "deploy/logs/task15_20260929-153704/final_ip.json",
+    "deploy/logs/task15_20260929-153704/final_ssl.json",
+    "deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md.tmp.27564.1790671038424",
+    "deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md.tmp.27564.1790671029051",
+    "deploy/logs/task15_20260929-153704/ptl18.json",
+    "deploy/任务45环境隔离修订_2026-09-29.md",
+    "deploy/nodepool_ledger_sg.md",
+    "deploy/工单_ACK马尼拉控制面安全组缺失.md",
+    "deploy/工单_ACK马尼拉API端点错误.md",
+    "deploy/nodepool_ledger.md",
+    "deploy/ack_ledger.md",
+    "deploy/sg_ledger.md",
+    "deploy/G8代码补项_交付说明_2026-09-28.md",
     "deploy/eip_ledger.md",
     "deploy/部署方案修订记录-v2.3.md",
     "deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md",

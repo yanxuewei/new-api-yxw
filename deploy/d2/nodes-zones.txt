@@ -1,0 +1,42 @@
+# 任务 11 证据 · 马尼拉节点池 nodes × zones
+# 采集时间 : 2026-09-29 15:30 (CST) / 07:30 (UTC)
+# 集群      : ack-newapi-mnl = cd57e40ce9a634c1698c2f5c5e09bd93c
+# 节点池    : np-mnl-app = npaad418131aa84c899be022b5463d13bf (ess, rg-aek4nyivmmsb6iy)
+# 等价命令  : kubectl get nodes -L topology.kubernetes.io/zone -l site=ph-mnl
+#
+# 采集方式  : 集群 API Server 为私网端点（10.0.22.182:6443），从 VPC 外不可达。
+#             故经「云助手」在节点内执行 + 集群 admin kubeconfig，直接读 REST /api/v1/nodes。
+#             （节点自带 /usr/bin/kubectl 的 kubeconfig 为 system:node，RBAC 受限，不可用于本项。）
+
+NAME                                STATUS   ROLES    ZONE             INSTANCE-TYPE       KUBELET           INTERNAL-IP
+ap-southeast-6.10.0.22.194          Ready    <none>   ap-southeast-6a  ecs.g9ae.2xlarge    v1.35.7-aliyun.1  10.0.22.194
+ap-southeast-6.10.0.22.195          Ready    <none>   ap-southeast-6a  ecs.g9ae.2xlarge    v1.35.7-aliyun.1  10.0.22.195
+ap-southeast-6.10.0.43.200          Ready    <none>   ap-southeast-6b  ecs.g9ae.2xlarge    v1.35.7-aliyun.1  10.0.43.200
+ap-southeast-6.10.0.43.201          Ready    <none>   ap-southeast-6b  ecs.g9ae.2xlarge    v1.35.7-aliyun.1  10.0.43.201
+
+--- 可用区分布 ---
+   ap-southeast-6a : 2
+   ap-southeast-6b : 2
+   → 满足「每区 ≥2 / 单 AZ 故障仍保有 2 副本」
+
+--- 节点标签 ---
+   site=ph-mnl · track=stable · node.kubernetes.io/instance-type=ecs.g9ae.2xlarge
+
+--- 节点容量（kubelet capacity，非可分配值）---
+   cpu=8  memory=32053108Ki (~30.6 GiB)  pods=48
+
+--- OS / 运行时 ---
+   osImage  = Alibaba Cloud Linux 3.2104 U13.3 (OpenAnolis Edition)
+   kubelet  = v1.35.7-aliyun.1
+   containerd = 2.3.4
+
+--- ESS 侧（asg-5tsd68ew4u0wutaqk5cy）---
+   i-5ts9wk588cliiweawind  Healthy  InService  ap-southeast-6a
+   i-5tsaatp5w68w13n4z1w8  Healthy  InService  ap-southeast-6a
+   i-5tsawhljdqzwqhmadqv0  Healthy  InService  ap-southeast-6b
+   i-5tsfiz0wh6r2kymp6jwh  Healthy  InService  ap-southeast-6b
+   → 4/4 InService/Healthy，与 K8s 侧 Ready 一致
+
+--- 集群工作负载 ---
+   all-ns pods: Running 35 / Succeeded 1 / 其他 0   （修前：全部 Pending）
+   kube-system: terway-eniip ×4 / coredns ×2 / csi-plugin ×4 / logtail-ds ×4 全部 Running

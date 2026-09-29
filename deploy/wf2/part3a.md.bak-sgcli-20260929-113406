@@ -27,19 +27,7 @@ sg-mnl-app-xxxx               # 本卡要固化的业务 SG
 
 把三个业务 SG ID 固化为环境变量并写入 IaC：`SG_MNL_ALB` / `SG_MNL_APP` / `SG_MNL_DB`（新加坡 `SG_SG_ALB` / `SG_SG_APP`）。
 
-> **✅ 已提前落地（2026-09-29，早于本卡排期 D5）**：5 个业务安全组 + **17 条可确定规则**已实建并复核，ID 见 **`deploy/sg_ledger.md`**，脚本 **`deploy/task22_sg_bootstrap.sh`**（幂等；`--verify` 随时核对现状，`--dry-run` 空跑）。
->
-> | 变量 | 名称 | SG ID | Region |
-> | --- | --- | --- | --- |
-> | `SG_MNL_ALB` | `sg-mnl-alb` | `sg-5tsj1epvcjjv6jkg3zks` | ap-southeast-6 |
-> | `SG_MNL_APP` | `sg-mnl-app` | `sg-5tsil3ca5dfkqefks1g9` | ap-southeast-6 |
-> | `SG_MNL_DB` | `sg-mnl-db` | `sg-5tsawhljdqzwo2t0n4ut` | ap-southeast-6 |
-> | `SG_SG_ALB` | `sg-sg-alb` | `sg-t4nbgfbh2cidnve88avf` | ap-southeast-1 |
-> | `SG_SG_APP` | `sg-sg-app` | `sg-t4n0qnhy8mxq9g733r67` | ap-southeast-1 |
->
-> **为什么提前建**：ACK 节点池**必须显式**指定 `scaling_group.security_group_ids`，否则 ACK 自建 `sg-` 前缀托管组（坑 2）；ID 先定死可杜绝"改了另一个安全组"的排查陷阱。本卡剩余实动作 = **步骤 1 的绑定确认 + V1–V4 出口复验 + 补 3 条延后规则**（`${DCDN_L2_IPS}` 因 DCDN 未开通【不适用】；GTM 探测段待任务 21；`sg-sg-app out 5432 → ${RDS_MNL_PUB}` 待任务 15 开 RDS 公网）。
-
-2. 按下表逐条建规则（**入向用 `AuthorizeSecurityGroup`、出向用 `AuthorizeSecurityGroupEgress`**；组引用只在**同 VPC** 内可用）：
+2. 按下表逐条 `AuthorizeSecurityGroup`（**用组引用而不是 IP 段**，可维护性最高）：
 
 | SG | 方向 | 协议/端口 | 源/目的 | 用途 |
 | --- | --- | --- | --- | --- |
@@ -55,17 +43,9 @@ sg-mnl-app-xxxx               # 本卡要固化的业务 SG
 | `sg-sg-app` | out | TCP 5432 | `${RDS_MNL_PUB}` 公网 IP 段 | 备 region 读主库（目的地址精确放行） |
 
 ```bash
-# 入向：只有入向用 AuthorizeSecurityGroup
 aliyun ecs AuthorizeSecurityGroup --RegionId ap-southeast-6 --SecurityGroupId ${SG_MNL_APP} \
-  --Permissions.1.IpProtocol tcp --Permissions.1.PortRange 3000/3000 \
-  --Permissions.1.SourceGroupId ${SG_MNL_ALB} --Permissions.1.NicType intranet \
-  --Permissions.1.Policy accept --Permissions.1.Priority 1 --Permissions.1.Description "from-alb-only"
-
-# 出向：必须换 Egress API（AuthorizeSecurityGroup 只加**入向**规则，用它建出向会静默失败）
-aliyun ecs AuthorizeSecurityGroupEgress --RegionId ap-southeast-6 --SecurityGroupId ${SG_MNL_APP} \
-  --Permissions.1.IpProtocol tcp --Permissions.1.PortRange 5432/5432 \
-  --Permissions.1.DestCidrIp 10.0.64.0/20 --Permissions.1.NicType intranet \
-  --Permissions.1.Policy accept --Permissions.1.Priority 1 --Permissions.1.Description "to-rds-pg-primary"
+  --IpProtocol tcp --PortRange 3000/3000 --SourceGroupId ${SG_MNL_ALB} \
+  --Policy accept --Priority 1 --Description "from-alb-only"
 # 期望输出：{"RequestId": "..."}，无 Code 字段即成功
 ```
 
@@ -103,8 +83,6 @@ kubectl --context mnl -n new-api run scan --image=busybox --rm -i --restart=Neve
 - **坑 2｜安全组改了不生效。** 现象：改完仍如旧。后果：误判"阿里云延迟"，其实改的是 ACK 自动建的另一个 `sg-` 安全组。改进：先 `kubectl get node -o jsonpath` 查实际绑定 SG 再改；ID 固化进 IaC。
 - **坑 3｜出向 `0.0.0.0/0:443` 被安全评审判不合格。** 后果：无法整改只能挂例外记录。改进：文档**主动写明理由**（上游模型厂商 IP 不可枚举）+ 缓解措施（NAT 网关 8 个固定 EIP + 操作审计 ActionTrail + 出向流量 SLS 审计）。
 - **坑 4｜新加坡→马尼拉 RDS 按"目的 IP 段"放行，但 RDS 公网 IP 会变。** 后果：接管日跨区 SQL 全断。改进：跨 region 无 SG 引用可用，只能①脚本定期解析同步 + 变更告警，或②走云企业网内网；列入月度巡检。
-- **坑 5｜出向规则用错 API 会「静默全失败」（2026-09-29 实跑踩到）。** 现象：用 `AuthorizeSecurityGroup` 加出向规则，返回 `RequestId` 齐全看着成功，但规则**一条都没落**。后果：上线后 Pod 连不上 RDS / Tair / 上游，排查方向全错（会先去查网络 ACL、路由、DSN）。改进：**入向 `AuthorizeSecurityGroup`、出向 `AuthorizeSecurityGroupEgress`**，两者不是同一个 API；参数统一 `--Permissions.1.*`（flat 的 `--SourceGroupId/--PortRange/...` 已标 `Deprecated`）；判成功**不能只看 `"Code"` 字段**——CLI 失败输出是 `ERROR: SDK.ServerError` + 文本行 `ErrorCode:`（非 JSON）。另注：`Permissions.N.*` 路径下重复规则**不会**返回 `InvalidPermission.Duplicate`，而是静默去重，想区分「新增 / 已存在」必须**前置比对**（脚本已用 `RULE_SET` 预读）。
-- **坑 6｜安全组查询失败被当成「不存在」→ 重复建组（2026-09-29 实跑踩到）。** 现象：脚本里 `2>/dev/null` 吞掉查询异常，`ensure_sg` 判定"没找到"就新建，VPC 里出现**两个同名 SG**（实跑多建了一个 `sg-mnl-app`，已撤销引用并删除）。后果：规则加在 A 组、实例挂 B 组，现象是"规则明明配了却不生效"，极难定位。改进：查询失败**必须中断报错，绝不猜**；名称过滤用精确 JMESPath `SecurityGroups.SecurityGroup[?SecurityGroupName=='x'].SecurityGroupId | [0]`，并对查询加重试。
 
 ### Day 3 · 任务 47｜ALB 安全组源收敛 + SNI 域名校验（人员A，1 人时，11:00–12:00）
 

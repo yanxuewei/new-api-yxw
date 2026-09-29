@@ -23,7 +23,7 @@
 
 ## 资源组
 `rg-ph-mnl` `rg-aek4nyivmmsb6iy`｜`rg-sg` `rg-aek4zvb3ldoiyua`｜`rg-nonprod` `rg-aek4hk3prqgqjcy`（staging/perf/压测）｜`rg-shared` `rg-aek3yypouljf4ry`（ACR / ActionTrail / CMS）｜默认 `rg-acfnssmgwnsb5oa` **禁止**放 new-api 资源。
-**生产 vs 非生产 = RG 权限边界；站点 = 标签 `site` + K8s 命名空间。** 铁律：① RG 须**创建时**指定（`CreateVpc --ResourceGroupId`；`CreateVSwitch` 无此参数但**继承 VPC 的组**）→ 先 VPC 后 vSwitch；② **vSwitch 不可单独换组**（`MoveResources` → `UnsupportedOperation`），迁 VPC 级联；③ OSS 换组 `ossutil api put-bucket-resource-group`，ACR 用 `cr ChangeResourceGroup --ResourceRegionId`（**非** `--RegionId`）；④ 启用按 RG 授权后，迁移与策略变更**同批发布**；⑤ `resourcemanager ListResources` **不索引 vSwitch** → 盘点走 `vpc DescribeVSwitches`。
+**生产 vs 非生产 = RG 权限边界；站点 = 标签 `site` + K8s 命名空间。** 铁律：① RG 须**创建时**指定（`CreateVpc --ResourceGroupId`；`CreateVSwitch` 无此参数但**继承 VPC 的组**）→ 先 VPC 后 vSwitch；② **vSwitch 不可单独换组**（`MoveResources` → `UnsupportedOperation`），迁 VPC 级联；**③ ACK/CS 集群同样不可换组**（`MoveResources` 对 `Service=cs|ack` × `ResourceType=cluster|Cluster` 四组合全返 `UnsupportedOperation.MoveResources`）→ body 漏写 `resource_group_id` 会**静默落 default 组**，只能**删除重建**（见 `deploy/ack_ledger.md` 坑 A）；④ OSS 换组 `ossutil api put-bucket-resource-group`，ACR 用 `cr ChangeResourceGroup --ResourceRegionId`（**非** `--RegionId`）；⑤ 启用按 RG 授权后，迁移与策略变更**同批发布**；⑥ `resourcemanager ListResources` **不索引 vSwitch** → 盘点走 `vpc DescribeVSwitches`；⑦ `resourcemanager` 在 `ap-southeast-6` **无 endpoint** → 必带 `--region ap-southeast-1`；`MoveResources` 要 **flat 格式** `--Resources.1.Service/ResourceType/ResourceId/RegionId` + `--method POST`（数组 JSON 报 `Illegal parameter serialization format`）。
 
 ## RAM 治理
 - 策略全 Custom 前缀 `newapi-`：admin-identity · ops-operator · cicd-acr-push · iac-terraform · dev-program · enforce-mfa · audit-protect · prod-boundary · prod-oss-guard。
@@ -57,7 +57,8 @@
 - 单价与站点成本 → `.deploy/gen_cost_table.py` 顶部常量（按量项统一 **730 h/月**）+ `.deploy/资源配额申请_执行报告.md`。常态 **9,865.36 USD/月**；接管峰值 15,322.51；备站冗余 623.90（6.32%）。
 
 ## 容灾与切换
-- **SLA 链**：`0.9999^5 ≈ 0.9996` → 月不可用 **17.28 min**；预算 21.6 min → 仅余 **4.32 min**。
+- **SLA 链**：`0.9999^5 ≈ 0.9996` → 月不可用 **17.28 min**；预算 21.6 min → 仅余 **4.32 min**。（注：`impl_deploy_fix.md:751-772` 已修正为 `0.9999^5 = 0.99950`，即**刚好达标、零余量**。）
+- **ACK 控制面 SLA ≠ 可选形态（2026-09-29 更正）**：ACK SLA（生效 2023-04-01）§1.4/§1.5 —— **区域级集群 regional = 所在地域 AZ 数 ≥3**；**可用区级集群 zonal = AZ 数 ≤2**；§2.2 承诺 99.95% / **99.50%**。**马尼拉 `ap-southeast-6` 只有 6a/6b 两个 AZ → 恒为 zonal、承诺 99.50%（月不可用上限 ≈3.6 h），无任何建簇选项可提升**。且 **ACK 控制面不在上面那条五项串联链内**（链路为 GA/ALB/应用数据面/RDS PG/Tair）→ **§8.2 推导不受 ACK SLA 影响**。指南原「选 regional 得 99.95%，否则 8.2 从根上错」系**双重误判，已在 `-v2.0.md` / `.md` / `-ch.md` / `wf2/part2a.md` 四份更正**（工具 `deploy/patch_ack_task10.py`）。对冲：控制面停摆**不影响已运行 Pod**（数据面继续服务），但**部署/扩缩容/HPA 停摆** → 冻结期内不得依赖临时扩缩容。
 - **切换三层**：① GTM 判定摘除 45–60s（可控）② DNS 传播 理论 60s / **实际 5–30 min**（运营商 LocalDNS，**不可控**）③ 客户端长连接（SSE 已建立**不迁移**）。**RTO**：乐观 2.3 min · 中位 6.3 min（**已超 4.32**）· 长尾 31.3 min。GTM TTL 最小 **1s**、探测最小 **15s**；探测节点**无菲律宾**；探测源 IP 须进 WAF 白名单。
 - **GTM 池间语义 = 主备 failover，不是分摊**：主池健康 → 备池零流量；`pool-sg` 绝不进主地址池集合；**可用 IP 最小阈值 = 1**（马尼拉 ALB 仅 2 IP，设 2 → 单 AZ 抖动误切）。
 - **备站容量 = 并列第二段 RTO**（HPA 爬坡 + 节点扩容 90–180s）；`impl_deploy.md §7.4.4` 只写 `replicas: 2`（**缺 HPA**）vs 指南 `:208`「HPA 2-24」→ 待统一。
@@ -83,3 +84,33 @@
 - Go 模块源实测：`proxy.golang.org` 直连 **http=000 / 10s 超时**；`goproxy.cn` 200 / 0.58s；`mirrors.aliyun.com/goproxy` 200 / 0.47s；`proxy.golang.org` 经 Clash 7890 → 200 / 0.68s。
 - 查 VM 内剩余空间（无 CLI 直读）：`docker run --rm --privileged --entrypoint sh alpine:3.20 -c 'df -Pk /'`。`Docker.raw` 的 `ls -l` 是 **apparent size**（恒等于上限、无意义），`du` 才是宿主真实占用。
 - 改 Docker Desktop 配置须 `docker desktop stop` → 改文件 → `docker desktop start`；沙箱内 `osascript -e 'quit app "Docker Desktop"'` 报 Apple Events `-10004` 权限违例，不可用。设置文件：`~/Library/Group Containers/group.com.docker/settings-store.json`（虚拟盘上限 `DiskSizeMiB`）；镜像加速器在 **`~/.docker/daemon.json`**（不是 settings-store）。
+
+## 私网集群运维通道（2026-09-29 新打通 · **替代「等任务 46 堡垒机」**）
+
+- **云助手直连私网节点**：
+  `aliyun ecs RunCommand --RegionId <r> --region <r> --Type RunShellScript --ContentEncoding Base64 --Timeout 600 --InstanceId.1 <i-xxx> --Name <n> --CommandContent "$(base64 -w0 body.sh)"`
+  → 轮询 `aliyun ecs DescribeInvocationResults --RegionId <r> --region <r> --InvokeId t-xxx`，**`Output` 是 base64，必须解码**。
+  - `--Type` 必须是 **`RunShellScript`**（写 `Shell` 报 `InvalidCmdType.NotFound`）。
+  - **默认不持久化命令对象** → 无需清理。`DescribeCommands` **不支持 `--MaxResults`**（报 `InvalidParameter.MaxResults`）。
+  - 偶发返回空 `InvokeId`（马尼拉端点抖动）→ **原地重试一次**，不是权限问题。
+- **集群 admin kubeconfig（CLI 可直接拉）**：
+  `aliyun cs DescribeClusterUserKubeconfig --ClusterId <cid> --region <r> --PrivateIpAddress true` → `config` 字段即 YAML，**`server` 就是可用 SLB VIP**（马尼拉 = `10.0.22.182:6443`）。
+  把 `certificate-authority-data` / `client-certificate-data` / `client-key-data` 各自 `base64 -d` 落成 PEM 后，**在节点内用 `curl --cert --key --cacert` 直连 REST API** —— 不需要 kubectl、不需要开公网端点、不需要堡垒机。权限 = cluster-admin，凭据只落节点 `/tmp`，用完删。
+- 节点自带 `/usr/bin/kubectl` 用的 kubeconfig 是 `system:node:<name>`，**只读、且读不到 EndpointSlice** → 排查够用、修复不够。
+- 通用执行器：`E:\WSL\np11_run_remote.sh <node> <body.sh> [loops]`（自动注入 `KCA`=`curl 凭据` 与 `KS`=`server` 两个变量）。
+
+## ACK 节点池 / 控制面（2026-09-29 实测）
+
+- ★ **控制面安全组必须放行 6443**：ACK 自动创建的 `sg-…`（名 `alicloud-cs-auto-created-security-group-<集群ID>`）**实测只有一条 ICMP 入方向规则** → 节点与 Pod 都连不上 apiserver ENI ⇒ ① 4/4 节点 `ensure_kube_version` 失败（`FailGetKubeVersion`，cloud-init 卡满 606s）；② Terway 经 ClusterIP 访问 API Server 超时 → `/etc/cni/net.d/` 空 → 永远 `NotReady`。
+  - 修：`aliyun ecs AuthorizeSecurityGroup --SecurityGroupId <控制面SG> --IpProtocol tcp --PortRange 6443/6443 --SourceCidrIp <VPC CIDR>`。
+  - **新建集群（含新加坡任务 24）第一件事就是核对这条规则**。控制面 ENI 反查：`aliyun ecs DescribeNetworkInterfaces --VpcId <vpc> --PrivateIpAddress.1 <ip>`（名字形如 `k8s-eni-*`、`type=Secondary`、**无 `InstanceId`**）。
+  - 别把这两个地址当「坏 VIP」：**DNS 解析与 `kubernetes` EndpointSlice 都是对的**，它们就是真实 apiserver ENI。SLB VIP 能通是因为走 **ENI 后端模式不经过该 SG**。
+- **口径铁律**：`ping` 通 **≠** 端口通（ICMP 可能在白名单里）；`curl (7) Connection timed out` **≠** DNS 问题（`(6)` 才是解析失败）→ **先测 TCP，再怀疑 DNS**。
+- **控制台「失败」列 ≠ `failed_nodes`**：映射的是 `offline_nodes`；「正常」采 ESS 生命周期口径也会失真 → 节点可用性**必须用 `kubectl get nodes` 验证**。
+- `DescribeClusterNodes` **不返回全部节点**（字段名是 `node_status`，可能 `Unknown`）→ 数节点用 `ess DescribeScalingInstances`。
+- **ESS 会自动替换 bootstrap 失败的节点**（本次观测 2 轮：14:17 / 14:38）→ 修复时按「当前实际实例 ID」，台账历史 ID 会作废。
+- **ESS 不严格按 `instance_types` 顺序取机型**（本次重建后 4 台全落 `g9ae`）→ 勿在文档里硬编码机型分布。
+- **节点标签真源 = 节点池 `kubernetes_config.labels`**（ECS 资源 tag ≠ K8s node label）；只给 `track` 不给 `site` → `kubectl get nodes -l site=ph-mnl` **一台都选不到**。
+- `ModifyClusterNodePool` 改 `kubernetes_config` 时**必须把 `user_data`（b64 原值）一并回传**；`DescribeClusterNodePools` **会返回 `user_data`** → 可回读校验是否丢失。
+- **`pam_limits` 会把 nofile 向上取整到 2 的幂**：写 200000 → 登录 shell 实得 **262144**；systemd 侧不取整（仍 200000）。验收口径应写「**≥ 200000**」。
+- ACK bootstrap **排在自有 `user_data` 之前**（`/var/lib/cloud/instance/user-data.txt` = ACK 段 → `set +e` → 我方段）⇒ 我方脚本改配置救不了当次 bootstrap。重跑用可执行副本 `/var/lib/cloud/instance/scripts/part-001`（会重复 `--auto-fdisk`，盘已挂载时报 `DiskinitError`，**无害**）。
