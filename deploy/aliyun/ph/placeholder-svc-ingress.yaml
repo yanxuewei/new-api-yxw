@@ -1,0 +1,63 @@
+# 任务 19 · 占位 Service + 验证用 Ingress（马尼拉 ACK / namespace: new-api）
+#
+# 存在的唯一目的：在 stable（任务 23）落地前，先打通
+#   ALB → IngressClass(alb) → Ingress → Service → Pod 这一整条链路，
+# 并把健康检查参数（注解）落到 Ingress 上，供任务 19 的 V5 验证。
+#
+# ⚠️ 两处与 v2.0 指南 §6.3 的**有意偏差**（须在 M2 证据链中留痕）：
+#   ① 指南 V2 期望 `curl https://api.likha.com/api/status` 返回；但任务 19 阶段
+#      没有任何后端 Pod，且任务 23 会用同 host(api.likha.com)+同 path(/)/不同 backend
+#      再建一条 Ingress —— 同 host 同 path 双后端属**路由冲突**（控制器合并结果不确定）。
+#      因此本占位 Ingress 改用内部验证域名（沿用任务 25 的 `*.internal.likha.com` 惯例），
+#      api.likha.com 的正式 Ingress 由任务 23 唯一持有。
+#   ② 占位 Service 名称按指南用 `new-api-master`（该 Deployment 属任务 18），
+#      故本阶段必然 0 endpoints —— V5「非正常后端为空」在 0 后端下是**假通过**，
+#      真正的健康检查验收挪到任务 23（有 Pod 之后）。
+#
+# 清理：任务 23 落地前执行 `kubectl -n new-api delete -f placeholder-svc-ingress.yaml`
+#      （脚本带 `--cleanup` 支持）。
+apiVersion: v1
+kind: Service
+metadata:
+  name: new-api-master
+  namespace: new-api
+  labels: { app: new-api-master, project: new-api, site: ph-mnl, track: master, env: prod }
+spec:
+  type: ClusterIP
+  selector: { app: new-api-master }        # 任务 18 之前无 Pod 命中 → endpoints 为空（预期）
+  ports:
+    - { name: http, port: 80, targetPort: 3000, protocol: TCP }
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: new-api-verify
+  namespace: new-api
+  labels: { app: new-api, project: new-api, site: ph-mnl, env: prod }
+  annotations:
+    # ---- 健康检查（§6.3 任务 19 步骤 4；G8 落地后 path 必须切 /readyz）----
+    alb.ingress.kubernetes.io/healthcheck-enabled: "true"
+    alb.ingress.kubernetes.io/healthcheck-path: "/api/status"        # → G8 后改 /readyz
+    alb.ingress.kubernetes.io/healthcheck-interval-seconds: "6"
+    alb.ingress.kubernetes.io/healthcheck-timeout-seconds: "3"
+    alb.ingress.kubernetes.io/healthy-threshold-count: "2"
+    alb.ingress.kubernetes.io/unhealthy-threshold-count: "3"
+    alb.ingress.kubernetes.io/healthcheck-method: "GET"
+    alb.ingress.kubernetes.io/healthcheck-httpcode: "http_2xx"
+    # ---- 排空：对齐 SHUTDOWN_TIMEOUT_SECONDS=150 的排空窗口 ----
+    alb.ingress.kubernetes.io/connection-drain-enabled: "true"
+    alb.ingress.kubernetes.io/connection-drain-timeout: "120"
+    # ---- 只监听 443（监听器本体由 AlbConfig 独占声明，此处仅声明后端协议）----
+    alb.ingress.kubernetes.io/backend-protocol: "HTTP"
+spec:
+  ingressClassName: alb
+  rules:
+    - host: ph-verify.internal.likha.com     # 私有验证域名，不公网解析（≠ api.likha.com，见上文偏差①）
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: new-api-master
+                port: { number: 80 }
