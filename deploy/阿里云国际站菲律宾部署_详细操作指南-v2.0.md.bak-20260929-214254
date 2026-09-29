@@ -5,7 +5,6 @@
 > 2. **操作口径**：每步以 `aliyun` CLI / `kubectl` / `psql` 真实命令为主路径（AI agent 可直接执行），控制台独有操作标 **【控制台】** 并配截图占位；关键命令一律附「期望输出」文本作为即贴即证。
 > 3. **决策修订（2026-09-27）**：日志库改为**马尼拉云数据库 ClickHouse 企业版（单 AZ）**（F9）；连接收敛改为**自建 PgBouncer**（F10）；线上 RDS PG 实测 `max_connections = 800`，连接预算按 **800 × 0.8 = 640** 全量重算（F11）。
 > 4. **付费方式修订（2026-09-28）**：**ECS 节点池与 Tair 实例全面改为包年包月（`PrePaid`，1 年 + 自动续费）**；配额核量口径随之从按量 `q_ecs_enterprise_postpay_c`（马尼拉 64 / 新加坡 96）切换为包年包月 **`q_ecs_enterprise_prepay_c`（马尼拉 100 / 新加坡 100，2026-09-28 API 实测）**；**ACK 集群管理费官方口径为按量付费、不支持转包年包月**，等价手段 = 购买 **ACK 资源包**抵扣。连带影响见 §2.1 基线表、任务 10（资源包）、任务 11 坑 7/坑 7b/坑 10（扩容即预付、库存独立、数据盘勿转包月）与任务 52 成本表（单价必须取包年包月价）。
-> 5. **日志库决策 API 加固（2026-09-29，任务 9 复核）**：F9 的"马尼拉 CK 企业版单 AZ"由 API 硬证据复核并**收紧三处口径** —— ① 马尼拉 CK **可用区只有 `ap-southeast-6a` 一个**（官方 Multi-AZ=No，`DescribeRegions` 实测仅回 6a）⇒ 单 AZ 是产品事实而非我们的取舍；② **存储只有 OSS**（ESSD_L0–L3/SSD 在马尼拉不可售）；③ **计费只有按量付费**（商品类型即「企业版 Serverless & 社区兼容版按量付费」，`CreateDBInstance` 无 `PayType`）⇒ **不适用付费方式修订，但可用计算资源包降本**（马尼拉抵扣因子 **1.45**）。同时否定"仅购买页可创建"（`clickhouse CreateDBInstance` API 2023-05-22 可直接建）。详见任务 9「2026-09-29 复核证据」表。
 >
 > **配套文件**：`.deploy/菲律宾部署方案-v2.1-修订版.xlsx`（任务/人时/验收标准唯一权威源）、`impl_deploy.md`（架构依据）、`.deploy/` 各落地执行报告（已落地事实源）。
 > **任何一处与国际站控制台不一致，以控制台 + 工单答复为准。**
@@ -163,7 +162,7 @@ gantt
 | F6 | **RAM 已落地**：admin/ops（MFA、无 AK）、cicd-push/iac-terraform（程序 AK）、dev-zhangzijun/dev-xiangdong（程序 AK 无控制台）、ops-prod_group 用户组已建；yanxuewei 遗留 AK 待降权 | G9 大部闭环 | 任务 46 直接引用真实用户/组 + 归档 SVG 配图 |
 | F7 | Tair / RDS 配额需在**产品开通后复查**（配额中心按产品分组，未开通时查不到） | 未闭环 | Day 1 泳道 B 首步执行 |
 | F8 | 账号 ID `5108890064395960`；域名 `api.likha.com` / `ops.likha.com`；**镜像源改单地域马尼拉**，前缀以实测 EE 域名为准（见任务 16 基线表） | 基线参数 | §2 参数表按真值更新；全文旧 `registry-vpc.ap-southeast-6.aliyuncs.com/newapi/new-api` 已订正 |
-| F9 | **马尼拉可用「云数据库 ClickHouse 企业版（单可用区）」**（2026-09-27 复核；**2026-09-29 API 硬证据加固**）：社区版无马尼拉，企业版单 AZ 可在 `ap-southeast-6` 购买 —— `clickhouse DescribeRegions` 实测**含 `ap-southeast-6a`，且马尼拉仅此一个 AZ**；官方地域表 Philippines (Manila)：**OSS=Yes · ESSD_L1/L2=No · Multi-AZ=No** | ✅ 决策已修订 | 日志库 `LOG_SQL_DSN` 收口马尼拉，**不再购买新加坡 CK**；任务 9/29/52、差异表 #1、M1 证据、风险表、裁剪表全部按此改写；单 AZ 故障域以「日志不入 SLA 证据链 + 写失败可降级」对冲。**2026-09-29 三点实测补丁**：① 马尼拉 CK **只能单 AZ（6a）且只能 OSS 存储** —— 原文「6a/6b 择一、尽量与 RDS 主节点错开 AZ」作废（6a 是唯一值，恰好与 RDS 主节点所在的 6b 错开）；② **企业版只有按量付费（Serverless 商品类型），不支持包年包月** —— 不计入 §2.1「包年包月」范围，它的等价降本手段是 **计算资源包**（马尼拉抵扣因子 **1.45**，预付 3 年）；③ 创建**不必走购买页**，`clickhouse CreateDBInstance`（API 2023-05-22）可直接建，`Category=enterprise` 与 `DeploySchema=single_az` 均已实测为合法值 |
+| F9 | **马尼拉可用「云数据库 ClickHouse 企业版（单可用区）」**（2026-09-27 复核）：社区版无马尼拉，企业版单 AZ 可在 `ap-southeast-6` 购买 | ✅ 决策已修订 | 日志库 `LOG_SQL_DSN` 收口马尼拉，**不再购买新加坡 CK**；任务 9/29/52、差异表 #1、M1 证据、风险表、裁剪表全部按此改写；单 AZ 故障域以「日志不入 SLA 证据链 + 写失败可降级」对冲 |
 | F10 | ~~**PgBouncer 采用自建方案**（ACK 集群内 3 副本），RDS 托管数据库代理不启用~~ → **2026-09-29 实测撤销：改用 RDS PG 内置托管 PgBouncer，实例上已启用（`PGBouncerEnabled="true"`），无任何自建部署动作** | ❌ 原结论作废（立论"托管功能面不足"经实测不成立） | 任务 41 已按托管口径重写（预算参数取实测 `max_client_conn 2000`/`default_pool_size 50`/`pool_mode transaction`，验证手段由 `SHOW POOLS` 换为 CMS `db.pgbouncer.*` + `pg_stat_activity`）；**"备站必须直连公网、不经池"这一连带结论也不成立**（公网串同样监听 6432），**2026-09-29 四项裁定已下：① `SQL_MAX_OPEN_CONNS=100`（`max_client_conn` 保持 2000）、② 备站走乙＝公网串 6432 经池（任务 15/30 的甲路作废）、③ `pool_mode` 维持 transaction（不临时切 session）、④ `stats_users=newapi_ops` 已下发生效**；⚠ 裁定 ① 后 I-1 **仅 CK 日志库分支成立**（1840 ≤ 2000），日志库仍为 PG 时 3680 > 2000 ⇒ CK 实例创建前的窗口仍需处置；「池化是切流硬性前置」不变 |
 | F11 | **线上购买 RDS PostgreSQL 规格实测 `max_connections = 800` 且用户不可改** | ✅ 实测 | 服务端可用预算封顶 800×0.8=**640**；`SQL_MAX_OPEN_CONNS` 默认 1000 与「16 副本 × 数百」直连方案在数学上全部作废；连接预算（任务 41/43、G11）按 640 重算；更换规格必须重跑 `SHOW max_connections` |
 
@@ -215,7 +214,7 @@ aliyun ram ListUsers | jq -r '.Users.User[]|.UserName'   # 期望 admin/ops/cicd
 > 输出按 **PASS / WARN / FAIL** 三档给出，原始响应落盘 `deploy/logs/verify_0_6_<时间戳>/`（已在 `.gitignore` 内）。
 > **`WARN` 不等于通过**，需人工确认后勾销 —— 当前两项长期 WARN：CK 实例未建（任务 29）、RAM 遗留账号 `zhangzijun` / `xiangdong`。
 
-**仍未闭环、Day 0 前必须完成**：G1 实名 `Verified`、G4 NS 指向阿里云、G5 证书 `Issued`（含 SAN `*.likha.com`）、G6 配置模板 PR、G7 产品开通（含 Tair/CK 决策落地 + **CK 企业版在 `ap-southeast-6` 的售卖区白名单**——官方要求未开放账号需提工单加白，否则企业版选项不出现）、**G8 代码补项（/healthz、/readyz、/metrics + 限流降级放行）合并**、G11 连接数预算表、G12 SLA 口径签字、G13 staging 方案、上游 8 EIP 白名单提交。
+**仍未闭环、Day 0 前必须完成**：G1 实名 `Verified`、G4 NS 指向阿里云、G5 证书 `Issued`（含 SAN `*.likha.com`）、G6 配置模板 PR、G7 产品开通（含 Tair/CK 决策落地）、**G8 代码补项（/healthz、/readyz、/metrics + 限流降级放行）合并**、G11 连接数预算表、G12 SLA 口径签字、G13 staging 方案、上游 8 EIP 白名单提交。
 
 ## 0.7 G0 门禁判定表（Day 1 启动前逐条打勾，任一未过不启动）
 
@@ -227,7 +226,7 @@ aliyun ram ListUsers | jq -r '.Users.User[]|.UserName'   # 期望 admin/ops/cicd
 | G4 | `dig NS` 指向阿里云 | 命令输出 | 待闭环 | ☐ |
 | G5 | 证书 `Issued` + SAN `*.likha.com` | openssl 输出 | 待闭环 | ☐ |
 | G6 | 配置模板 PR 已合并 | PR 链接 | 待闭环 | ☐ |
-| G7 | 全部产品开通（含 CK 决策按 F9 修订：马尼拉企业版单 AZ = **可用区仅 6a · 存储仅 OSS · 计费仅按量**）· **并确认本账号在 `ap-southeast-6` 已获企业版售卖区白名单**（官方口径：控制台无企业版选项即需提工单加白）· 同时登记 **CK 计算资源包** 是否进采购清单 | 控制台列表 + `clickhouse DescribeRegions`/`CreateDBInstance` 探针 | 待闭环 | ☐ |
+| G7 | 全部产品开通（含 CK 决策按 F9 修订：马尼拉企业版单 AZ） | 控制台列表 | 待闭环 | ☐ |
 | G8 | `/healthz` `/readyz` `/metrics` + 限流降级 **已合并** | commit/MR | **待闭环——未完成则 SLA 承诺下调** | ☐ |
 | G9 | RAM + MFA + 操作审计投递 | 跟踪状态 | 已落地（F6），补 yanxuewei 降权 | ☐ |
 | G10 | 新加坡 ≥96 vCPU | 工单号 e117bf2b-…（按量 Agree）；**包年包月 `prepay_c`=100（需求 96，仅余 4 vCPU）** | 已闭环 | ☐ |
@@ -259,7 +258,7 @@ aliyun ram ListUsers | jq -r '.Users.User[]|.UserName'   # 期望 admin/ops/cicd
 
 | # | 方案 v2.1 原写法 | 国际站现实 | 后果 | 本指南做法 | v2.0 状态 |
 | --- | --- | --- | --- | --- | --- |
-| 1 | 马尼拉 RDS ClickHouse 社区版承载 `LOG_SQL_DSN` | 社区版无马尼拉；**企业版（单可用区）可在马尼拉购买**（2026-09-27 复核）；**2026-09-29 API 加固：`DescribeRegions` 含 `ap-southeast-6a` 且马尼拉仅 1 个 AZ；官方地域表 OSS=Yes / ESSD=No / Multi-AZ=No** | 社区版方案不成立；企业版**单 AZ 是唯一形态**（非可选），故障域 = 6a 一个可用区；**只支持 OSS 存储**（无 ESSD）；**只有按量付费**（无包年包月） | **改用马尼拉云数据库 ClickHouse 企业版（单 AZ）**；以「日志库不入 SLA 证据链 + 写失败可降级」对冲单 AZ 风险；降本走**计算资源包**（抵扣因子 1.45），**不**走包年包月 | ✅ 决策已修订（F9），任务 9/29 已按新决策改写 |
+| 1 | 马尼拉 RDS ClickHouse 社区版承载 `LOG_SQL_DSN` | 社区版无马尼拉；**企业版（单可用区）可在马尼拉购买**（2026-09-27 复核） | 社区版方案不成立；企业版单 AZ 故障域 = 1 个 AZ | **改用马尼拉云数据库 ClickHouse 企业版（单 AZ）**；以「日志库不入 SLA 证据链 + 写失败可降级」对冲单 AZ 风险 | ✅ 决策已修订（F9），任务 9/29 已按新决策改写 |
 | 2 | ACK 1.31+ | 仅可建 **1.34/1.35/1.36**，1.31/1.33 已 EOL | 选不到/EOL 裸奔 | 统一 1.35，一次只升一个次版本 | 任务 10/24 已按 1.35 写 |
 | 3 | 节点规格 g8i.2xlarge | **g8i 全系未在马尼拉上架**（2026-09-25 实测） | 节点池选不到机型，Day2 卡死 | 先 `DescribeAvailableResource` 再定机型；多机型+双 AZ | ✅ 已改 **g9i.2xlarge**，备选 g8ine.2xlarge（F1） |
 | 4 | 备区经 RDS 公网 `verify-full` 读主库 | SSL 证书 CN/SAN 绑定开 SSL 时所选连接地址；经池时由实例出具同一张证书 | 握手失败，备区连不上主库 | 证书地址**选公网**；主站侧降 `verify-ca`，三条路径 | ✅ 已改**托管 PgBouncer**（F10 撤销，任务 41）：证书绑公网串 ⇒ 备站经公网串 **5432 或 6432 都能** `verify-full`（实测 6432 复用同证书）；主站经池走内网串只能 `verify-ca`（任务 15 坑 7 / 任务 41 坑 9）。备站走池（乙）还是直连（甲）**待裁定**（任务 30） |
@@ -345,7 +344,7 @@ aliyun ram ListUsers | jq -r '.Users.User[]|.UserName'   # 期望 admin/ops/cicd
 | K8s / CNI | 1.35（原 1.31 已 EOL）/ **Terway**（不可后期更换；Pod IP 是真实 VPC IP，节点与 Pod 共用 app 交换机） |
 | 镜像前缀（实测） | `${ACR_MNL_PREFIX}` = `acr-newapi-mnl-registry-vpc.ap-southeast-6.cr.aliyuncs.com/newapi-prod/new-api`（EE 实例带实例名前缀；旧 `registry-vpc.ap-southeast-6.aliyuncs.com/newapi/` 形态为个人版域名，实测不存在该命名空间） |
 | 节点池机型（实测修订） | **`ecs.g9i.2xlarge`**——`ecs.g8i` 未在马尼拉上架（2026-09-25 实测），旧文档 g8i 描述作废 |
-| **付费方式（2026-09-28 修订）** | **ECS 节点池 = 包年包月**（`instance_charge_type: PrePaid`，`period_unit: Month` / `period: 12`，`auto_renew: true`）· **Tair = 包年包月**（`ChargeType: PrePaid`，`Period: 12`，`AutoRenew: true`）· **RDS PostgreSQL = 包年包月**（`PayType: Prepaid`，**`Period: Year` / `UsedTime: 1`** —— 月付周期上限 <12，`Period=Month&UsedTime=12` 报 `Order.PeriodInvalid`）· **ACK 集群管理费不支持包年包月**（官方口径）→ 用 **ACK 资源包**抵扣 · **ClickHouse 企业版（马尼拉日志库）也不支持包年包月**（商品类型即「企业版 Serverless & 社区兼容版**按量付费**」，`CreateDBInstance` 无 `PayType` 参数）→ 用 **计算资源包**抵扣（马尼拉**抵扣因子 1.45**，预付 3 年）· ALB/WAF/NAT/EIP/SLS 仍各自按量 |
+| **付费方式（2026-09-28 修订）** | **ECS 节点池 = 包年包月**（`instance_charge_type: PrePaid`，`period_unit: Month` / `period: 12`，`auto_renew: true`）· **Tair = 包年包月**（`ChargeType: PrePaid`，`Period: 12`，`AutoRenew: true`）· **RDS PostgreSQL = 包年包月**（`PayType: Prepaid`，**`Period: Year` / `UsedTime: 1`** —— 月付周期上限 <12，`Period=Month&UsedTime=12` 报 `Order.PeriodInvalid`）· **ACK 集群管理费不支持包年包月**（官方口径）→ 用 **ACK 资源包**抵扣 · ALB/WAF/NAT/EIP/SLS 仍各自按量 |
 | 命名标签 | `project=new-api site=ph-mnl\|sg env=prod cost-center=<按财务> managed-by=console` |
 
 **配额 API 实测坑（全局适用）**：调用配额中心查询/申请**必须**带 `--Dimensions.1.Key regionId --Dimensions.1.Value <regionId>`，不带会返回 cn-hangzhou 的配额（假数据）；申请参数拼写为 `--DesireValue`；审批通过状态值为 **`Agree`**。ECS vCPU 配额已批：马尼拉 50→64、新加坡 50→96（**按量口径 `q_ecs_enterprise_postpay_c`**），**分钟级生效**。**2026-09-28 付费方式修订后：包年包月走独立额度 `q_ecs_enterprise_prepay_c`（马尼拉 100 / 新加坡 100，属默认值、无需工单）——核量时必须查 prepay 而非 postpay，两者分别计量、互不抵扣。**
@@ -919,7 +918,7 @@ dig SOA likha.com +short          # 改记录后期望 SOA 序列号递增
 ☐ 证书 *.likha.com 状态「已签发」，notAfter ≥ 今+30 天；私钥在 KMS new-api/prod/tls-wildcard；到期告警已建；部署模板备好未执行
 ☐ ACR 马尼拉企业版 RUNNING、**VPC 端点已关联马尼拉 VPC（`LinkedVpcs` 非空；实测 2026-09-28 为空，未通过）**、马尼拉 VPC 域名 kubectl 拉取输出 ok、新加坡跨区公网域名拉取输出 ok 且**耗时已记录**（§11 RTO 输入）
 ☐ 镜像 tag=git sha 且 CI 拒绝 latest；credential-helper 覆盖 new-api namespace
-☐ G0 表全部通过（含配额：**包年包月** vCPU 马尼拉=100、新加坡=100（`q_ecs_enterprise_prepay_c`）；按量对照 64/96 工单 `Agree`）；机型统一 ecs.g9i.2xlarge；**付费方式：ECS/Tair/RDS = 包年包月（PrePaid）；ACK 集群管理费走 ACK 资源包；CK 企业版只能按量（可选计算资源包，抵扣因子 1.45）**
+☐ G0 表全部通过（含配额：**包年包月** vCPU 马尼拉=100、新加坡=100（`q_ecs_enterprise_prepay_c`）；按量对照 64/96 工单 `Agree`）；机型统一 ecs.g9i.2xlarge；**付费方式：ECS/Tair = 包年包月（PrePaid），ACK 集群管理费走 ACK 资源包**
 ☐ likha.com NS 指向阿里云；api/ops/static 三条记录已预建，api TTL=60
 ```
 
@@ -1486,90 +1485,39 @@ curl -sS -o /dev/null -w "%{http_code}\n" https://oss-newapi-mnl.oss-ap-southeas
 
 ### Day 1 · 任务 9｜日志库 ClickHouse 决策（修订：马尼拉企业版单 AZ）（单人，1 人时，S1）——决策已修订 ✅
 
-**前置/状态**：**✅ 决策已按 F9 修订；2026-09-29 已用 API 硬证据复核并补 4 处口径**，本卡只保留决策结论与复核。原方案要求"马尼拉 ClickHouse 社区版 24.8，2 节点"；2026-09 实测核实：**国际站云数据库 ClickHouse 支持地域列表不含马尼拉**（社区版 A0 不可行）；**2026-09-27 复核定案：云数据库 ClickHouse「企业版（单可用区）」可在 `ap-southeast-6`（马尼拉）购买** → A0 成立，日志库收口马尼拉，**不再购买新加坡 CK**。日志表经分类**不含账类数据**。
-
-> **2026-09-29 复核证据（`clickhouse DescribeRegions` + 官方地域表 + `CreateDBInstance` 探针，零资源创建）**：
->
-> | # | 复核项 | 实测/权威结论 | 对原表述的处置 |
-> |---|---|---|---|
-> | E1 | 马尼拉**是否有 CK 地域** | `DescribeRegions` 返回 16 个地域，**含 `ap-southeast-6`**；对照组 `ap-southeast-9` 调 `CreateDBInstance` 报 `InvalidRegion.NotFound` ⇒ 该列表有判别力 | 立论**成立** |
-> | E2 | 马尼拉**有几个可用区** | `ap-southeast-6` 的 `Zones` **只有 `ap-southeast-6a` 一个**（对照：新加坡 3 个、东京 2 个、吉隆坡 3 个） | ❌ 原「6a/6b 择一、尽量与 RDS 主节点错开」**作废**——6a 是唯一值；**偶然结果**：RDS 主节点在 **6b**（`pgm-5tstdhko64x2c01w`），故确实错开，但这是运气不是选择 |
-> | E3 | 是否支持**多可用区** | 官方地域表 `Philippines (Manila)` → **Multi-AZ = No**；实测传 `DeploySchema=multi_az` 报 `relevantInspectionException: The number of zones is not multi.` | **单 AZ 不是我们的取舍，是该地域唯一形态** → 风险表措辞须从"我们选择单 AZ"改为"马尼拉 CK 只能单 AZ" |
-> | E4 | **存储类型** | 官方地域表 → 马尼拉 **OSS = Yes · ESSD_L1 = No · ESSD_L2 = No**；`StorageType` 枚举实测为 `ESSD_L0/L1/L2/L3/SSD/oss`（**`oss` 小写**，大写 `OSS` 会被 CLI 拒） | ❌ 原方案默认 ESSD 云盘口径**作废**，**只能 OSS**（存算分离对象存储后端） |
-> | E5 | **计费方式** | 商品类型 = 「企业版 Serverless & 社区兼容版**按量付费**」；计费项文档：**企业版的计算/存储/备份全为按量付费**（只有社区兼容版才有包年包月）；`CreateDBInstance` 参数表中**不存在 `PayType`/`ChargeType`/`Period`** | ❌ 与 §2.1「包年包月修订」**不适用** → CK 是**明确例外**；等价降本 = **计算资源包/存储资源包**（见 E6） |
-> | E6 | **降本手段与单价** | 计算 **0.185350 USD/CCU·h**、存储 OSS **0.000044 USD/GB·h**（均为马尼拉官方值）；**计算资源包 0.03611 USD/CCU·H**，最小包 3000 CCU·H、**预付 3 年、不可退订、可叠加**；**马尼拉抵扣因子 1.45** | 新增成本杠杆，见「落地要点」成本段 |
-> | E7 | **创建通道** | `clickhouse CreateDBInstance`（API 2023-05-22）即"create a ClickHouse Enterprise Edition cluster"，**CLI 可直接建**，无需购买页 | ❌ 原「仅购买页可完成」**作废** |
-> | E8 | **`DeploySchema` 合法值** | 探针实测：`single_az` ✅ 合法（走到商品校验层）、`multi_az` ✅ 合法（走到多 AZ 数量校验层）、`bogus_value` ❌ 报 `InvalidDeploySchema.Malformed` | 新增；**马尼拉只能用 `single_az`** |
-> | E9 | **内核版本** | 官方原文：企业版**默认使用最新内核版本，不允许手动选择**，且向后兼容 | 原「版本以 `SELECT version()` 为准、勿照抄 24.8」保留，但补一句：**版本不可选**，只能建后查 |
+**前置/状态**：**✅ 决策已按 F9 修订**，本卡只保留决策结论与复核。原方案要求"马尼拉 ClickHouse 社区版 24.8，2 节点"；2026-09 实测核实：**国际站云数据库 ClickHouse 支持地域列表不含马尼拉**（社区版 A0 不可行）；**2026-09-27 复核定案：云数据库 ClickHouse「企业版（单可用区）」可在 `ap-southeast-6`（马尼拉）购买** → A0 成立，日志库收口马尼拉，**不再购买新加坡 CK**。日志表经分类**不含账类数据**。
 
 > **决策结论（修订后）**：
-> - **主链路日志库 = 马尼拉云数据库 ClickHouse 企业版（单可用区 / 6a / OSS 存储 / 按量计费）**，与主站同 region、同 VPC，日志写入走内网，**无 60–90ms 跨区 RTT 代价**；实例创建与 `LOG_SQL_DSN` 落地在任务 29。
-> - **单 AZ 不是取舍，是马尼拉唯一形态**（E3：官方 Multi-AZ=No + 实测报"zone 数量不是多 AZ"）：故障域 = `ap-southeast-6a` 一个可用区。对冲手段固定两条——① **日志库不进入 SLA 证据链**（SLO 只用网关/APM 指标，见任务 26/32）；② **写失败必须降级**（本卡「降级验证」是切流放行证据，未演练不得切流）。**不要写成"我们接受单 AZ 的代价"** —— 该表述会让接手方以为存在多 AZ 选项而反复排查；正确表述是"该产品在该地域不提供多 AZ"。
+> - **主链路日志库 = 马尼拉云数据库 ClickHouse 企业版（单可用区）**，与主站同 region、同 VPC，日志写入走内网，**无 60–90ms 跨区 RTT 代价**；实例购买与 `LOG_SQL_DSN` 落地在任务 29。
+> - **单 AZ 是本次修订明确接受的代价**：故障域 = 1 个可用区。对冲手段固定两条——① **日志库不进入 SLA 证据链**（SLO 只用网关/APM 指标，见任务 26/32）；② **写失败必须降级**（本卡「降级验证」是切流放行证据，未演练不得切流）。
 > - **硬规则不变**：日志表含"账"类数据（额度、消费、充值、对账）→ 一律不能用 CK，只能选 C（RDS PG 独立库 `newapi_log`）或主库；CK 最终一致 + 异步写不满足资金对账可追溯要求。**是账的一律留主库并纳入 PITR 范围——本节真正红线。**
 > - **代码事实修订（实测确认）**：new-api **主库不支持 ClickHouse**（`model/main.go:145` 仅 SQLite/MySQL/PostgreSQL），日志库是**独立 `LOG_SQL_DSN`**——"选 C 还是主库"的分支里 C 实际是把日志写入同一 RDS 实例的独立库，与主库争资源，不改变主库引擎。
 > - 四路对比留档（防止后续有人重开决策）：
 
 | 方案 | 延迟 | 运维负担 | 跨区流量费 | 一致性风险 | 适用前提 |
 | --- | --- | --- | --- | --- | --- |
-| **A0 马尼拉 CK 企业版（单 AZ）（已选）** | 最低（同 region 内网） | 中（托管） | 无 | 低（日志可丢）；单 AZ 故障域 | **✅ 2026-09-27 复核定案 + 2026-09-29 API 加固**：企业版可在 `ap-southeast-6` 创建；但**只能单 AZ（6a）、只能 OSS 存储、只能按量计费**（E2/E3/E4/E5）；前提是日志不入 SLA 证据链 + 写失败可降级 |
+| **A0 马尼拉 CK 企业版（单 AZ）（已选）** | 最低（同 region 内网） | 中（托管） | 无 | 低（日志可丢）；单 AZ 故障域 | **✅ 2026-09-27 复核定案**：企业版单 AZ 可选马尼拉；前提是日志不入 SLA 证据链 + 写失败可降级 |
 | A 新加坡 CK + 跨区写（旧方案，已废弃） | +60~90ms/条 | 中（托管） | 有（云企业网或公网） | 低（日志可丢） | 仅当马尼拉企业版不可购时回退 |
 | B ACK 自建 CK | 低 | **高**（自运维备份/升级/扩容） | 无 | 中（副本少） | 团队有 CK 运维经验 |
 | C RDS PG 独立库 | 低 | 低 | 无 | **中高**（与主库争资源） | 日志量可控且不含账类数据 |
 
 落地要点（备查）：
-- **A0（已选，2026-09-29 按实测口径重写）**：云数据库 ClickHouse → **企业版（`Category=enterprise`）→ 单可用区 `DeploySchema=single_az`** → **可用区只能 `ap-southeast-6a`**（E2，非选择项）→ VPC `vpc-5tst1tgeessxn1azwasg2`、vSwitch 必须 **`vsw-5tswufq2pi26l4ahoiu84`（`vsw-mnl-data-a`，10.0.48.0/20，@6a）** → **存储类型只能 `oss`（小写）** → 计费**只能按量**；端口 **8123(HTTP)/9000(native)**（企业版连接地址形如 `cc-<id>-clickhouse.clickhouseserver.rds.aliyuncs.com`，以控制台/`DescribeDBInstances` 回显为准）；白名单加**马尼拉 app 段 `10.0.16.0/20`、`10.0.32.0/20` + 新加坡备站出口 4 个 EIP**（备站经公网异步写同一实例，见任务 29/30）。
-- **A0 弹性与成本（2026-09-29 实测锚点）**：**1 CCU = 1 核 4 GB**；`NodeScaleMin` 4 / `NodeScaleMax` 8（最小 4 CCU 起，比 CCU 区间 4–32 更紧，以控制台可选项为准）；`NodeCount` 2–16 且**仅在设置弹性区间时必填**。成本三档——**按量 0.185350 USD/CCU·h**（4 CCU 常驻 ⇒ 0.7414 USD/h ⇒ **≈541 USD/月**）、**存储 OSS 0.000044 USD/GB·h**（100 GB ⇒ **≈3.21 USD/月**，可忽略）、**用计算资源包抵扣**：所需包量 = 实际 CCU·h × **马尼拉抵扣因子 1.45**，包单价 **0.03611 USD/CCU·H** ⇒ 4 CCU 常驻等效 **≈152.9 USD/月（约为按量的 28.2%，省 ≈71.8%）**。资源包约束：**最小包 3000 CCU·H、预付 3 年、不支持退订、可叠加、不可续费**（3 年额度对日志库这种长尾负载是合适的；但**如果日志库 3 个月内可能被裁掉，就别买包**）。
-- **A0 前置门槛（G7 未闭环项，务必先验）**：官方原文——若控制台**没有企业版选项**，需**提交工单**申请加入售卖区白名单；否则无法创建企业版集群。→ 开工第一件事是**确认本账号在 `ap-southeast-6` 能看到/能建企业版**（CLI 探针或控制台各一次），不要等到任务 29 才发现要等工单。
-- **A0 依赖服务**：社区版集群默认挂 CLB 并计费；**企业版是否挂 CLB 尚未实测**（实例未建）→ 建成后须用 `cli` 复查有无 CLB 实例被自动创建并计费，写进任务 52 成本表。
+- **A0（已选）**：云数据库 ClickHouse → **企业版 → 单可用区（马尼拉 6a/6b，尽量与主站 RDS 主节点错开 AZ）** → VPC `vpc-5tst1tgeessxn1azwasg2`、vSwitch 用 data 段 `10.0.48.0/20`；端口 **8123(HTTP)/9000(native)**；白名单加**马尼拉 app 段 `10.0.16.0/20`、`10.0.32.0/20` + 新加坡备站出口 4 个 EIP**（备站经公网异步写同一实例，见任务 29/30）。实例购买在任务 29 执行。
 - **A（旧方案，回退备用）**：云数据库 ClickHouse → 社区版 → ≥2 节点 → VPC `vpc-t4nimmwvruexbnene0a3r`；端口 **8123(HTTP)/9000(native)**；白名单加调用方（马尼拉出口 EIP 或云企业网网段）。
 - **B**：`helm install ck <chart>` 到 `new-api-log` namespace，`StorageClass=alicloud-disk-essd`，副本 2，NetworkPolicy 限 app 段访问。
 - **C**：RDS 建 `newapi_log` + 独立账号，按天声明式分区 + 定时 `DROP PARTITION`。
 
-**操作步骤（CLI-first）**（决策已由 API 复核，本卡不创建资源）：
+**操作步骤（CLI-first）**（决策已修订，本卡只复核）：
 
 ```bash
-# ---- 1. 地域与可用区（2026-09-29 已执行，可重跑）----
-aliyun clickhouse DescribeRegions | jq -r '.Regions.Region[]|select(.RegionId=="ap-southeast-6")|.Zones.Zone[]|.ZoneId'
-# 期望（实测）：只有一行 ap-southeast-6a  ⇒ 马尼拉 CK 单 AZ 是硬事实
-aliyun clickhouse DescribeRegions | jq -r '.Regions.Region[]|select(.RegionId=="ap-southeast-1")|.Zones.Zone[]|.ZoneId'
-# 对照（实测）：ap-southeast-1a/1b/1c 三行 ⇒ 证明上面"只有一行"不是接口缺失
-
-# ---- 2. 存量核对（任务 29 创建后此处应 TotalCount=1）----
-aliyun clickhouse DescribeDBInstances --RegionId ap-southeast-6 | jq '.Data.TotalCount'
-# 实测（2026-09-29）：0 —— 实例尚未创建；旧卡写的"未建为 0/建成 1"口径正确
-
-# ---- 3. 决策落盘：LOG_SQL_DSN 指向马尼拉本地企业版 CK（内网地址），实例在任务 29 创建 ----
-
-# ---- 4. 零风险参数探针（用它复核创建参数是否被服务端接受，不会创建实例）----
-#   原理：故意把某个服务端校验点写错，看错误码落到哪一层；落到"商品校验/多AZ数量"即为参数层已通过。
-#   ① DeploySchema 合法性：bogus 值 → 报 InvalidDeploySchema.Malformed（实测）
-aliyun clickhouse CreateDBInstance --RegionId ap-southeast-6 --ZoneId ap-southeast-6a \
-  --Category enterprise --Engine clickhouse --DeploySchema bogus_value \
-  --VpcId vpc-5tst1tgeessxn1azwasg2 --VswitchId vsw-5tswufq2pi26l4ahoiu84 \
-  --NodeScaleMin 4 --NodeScaleMax 8 --NodeCount 2 --StorageType oss \
-  --DBInstanceDescription probe-ck-deployschema
-#   ② 多 AZ 在马尼拉不可用：DeploySchema=multi_az + 只给 1 个 AZ
-#      → 报 relevantInspectionException: The number of zones is not multi.（实测）
-#   ③ single_az 合法：配一个必失败的 EngineVersion，看错误是否越过参数层
-#      → 报 COMMODITY.INVALID_COMPONENT（实测）⇒ single_az 已被接受
-#   ⚠ 探针只把"服务端校验错误"当结果，任何一次落到"创建成功"都是事故；跑完必须
-#     aliyun clickhouse DescribeDBInstances --RegionId ap-southeast-6 | jq '.Data.TotalCount' 复核仍为 0
-
-# ---- 5. 创建命令（任务 29 执行；此处仅留口径，勿在本卡跑）----
-aliyun clickhouse CreateDBInstance --RegionId ap-southeast-6 \
-  --ZoneId ap-southeast-6a --Category enterprise --Engine clickhouse \
-  --DeploySchema single_az \
-  --VpcId vpc-5tst1tgeessxn1azwasg2 --VswitchId vsw-5tswufq2pi26l4ahoiu84 \
-  --NodeScaleMin 4 --NodeScaleMax 8 --NodeCount 2 \
-  --StorageType oss --DBTimeZone Asia/Shanghai \
-  --ResourceGroupId rg-aek4nyivmmsb6iy --DBInstanceDescription ck-mnl-newapi-log
-# ⚠ 无 PayType/Period/AutoPay 参数 —— 企业版只能按量付费，**创建即开始按 CCU 计费**，
-#   且 API 无 DryRun ⇒ 没有"零成本试单"这条路（RDS 那套 --AutoPay false 在此不可用）
+# 1. 复核地域结论：CK 购买页「企业版 + 单可用区」地域下拉能否选到菲律宾（马尼拉）【控制台核实】（截图清单第 14 项）
+# 2. 复核决策落盘：确认 LOG_SQL_DSN 规划指向马尼拉本地企业版 CK（Day1 仅决策，实例在任务 29 购）
+aliyun clickhouse DescribeDBInstances --RegionId ap-southeast-6   # 期望：任务 29 创建后 TotalCount=1（未建时为 0）
 ```
 
-`[图 D1-B-9｜拍摄对象：云数据库 ClickHouse 购买页（企业版实例列表 → 新建）——版本选「企业版」，部署方案选「单可用区」，可用区只有马尼拉可用区 A 一个选项；打码：账号 ID]`
+`[图 D1-B-9｜拍摄对象：云数据库 ClickHouse 购买页——版本选「企业版」、可用区选「单可用区（马尼拉）」；打码：账号 ID]`
 
-TTL DDL 基线（CK 就绪后执行。**E9：企业版内核版本不可手选**，默认最新且向后兼容 ⇒ 版本只能建后 `SELECT version()` 取证，勿照抄 24.8；**E4：存储是 OSS 对象存储后端**，冷热分层由平台负责；**企业版为存算分离 Serverless，用户侧不需要 `Replicated*MergeTree` / `ON CLUSTER` / 自建 ZooKeeper**）：
+TTL DDL 基线（CK 就绪后执行，版本以 `SELECT version()` 为准勿照抄 24.8；**企业版单 AZ 单副本不需要 `ON CLUSTER` 与 ZooKeeper**，启用多副本时 cluster 名以控制台给出为准）：
 
 ```sql
 CREATE TABLE newapi_logs (
@@ -1599,10 +1547,6 @@ clickhouse-client ... --query "SELECT count() FROM newapi_logs"  # 期望 ≥1�
 - 坑 2｜（旧方案 A 的代价，现按 F9 已不采用，仅回退时适用）CK 在新加坡、应用在马尼拉、同步写日志：每请求 +60–90ms，TTFT 明显劣化，压测不可能达标；CK 抖动会通过日志路径拖垮主链路（"日志把业务打死"典型模式）。**改进**：无论日志库落在哪个 region，日志写入必须异步 + 批量 + 有界队列 + 满了丢弃（而非阻塞）；日志写失败单独打点告警。
 - 坑 3｜把计费/对账数据放进 CK：CK 通常不做备份，且分布式表异步写的最终一致会让对账出现缺口。**后果**：丢钱，比丢日志严重一个量级。**改进**：先分类"哪些是账、哪些是日志"，见上方硬规则。
 - 坑 4｜**把单 AZ 当成"没有风险"**：企业版单可用区意味着该 AZ 故障时日志库整体不可用，且**没有跨 AZ 自动接管**。**改进（不可省略）**：① 日志库明确排除在 SLA 证据链之外，SLO 看板不引用 CK 数据源；② 本卡「降级验证」必须实操通过并留证，作为切流放行前置条件之一；③ 日志只做查询/排障用途，保留 90 天 TTL，不做业务回算依赖。
-- 坑 5｜**把"单 AZ"写成"我们选择单 AZ"**（2026-09-29 实测新增）。现象：文档表述为"本次修订明确接受的代价"，读的人会去找"多 AZ 开关"并怀疑是配置漏项。真相：**该产品在该地域根本不提供多 AZ**（E2/E3：`Zones` 只有 6a；官方地域表 Multi-AZ=No；传 `multi_az` 报 `The number of zones is not multi.`）。**改进**：表述固定为"马尼拉 CK 不提供多 AZ"，并把证据行贴在旁边。
-- 坑 6｜**按 ECS/Tair 的思路给 CK 找"包年包月"**（同批新增）。现象：付费方式统一改包年包月时，很自然会想给 CK 也改一次；但 CK 商品类型就叫「企业版 Serverless & 社区兼容版**按量付费**」，`CreateDBInstance` **连 `PayType` 参数都没有**，控制台也无该选项。**后果**：反复试错 + 误以为"参数没开放"。**改进**：CK 计费口径固定为「**按量 + 计算资源包**」，且记住资源包的三个硬约束——**最小包 3000 CCU·H、预付 3 年、不可退订**（可叠加、不可续费）。**判断规则：日志库若 3 年内可能被裁撤/迁移，就不要买包。**
-- 坑 7｜**以为 CK 存储能选 ESSD 云盘**（同批新增）。现象：方案里"按 ESSD PL1 估存储成本"的惯性会延续到 CK。真相：**马尼拉只有 OSS**（ESSD_L0/L1/L2/L3/SSD 在该地域不可售）。**改进**：性能预期按"对象存储后端 + 平台分层"重设；若业务要求低延迟点查/高并发明细，回到四路表改用方案 C（RDS PG 独立库）或 B（ACK 自建），不要在马尼拉硬要 ESSD。
-- 坑 8｜**探针/命令的大小写与本地校验**（同批新增）。① `StorageType` 值**必须小写 `oss`**，写 `OSS` 会被 CLI 直接拒（返回 `did_you_mean: [ESSD_L0,...,oss]`），看起来像"地域不支持"；② 探针若拿 CLI 已声明 enum/range 的参数当"必失败点"（如 `--NodeCount 1`），会在 **CLI 本地**就被拦下，**根本到不了服务端**，得到的"报错"没有任何判别力。**改进**：探针一律选用服务端才校验的点（`DeploySchema` 非法值、多 AZ 数量、不存在的地域/AZ），且跑完必须复核 `TotalCount` 未变。
 
 ### Day 1 · 任务 15｜开启 RDS 公网地址并把白名单收死（单人，2 人时，S4）✅ 已执行，勿重做
 
@@ -1963,28 +1907,18 @@ aliyun r-kvstore CreateInstance --RegionId ap-southeast-1 --ZoneId ap-southeast-
   --ChargeType PrePaid --Period 12 --AutoRenew true --AutoRenewPeriod 1
 aliyun r-kvstore ModifyInstanceParameter --InstanceId ${TAIR_SG_ID} \
   --Parameters '{"#no_loose_maxmemory-policy":"allkeys-lru"}'
-# 2. 日志库不再在新加坡购买 CK（F9 修订）：马尼拉企业版单 AZ 实例在本卡创建，参数按任务 9 实测口径固化——
-#    Category=enterprise · DeploySchema=single_az · ZoneId=ap-southeast-6a（唯一可用区）· StorageType=oss（小写，唯一可售）
-#    VpcId=vpc-5tst1tgeessxn1azwasg2 · VswitchId=vsw-5tswufq2pi26l4ahoiu84（vsw-mnl-data-a，@6a）
+# 2. 日志库不再在新加坡购买 CK（F9 修订）：马尼拉企业版单 AZ 实例在任务 9 落地要点基础上于本卡创建——
+#    云数据库 ClickHouse → 企业版 → 单可用区（ap-southeast-6）→ VPC vpc-5tst1tgeessxn1azwasg2 / data 段 vSwitch
 #    端口 8123(HTTP)/9000(native)；白名单：马尼拉 app 段 10.0.16.0/20、10.0.32.0/20 + 新加坡备站出口 4 个 EIP
-aliyun clickhouse CreateDBInstance --RegionId ap-southeast-6 \
-  --ZoneId ap-southeast-6a --Category enterprise --Engine clickhouse --DeploySchema single_az \
-  --VpcId vpc-5tst1tgeessxn1azwasg2 --VswitchId vsw-5tswufq2pi26l4ahoiu84 \
-  --NodeScaleMin 4 --NodeScaleMax 8 --NodeCount 2 \
-  --StorageType oss --DBTimeZone Asia/Shanghai \
-  --ResourceGroupId rg-aek4nyivmmsb6iy --DBInstanceDescription ck-mnl-newapi-log
-# ⚠ 三个"没有"：没有 PayType/Period（只能按量）；没有 DryRun（创建即计费，无零成本试单）；
-#   没有 EngineVersion 可选性（企业版内核由平台决定，建后 SELECT version() 取证）
-# ⚠ 创建前先确认账号已能用企业版（官方要求未开放的账号需提工单加白，见任务 9「A0 前置门槛」）
 # 3. LOG_SQL_DSN：马尼拉主站指向**本地马尼拉企业版 CK（内网地址）**；
 #    新加坡备站指向**同一马尼拉 CK 的公网/跨区可达地址**，异步批量写（+60–90ms 仅为备站/接管期代价，主站无此代价）
 #    日志采集：logtail-ds + 日志服务 SLS 的 sls-newapi-sg，/app/logs/*.log 与 stdout 双路（stdout 兜底）
 ```
 
-【控制台/CLI 二选一，**2026-09-29 修订：不再"仅购买页可完成"**】建簇走上面的 `clickhouse CreateDBInstance`（API 2023-05-22 即"创建企业版集群"）；控制台路径为 云数据库 ClickHouse → **企业版实例列表** → 新建集群 → 商品类型「企业版 Serverless & 社区兼容版按量付费」→ 部署方案**单可用区**（马尼拉只有可用区 A 一个可选）→ 专有网络 `vpc-5tst1tgeessxn1azwasg2` + 交换机 `vsw-mnl-data-a`。建好后用 `aliyun clickhouse DescribeDBInstances --RegionId ap-southeast-6` 复核状态。**注意：企业版实例列表与社区版实例列表是控制台上两个不同 tab**，找不到实例先查 tab 再查地域。
+【控制台】马尼拉 CK 企业版实例创建仅购买页可完成：**企业版、单可用区（马尼拉）、专有网络 `vpc-5tst1tgeessxn1azwasg2`**；建好后可用 `aliyun clickhouse DescribeDBInstances --RegionId ap-southeast-6` 复核状态。
 `[图 D1-B-29｜拍摄对象：马尼拉 CK 企业版（单 AZ）实例详情页与白名单配置页；打码：实例连接地址]`
 
-期望输出：Tair 返回 `InstanceId`（`r-t4n...`）；马尼拉 CK 企业版实例状态进入就绪态（**状态字段取值以 `DescribeDBInstances` 回显为准，不要预设 `Activated`**；社区版口径是 `Running`，企业版未实测）。CK 建表 + 写入按任务 9 的 TTL DDL 基线执行（`newapi_logs`，PARTITION BY toDate(ts)，TTL 90 天；**企业版为存算分离 Serverless，用户侧用普通 `MergeTree()` 即可，不带 `ON CLUSTER`、不建 ZooKeeper、不用 `Replicated*`**）。
+期望输出：Tair 返回 `InstanceId`（`r-t4n...`）；马尼拉 CK 企业版实例状态 Activated。CK 建表 + 写入按任务 9 的 TTL DDL 基线执行（`newapi_logs`，PARTITION BY toDate(ts)，TTL 90 天；单副本用普通 `MergeTree()`，不带 `ON CLUSTER`）。
 SLS 采集复核：日志服务控制台确认 `sls-newapi-sg` 有 `/app/logs/*.log` 与 stdout 两路 Logtail 配置且近期有写入量。
 `[图 D1-B-29b｜拍摄对象：Logtail 采集配置与马尼拉 CK 企业版实例（单 AZ）页；打码：实例地址]`
 
@@ -3997,7 +3931,7 @@ aliyun bssopenapi QueryInstanceBill --BillingCycle $(date +%Y-%m) --PageSize 50 
   | jq -r '.Data.Items.Item[] | select(.ProductCode=="nat" or .ProductCode=="alb") | [.ProductCode,.InstanceID,.PretaxAmount] | @tsv'
 ```
 
-3. 成本量化表（月度 USD；单价一律取购买页/QueryBill 实价，不许估算占位过夜）：**付费方式（2026-09-28 修订）= ECS/Tair 包年包月，故单价必须取包年包月价而非按量价**。实测锚点（ap-southeast-6）：`ecs.g9i.2xlarge` 包月 **217.17 USD/台/月** + 系统盘 100G ESSD PL1 **15.20** + 数据盘 300G ESSD PL1 **45.60** → 4 台 1 个月合计 **1111.88 USD**（按量同配置约 1.57808 USD/小时×4 台 ⇒ 月约 1136 USD，**包月省 ≈18%**）；Tair 4GB 标准版（`redis.master.stand.default`）包月 **58.75 USD/台/月**；**ClickHouse 企业版（马尼拉）= 只能按量**：计算 **0.185350 USD/CCU·h**、存储 OSS **0.000044 USD/GB·h**（2026-09-29 官方实测值）⇒ 4 CCU 常驻 = **≈541 USD/月** + 100 GB OSS ≈ **3.21 USD/月**；**若上计算资源包**（0.03611 USD/CCU·H，马尼拉**抵扣因子 1.45**）⇒ 等效 **≈152.9 USD/月**，即按量的 **28.2%**（省 ≈71.8%；约束：最小 3000 CCU·H、预付 3 年、不可退订）；**RDS PostgreSQL `pg.x4.2xlarge.2c`（16C64G）高可用 + 100G ESSD PL1 包年包月 = 标价 15134.47 USD/年 → 实付 10594.13 USD/年**（折扣 4540.34 ≈30%，月均 **882.84**；月单价 1261.21；按量对照 2.63232 USD/h ⇒ 月约 1921.59，**包年包月省 ≈54%**）；ACK Pro 集群管理费**只能按量**（约 0.09 USD/集群/小时）→ 用 **ACK 资源包**抵扣，成本表按资源包实付摊销。清单：ECS 马尼拉 `g9i.2xlarge`×4–8（包年包月配额 64/100）、ECS 新加坡 ×2–12（包年包月配额 96/100，**接管时 6× 弹性极高**——但包年包月**扩容即按 12 个月预付、缩容不退款**，弹性成本须按 12 个月上限而非月费率估算）、RDS PostgreSQL 16C64G 高可用×1、Tair 4GB 主备×2、ClickHouse（马尼拉企业版单 AZ，F9；**不再计新加坡 CK 与跨区专线费**；口径 = **可用区仅 6a · 存储仅 OSS · 计费仅按量（或计算资源包）**，弹性敏感度**中**；**注意成本表里 CK 那一行不能按"包年包月"填，只能填按量或资源包摊销**）、**跨区公网 SG→MNL RDS 出方向 GB（常被忽略：接管后所有 SQL 走公网）**、NAT 网关+共享带宽×2、ALB LCU×2、WAF 企业版+请求数×2、全站加速 DCDN 流量 GB、SLS 写入+存储、OSS（标准+低频+归档+跨区域复制）、GTM 旗舰版/云解析 DNS 付费版、Grafana（新加坡）、通配符证书 ×2/年、**ACK 资源包（2 集群）**、**CK 计算资源包/存储资源包（可选；买之前先过"最小 3000 CCU·H + 预付 3 年 + 不可退订"这道判断）**。每行标注弹性敏感度（高/中/低）。
+3. 成本量化表（月度 USD；单价一律取购买页/QueryBill 实价，不许估算占位过夜）：**付费方式（2026-09-28 修订）= ECS/Tair 包年包月，故单价必须取包年包月价而非按量价**。实测锚点（ap-southeast-6）：`ecs.g9i.2xlarge` 包月 **217.17 USD/台/月** + 系统盘 100G ESSD PL1 **15.20** + 数据盘 300G ESSD PL1 **45.60** → 4 台 1 个月合计 **1111.88 USD**（按量同配置约 1.57808 USD/小时×4 台 ⇒ 月约 1136 USD，**包月省 ≈18%**）；Tair 4GB 标准版（`redis.master.stand.default`）包月 **58.75 USD/台/月**；**RDS PostgreSQL `pg.x4.2xlarge.2c`（16C64G）高可用 + 100G ESSD PL1 包年包月 = 标价 15134.47 USD/年 → 实付 10594.13 USD/年**（折扣 4540.34 ≈30%，月均 **882.84**；月单价 1261.21；按量对照 2.63232 USD/h ⇒ 月约 1921.59，**包年包月省 ≈54%**）；ACK Pro 集群管理费**只能按量**（约 0.09 USD/集群/小时）→ 用 **ACK 资源包**抵扣，成本表按资源包实付摊销。清单：ECS 马尼拉 `g9i.2xlarge`×4–8（包年包月配额 64/100）、ECS 新加坡 ×2–12（包年包月配额 96/100，**接管时 6× 弹性极高**——但包年包月**扩容即按 12 个月预付、缩容不退款**，弹性成本须按 12 个月上限而非月费率估算）、RDS PostgreSQL 16C64G 高可用×1、Tair 4GB 主备×2、ClickHouse（马尼拉企业版单 AZ，F9；**不再计新加坡 CK 与跨区专线费**）、**跨区公网 SG→MNL RDS 出方向 GB（常被忽略：接管后所有 SQL 走公网）**、NAT 网关+共享带宽×2、ALB LCU×2、WAF 企业版+请求数×2、全站加速 DCDN 流量 GB、SLS 写入+存储、OSS（标准+低频+归档+跨区域复制）、GTM 旗舰版/云解析 DNS 付费版、Grafana（新加坡）、通配符证书 ×2/年、**ACK 资源包（2 集群）**。每行标注弹性敏感度（高/中/低）。
 4. 成本看板（任务 39）：标签 `project=new-api site=ph-mnl|sg env=prod cost-center=<按财务>` 全量打，预算告警 80%，月度复核。
 
 **验证方法**：
