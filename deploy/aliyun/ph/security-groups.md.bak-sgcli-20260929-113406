@@ -48,24 +48,16 @@
 ## 3. 建规则 CLI 示例
 
 ```bash
-# 入向：只有入向用 AuthorizeSecurityGroup
 aliyun ecs AuthorizeSecurityGroup --RegionId ap-southeast-6 --SecurityGroupId ${SG_MNL_APP} \
-  --Permissions.1.IpProtocol tcp --Permissions.1.PortRange 3000/3000 \
-  --Permissions.1.SourceGroupId ${SG_MNL_ALB} --Permissions.1.NicType intranet \
-  --Permissions.1.Policy accept --Permissions.1.Priority 1 --Permissions.1.Description "from-alb-only"
-
-# 出向：必须换 Egress API（AuthorizeSecurityGroup 只加**入向**规则，用它建出向会静默失败）
-aliyun ecs AuthorizeSecurityGroupEgress --RegionId ap-southeast-6 --SecurityGroupId ${SG_MNL_APP} \
-  --Permissions.1.IpProtocol tcp --Permissions.1.PortRange 5432/5432 \
-  --Permissions.1.DestCidrIp 10.0.64.0/20 --Permissions.1.NicType intranet \
-  --Permissions.1.Policy accept --Permissions.1.Priority 1 --Permissions.1.Description "to-rds-pg-primary"
+  --IpProtocol tcp --PortRange 3000/3000 --SourceGroupId ${SG_MNL_ALB} \
+  --Policy accept --Priority 1 --Description "from-alb-only"
 ```
 
 ## 4. 验证（D5 执行，照抄 §8.1）
 
 ```bash
 # 反例自查：任何入向 0.0.0.0/0 且端口非 80/443 的规则都要删（期望输出为空）
-aliyun ecs DescribeSecurityGroupAttribute --RegionId ap-southeast-6 --SecurityGroupId ${SG_MNL_APP} \
+aliyun ecs DescribeSecurityGroupAttribute --SecurityGroupId ${SG_MNL_APP} \
   | jq -r '.Permissions.Permission[] | select(.Direction=="ingress" and .SourceCidrIp=="0.0.0.0/0") | [.PortRange,.IpProtocol,.Description] | @tsv'
 
 nc -vz ${NODE_PUBLIC_IP} 3000                                              # 期望 refused/timeout（V1）

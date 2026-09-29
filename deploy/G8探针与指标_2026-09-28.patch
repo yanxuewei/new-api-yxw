@@ -1,0 +1,1324 @@
+diff --git a/common/constants.go b/common/constants.go
+index a733c2c08..faffc4956 100644
+--- a/common/constants.go
++++ b/common/constants.go
+@@ -232,6 +232,23 @@ var (
+ 	SearchRateLimitEnable         = true
+ 	SearchRateLimitNum            = 10
+ 	SearchRateLimitDuration int64 = 60
++
++	// RateLimitFailOpen lets ordinary limiters pass traffic when the rate-limit
++	// backend is unreachable. Authentication-critical limiters never fail open;
++	// they fall back to a per-pod in-memory window unless
++	// RateLimitCriticalMemoryBackstop is disabled, in which case they reject.
++	RateLimitFailOpen               = true
++	RateLimitCriticalMemoryBackstop = true
++
++	// MetricsEnabled serves /metrics on MetricsBindAddr:MetricsPort, a listener
++	// separate from the public application port.
++	MetricsEnabled  = false
++	MetricsPort     = 9090
++	MetricsBindAddr = "0.0.0.0"
++
++	// MigrateMode selects schema ownership: "auto" keeps the historical
++	// startup AutoMigrate, "off" leaves DDL to external migration jobs.
++	MigrateMode = "auto"
+ )
+ 
+ var RateLimitKeyExpirationDuration = 20 * time.Minute
+diff --git a/common/init.go b/common/init.go
+index b34f4376d..6b13e6e17 100644
+--- a/common/init.go
++++ b/common/init.go
+@@ -135,6 +135,20 @@ func InitEnv() {
+ 	SearchRateLimitEnable = GetEnvOrDefaultBool("SEARCH_RATE_LIMIT_ENABLE", true)
+ 	SearchRateLimitNum = GetEnvOrDefault("SEARCH_RATE_LIMIT", 10)
+ 	SearchRateLimitDuration = int64(GetEnvOrDefault("SEARCH_RATE_LIMIT_DURATION", 60))
++
++	// Degradation policy for the rate-limit backend and the internal metrics listener.
++	RateLimitFailOpen = GetEnvOrDefaultBool("RATE_LIMIT_FAIL_OPEN", true)
++	RateLimitCriticalMemoryBackstop = GetEnvOrDefaultBool("RATE_LIMIT_CRITICAL_MEMORY_BACKSTOP", true)
++	MetricsEnabled = GetEnvOrDefaultBool("METRICS_ENABLED", false)
++	MetricsPort = GetEnvOrDefault("METRICS_PORT", 9090)
++	MetricsBindAddr = GetEnvOrDefaultString("METRICS_BIND_ADDR", "0.0.0.0")
++
++	// Schema ownership: "auto" (startup AutoMigrate) or "off" (external migration job).
++	MigrateMode = strings.ToLower(GetEnvOrDefaultString("MIGRATE_MODE", "auto"))
++	if MigrateMode != "auto" && MigrateMode != "off" {
++		SysError("unknown MIGRATE_MODE " + MigrateMode + ", using auto")
++		MigrateMode = "auto"
++	}
+ 	initConstantEnv()
+ }
+ 
+diff --git a/controller/probe.go b/controller/probe.go
+new file mode 100644
+index 000000000..83f14edc8
+--- /dev/null
++++ b/controller/probe.go
+@@ -0,0 +1,107 @@
++package controller
++
++import (
++	"context"
++	"net/http"
++	"time"
++
++	"github.com/QuantumNous/new-api/common"
++	"github.com/QuantumNous/new-api/logger"
++	"github.com/QuantumNous/new-api/model"
++
++	"github.com/gin-gonic/gin"
++)
++
++// Dependency grades used by /readyz. The grade decides whether a failed
++// check makes the pod unservable, so it is the contract this endpoint exists
++// for - see the deployment guide's probe-degradation notes.
++//
++//	primary database  HARD   a pod that cannot read/write billing must not
++//	                       take traffic; ALB/K8s should pull it out.
++//	log database      SOFT   logs are outside the SLA evidence chain and a
++//	                       write failure degrades to dropping the row.
++//	redis / tair      SOFT   rate limiting fails open by design, so killing
++//	                       the pod here turns a cache blip into a outage.
++//
++// Responses carry only check names and states. Driver or DSN error text stays
++// in the server log, never in the HTTP body.
++const (
++	stateUp       = "up"
++	stateDegraded = "degraded"
++	stateDown     = "down"
++	stateDisabled = "disabled"
++)
++
++// Healthz is the liveness probe: process up, no dependency checks. It must
++// stay that way - a dependency-aware liveness probe restarts pods during the
++// exact outage it is supposed to ride through.
++func Healthz(c *gin.Context) {
++	c.JSON(http.StatusOK, gin.H{"status": "ok"})
++}
++
++// Readyz is the readiness probe: primary database hard, log database and
++// cache soft (reported as degraded but still serving).
++func Readyz(c *gin.Context) {
++	timeout := time.Duration(common.GetEnvOrDefault("READY_PROBE_TIMEOUT_MILLIS", 1000)) * time.Millisecond
++	ctx, cancel := context.WithTimeout(c.Request.Context(), timeout)
++	defer cancel()
++
++	checks := gin.H{}
++	note := func(name, state string) { checks[name] = state }
++
++	if err := pingPrimaryDB(ctx); err != nil {
++		logger.LogError(c.Request.Context(), "readyz primary database check failed: "+err.Error())
++		note("database", stateDown)
++		c.JSON(http.StatusServiceUnavailable, gin.H{"status": "not_ready", "checks": checks})
++		return
++	}
++	note("database", stateUp)
++
++	switch {
++	case model.LOG_DB == nil:
++		note("log_database", stateDisabled)
++	case model.LOG_DB == model.DB:
++		// No separate LOG_SQL_DSN: logs share the primary, already proven up.
++		note("log_database", stateUp)
++	case pingLogDB(ctx) != nil:
++		logger.LogError(c.Request.Context(), "readyz log database check failed, serving in degraded mode")
++		note("log_database", stateDegraded)
++	default:
++		note("log_database", stateUp)
++	}
++
++	switch {
++	case !common.RedisEnabled || common.RDB == nil:
++		note("cache", stateDisabled)
++	case common.RDB.Ping(ctx).Err() != nil:
++		logger.LogError(c.Request.Context(), "readyz cache check failed, serving in degraded mode")
++		note("cache", stateDegraded)
++	default:
++		note("cache", stateUp)
++	}
++
++	status := "ready"
++	if checks["log_database"] == stateDegraded || checks["cache"] == stateDegraded {
++		status = "degraded"
++	}
++	c.JSON(http.StatusOK, gin.H{"status": status, "checks": checks})
++}
++
++func pingPrimaryDB(ctx context.Context) error {
++	if model.DB == nil {
++		return context.DeadlineExceeded
++	}
++	sqlDB, err := model.DB.DB()
++	if err != nil {
++		return err
++	}
++	return sqlDB.PingContext(ctx)
++}
++
++func pingLogDB(ctx context.Context) error {
++	sqlDB, err := model.LOG_DB.DB()
++	if err != nil {
++		return err
++	}
++	return sqlDB.PingContext(ctx)
++}
+diff --git a/controller/probe_test.go b/controller/probe_test.go
+new file mode 100644
+index 000000000..1742db839
+--- /dev/null
++++ b/controller/probe_test.go
+@@ -0,0 +1,188 @@
++package controller
++
++import (
++	"net/http"
++	"net/http/httptest"
++	"strings"
++	"testing"
++	"time"
++
++	"github.com/QuantumNous/new-api/common"
++	"github.com/QuantumNous/new-api/model"
++
++	"github.com/gin-gonic/gin"
++	"github.com/glebarez/sqlite"
++	"github.com/go-redis/redis/v8"
++	"github.com/stretchr/testify/assert"
++	"github.com/stretchr/testify/require"
++	"gorm.io/gorm"
++)
++
++// useProbeSQLite gives /readyz a working primary database without running the
++// full startup migration set.
++func useProbeSQLite(t *testing.T) {
++	t.Helper()
++	previousDB := model.DB
++	previousLogDB := model.LOG_DB
++	db, err := gorm.Open(sqlite.Open("file:"+strings.ReplaceAll(t.Name(), "/", "_")+"?mode=memory&cache=shared"), &gorm.Config{})
++	require.NoError(t, err)
++	model.DB = db
++	model.LOG_DB = db
++	t.Cleanup(func() {
++		if sqlDB, err := db.DB(); err == nil {
++			_ = sqlDB.Close()
++		}
++		model.DB = previousDB
++		model.LOG_DB = previousLogDB
++	})
++}
++
++// useProbeRedis installs a cache client aimed at a closed port, which is how a
++// Tair outage looks to the process from inside.
++func useProbeRedis(t *testing.T, enabled bool) {
++	t.Helper()
++	previousEnabled := common.RedisEnabled
++	previousClient := common.RDB
++	common.RedisEnabled = enabled
++	if enabled {
++		common.RDB = redis.NewClient(&redis.Options{Addr: "127.0.0.1:1", DialTimeout: 200 * time.Millisecond})
++	} else {
++		common.RDB = nil
++	}
++	t.Cleanup(func() {
++		if common.RDB != nil {
++			_ = common.RDB.Close()
++		}
++		common.RedisEnabled = previousEnabled
++		common.RDB = previousClient
++	})
++}
++
++func performProbeRequest(t *testing.T, path string) *httptest.ResponseRecorder {
++	t.Helper()
++	gin.SetMode(gin.TestMode)
++	router := gin.New()
++	router.GET("/healthz", Healthz)
++	router.GET("/readyz", Readyz)
++	recorder := httptest.NewRecorder()
++	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
++	return recorder
++}
++
++func decodeProbeBody(t *testing.T, recorder *httptest.ResponseRecorder) map[string]any {
++	t.Helper()
++	var body map[string]any
++	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &body))
++	return body
++}
++
++// TestHealthzIgnoresDependencies pins the liveness contract: even with no
++// database and no cache the process reports healthy, because a dependency-aware
++// liveness probe restarts pods during the outage it should ride through.
++func TestHealthzIgnoresDependencies(t *testing.T) {
++	previousDB := model.DB
++	previousLogDB := model.LOG_DB
++	previousEnabled := common.RedisEnabled
++	previousClient := common.RDB
++	t.Cleanup(func() {
++		model.DB = previousDB
++		model.LOG_DB = previousLogDB
++		common.RedisEnabled = previousEnabled
++		common.RDB = previousClient
++	})
++
++	model.DB = nil
++	model.LOG_DB = nil
++	common.RedisEnabled = false
++	common.RDB = nil
++
++	recorder := performProbeRequest(t, "/healthz")
++	require.Equal(t, http.StatusOK, recorder.Code)
++	assert.Equal(t, "ok", decodeProbeBody(t, recorder)["status"])
++}
++
++// TestReadyzFailsClosedWithoutPrimaryDatabase: a pod that cannot reach the
++// billing database must be pulled out of rotation.
++func TestReadyzFailsClosedWithoutPrimaryDatabase(t *testing.T) {
++	previousDB := model.DB
++	previousLogDB := model.LOG_DB
++	t.Cleanup(func() {
++		model.DB = previousDB
++		model.LOG_DB = previousLogDB
++	})
++	model.DB = nil
++	model.LOG_DB = nil
++
++	recorder := performProbeRequest(t, "/readyz")
++	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
++	checks, ok := decodeProbeBody(t, recorder)["checks"].(map[string]any)
++	require.True(t, ok)
++	assert.Equal(t, stateDown, checks["database"])
++}
++
++// TestReadyzDegradedWhenCacheDown is the SLA-critical case: the cache being
++// unavailable keeps the pod serving, reported as degraded rather than not ready.
++func TestReadyzDegradedWhenCacheDown(t *testing.T) {
++	useProbeSQLite(t)
++	useProbeRedis(t, true)
++
++	recorder := performProbeRequest(t, "/readyz")
++	require.Equal(t, http.StatusOK, recorder.Code)
++	body := decodeProbeBody(t, recorder)
++	checks, ok := body["checks"].(map[string]any)
++	require.True(t, ok)
++	assert.Equal(t, "degraded", body["status"])
++	assert.Equal(t, stateUp, checks["database"])
++	assert.Equal(t, stateDegraded, checks["cache"])
++}
++
++func TestReadyzReportsDisabledCacheAsReady(t *testing.T) {
++	useProbeSQLite(t)
++	useProbeRedis(t, false)
++
++	recorder := performProbeRequest(t, "/readyz")
++	require.Equal(t, http.StatusOK, recorder.Code)
++	body := decodeProbeBody(t, recorder)
++	checks, ok := body["checks"].(map[string]any)
++	require.True(t, ok)
++	assert.Equal(t, "ready", body["status"])
++	assert.Equal(t, stateDisabled, checks["cache"])
++}
++
++// TestReadyzStaysReadyWhenLogDatabaseDown: the log database sits outside the
++// SLA evidence chain, so its failure may never remove a pod from rotation.
++func TestReadyzStaysReadyWhenLogDatabaseDown(t *testing.T) {
++	useProbeSQLite(t)
++	useProbeRedis(t, false)
++
++	previousLogDB := model.LOG_DB
++	logDB, err := gorm.Open(sqlite.Open("file:probe_log_down?mode=memory&cache=shared"), &gorm.Config{})
++	require.NoError(t, err)
++	sqlDB, err := logDB.DB()
++	require.NoError(t, err)
++	require.NoError(t, sqlDB.Close())
++	model.LOG_DB = logDB
++	t.Cleanup(func() { model.LOG_DB = previousLogDB })
++
++	recorder := performProbeRequest(t, "/readyz")
++	require.Equal(t, http.StatusOK, recorder.Code)
++	body := decodeProbeBody(t, recorder)
++	checks, ok := body["checks"].(map[string]any)
++	require.True(t, ok)
++	assert.Equal(t, "degraded", body["status"])
++	assert.Equal(t, stateDegraded, checks["log_database"])
++	assert.Equal(t, stateUp, checks["database"])
++}
++
++// TestReadyzBodyLeaksNoDependencyDetails: driver errors carry host and user
++// names, so only check states may reach the response body.
++func TestReadyzBodyLeaksNoDependencyDetails(t *testing.T) {
++	useProbeSQLite(t)
++	useProbeRedis(t, true)
++
++	raw := strings.ToLower(performProbeRequest(t, "/readyz").Body.String())
++	assert.NotContains(t, raw, "127.0.0.1")
++	assert.NotContains(t, raw, "dsn")
++	assert.NotContains(t, raw, stateDown)
++	assert.NotContains(t, raw, "ping")
++}
+diff --git a/main.go b/main.go
+index 26b59f9d7..fbe2111a5 100644
+--- a/main.go
++++ b/main.go
+@@ -23,6 +23,7 @@ import (
+ 	"github.com/QuantumNous/new-api/middleware"
+ 	"github.com/QuantumNous/new-api/model"
+ 	"github.com/QuantumNous/new-api/oauth"
++	httpmetrics "github.com/QuantumNous/new-api/pkg/httpmetrics"
+ 	"github.com/QuantumNous/new-api/pkg/jsplugin"
+ 	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
+ 	"github.com/QuantumNous/new-api/pkg/wsmanager"
+@@ -183,6 +184,12 @@ func main() {
+ 		common.FatalLog("failed to configure trusted proxies: " + err.Error())
+ 		return
+ 	}
++	// Metrics must wrap the recovery handler, otherwise a panicking request is
++	// counted with the status code written before the panic was handled.
++	if common.MetricsEnabled {
++		httpmetrics.Init(common.Version)
++	}
++	server.Use(httpmetrics.Middleware())
+ 	server.Use(gin.CustomRecovery(func(c *gin.Context, err any) {
+ 		common.SysLog(fmt.Sprintf("panic detected: %v", err))
+ 		c.JSON(http.StatusInternalServerError, gin.H{
+@@ -211,6 +218,12 @@ func main() {
+ 		port = strconv.Itoa(*common.Port)
+ 	}
+ 
++	// The metrics listener is separate from the application port so /metrics can
++	// never be reached through the ALB, WAF or GTM. Scraping is limited to the
++	// cluster by container port plus NetworkPolicy.
++	metricsAddr := fmt.Sprintf("%s:%d", common.MetricsBindAddr, common.MetricsPort)
++	metricsServer := startMetricsServer(metricsAddr)
++
+ 	srv := &http.Server{
+ 		Addr:    ":" + port,
+ 		Handler: server,
+@@ -238,6 +251,9 @@ func main() {
+ 	if err := srv.Shutdown(ctx); err != nil {
+ 		common.SysError(fmt.Sprintf("server forced to shutdown: %v", err))
+ 	}
++	if err := metricsServer.Shutdown(ctx); err != nil {
++		common.SysError(fmt.Sprintf("metrics listener forced to shutdown: %v", err))
++	}
+ 	// 内存中的看板数据保存入库，避免重启丢失未落库数据 (issue #5679)
+ 	if common.DataExportEnabled {
+ 		model.SaveQuotaDataCache()
+@@ -245,6 +261,33 @@ func main() {
+ 	common.SysLog("server exited")
+ }
+ 
++// startMetricsServer binds the internal /metrics listener and registers the
++// pool collectors that make the connection budget observable. A bind failure is
++// logged, not fatal: telemetry must never take the gateway down.
++func startMetricsServer(addr string) *httpmetrics.Server {
++	if !common.MetricsEnabled {
++		return nil
++	}
++	if sqlDB, err := model.DB.DB(); err == nil {
++		httpmetrics.RegisterSQLPool("primary", sqlDB)
++	}
++	if model.LOG_DB != nil && model.LOG_DB != model.DB {
++		if sqlDB, err := model.LOG_DB.DB(); err == nil {
++			httpmetrics.RegisterSQLPool("log", sqlDB)
++		}
++	}
++	if common.RedisEnabled && common.RDB != nil {
++		httpmetrics.RegisterRedisPool("cache", common.RDB)
++	}
++	server, err := httpmetrics.ListenAndServe(addr)
++	if err != nil {
++		common.SysError("failed to start metrics listener: " + err.Error())
++		return nil
++	}
++	common.SysLog("metrics listening on " + server.Addr() + "/metrics")
++	return server
++}
++
+ func InjectUmamiAnalytics() {
+ 	analyticsInjectBuilder := &strings.Builder{}
+ 	if os.Getenv("UMAMI_WEBSITE_ID") != "" {
+diff --git a/middleware/logger.go b/middleware/logger.go
+index bf16b6b61..03e938b32 100644
+--- a/middleware/logger.go
++++ b/middleware/logger.go
+@@ -10,6 +10,11 @@ import (
+ 
+ const RouteTagKey = "route_tag"
+ 
++// ProbePaths are the container probes. They are hit every few seconds by
++// kubelet, the ALB health check and GTM, so both the access log and the rate
++// limiters must leave them alone.
++var ProbePaths = []string{"/healthz", "/readyz"}
++
+ func RouteTag(tag string) gin.HandlerFunc {
+ 	return func(c *gin.Context) {
+ 		c.Set(RouteTagKey, tag)
+@@ -19,30 +24,33 @@ func RouteTag(tag string) gin.HandlerFunc {
+ 
+ func SetUpLogger(server *gin.Engine) {
+ 	server.Use(redactTaskArtifactAccessQuery())
+-	server.Use(gin.LoggerWithFormatter(func(param gin.LogFormatterParams) string {
+-		var requestID string
+-		if param.Keys != nil {
+-			requestID, _ = param.Keys[common.RequestIdKey].(string)
+-		}
+-		tag, _ := param.Keys[RouteTagKey].(string)
+-		if tag == "" {
+-			tag = "web"
+-		}
+-		path := param.Path
+-		// OAuth callbacks carry one-time codes and state in the query string.
+-		// Redact the log value only; the handler still needs the original query.
+-		if strings.HasPrefix(path, "/api/oauth/") || strings.HasPrefix(path, "/oauth/") {
+-			path, _, _ = strings.Cut(path, "?")
+-		}
+-		return fmt.Sprintf("[GIN] %s | %s | %s | %3d | %13v | %15s | %7s %s\n",
+-			param.TimeStamp.Format("2006/01/02 - 15:04:05"),
+-			tag,
+-			requestID,
+-			param.StatusCode,
+-			param.Latency,
+-			param.ClientIP,
+-			param.Method,
+-			path,
+-		)
++	server.Use(gin.LoggerWithConfig(gin.LoggerConfig{
++		SkipPaths: ProbePaths,
++		Formatter: func(param gin.LogFormatterParams) string {
++			var requestID string
++			if param.Keys != nil {
++				requestID, _ = param.Keys[common.RequestIdKey].(string)
++			}
++			tag, _ := param.Keys[RouteTagKey].(string)
++			if tag == "" {
++				tag = "web"
++			}
++			path := param.Path
++			// OAuth callbacks carry one-time codes and state in the query string.
++			// Redact the log value only; the handler still needs the original query.
++			if strings.HasPrefix(path, "/api/oauth/") || strings.HasPrefix(path, "/oauth/") {
++				path, _, _ = strings.Cut(path, "?")
++			}
++			return fmt.Sprintf("[GIN] %s | %s | %s | %3d | %13v | %15s | %7s %s\n",
++				param.TimeStamp.Format("2006-01-02 - 15:04:05"),
++				tag,
++				requestID,
++				param.StatusCode,
++				param.Latency,
++				param.ClientIP,
++				param.Method,
++				path,
++			)
++		},
+ 	}))
+ }
+diff --git a/middleware/rate-limit.go b/middleware/rate-limit.go
+index 4324174fd..ee2a1f398 100644
+--- a/middleware/rate-limit.go
++++ b/middleware/rate-limit.go
+@@ -6,14 +6,24 @@ import (
+ 	"fmt"
+ 	"net/http"
+ 	"strconv"
++	"strings"
++	"sync"
++	"time"
+ 
+ 	"github.com/QuantumNous/new-api/common"
+-	"github.com/QuantumNous/new-api/logger"
++	"github.com/QuantumNous/new-api/pkg/httpmetrics"
+ 	"github.com/gin-gonic/gin"
+ )
+ 
+ const redisRateLimitNamespace = "rateLimit:v2"
+ 
++// Marks that guard authentication or sensitive re-authentication. They keep an
++// in-memory backstop rather than failing open when Redis is unavailable.
++const (
++	criticalRateLimitMark     = "CT"
++	userCriticalRateLimitMark = "UC:"
++)
++
+ // Redis rate limiting intentionally uses a fixed window. The single Lua script
+ // makes increment, expiry, and the limit decision atomic, while retaining the
+ // simple fixed-window behavior: traffic at a window boundary can burst up to
+@@ -114,20 +124,18 @@ func redisRateLimiter(c *gin.Context, maxRequestNum int, duration int64, mark st
+ 		duration,
+ 	)
+ 	if err != nil {
+-		logger.LogError(c.Request.Context(), fmt.Sprintf("rate limit check failed (mark=%s): %v", mark, err))
+-		c.Status(http.StatusInternalServerError)
+-		c.Abort()
++		degradeRateLimit(c, mark, maxRequestNum, duration, mark+c.ClientIP(), err)
+ 		return
+ 	}
+ 	if !allowed {
+-		writeRateLimited(c, ttlSeconds)
++		writeRateLimited(c, mark, ttlSeconds)
+ 	}
+ }
+ 
+ func memoryRateLimiter(c *gin.Context, maxRequestNum int, duration int64, mark string) {
+ 	key := mark + c.ClientIP()
+ 	if !inMemoryRateLimiter.Request(key, maxRequestNum, duration) {
+-		writeRateLimited(c, duration)
++		writeRateLimited(c, mark, duration)
+ 		return
+ 	}
+ }
+@@ -136,7 +144,8 @@ func memoryRateLimiter(c *gin.Context, maxRequestNum int, duration int64, mark s
+ // clients can back off instead of treating the rejection as a fatal error.
+ // The in-memory limiter cannot report the remaining window, so callers
+ // without a TTL pass the full window duration as a conservative upper bound.
+-func writeRateLimited(c *gin.Context, retryAfterSeconds int64) {
++func writeRateLimited(c *gin.Context, mark string, retryAfterSeconds int64) {
++	httpmetrics.ObserveRateLimited(mark)
+ 	if retryAfterSeconds > 0 {
+ 		c.Header("Retry-After", strconv.FormatInt(retryAfterSeconds, 10))
+ 	}
+@@ -144,6 +153,71 @@ func writeRateLimited(c *gin.Context, retryAfterSeconds int64) {
+ 	c.Abort()
+ }
+ 
++// degradeRateLimit decides what happens when the rate-limit backend itself is
++// unreachable. A Tair blip must not become a gateway-wide outage, so this path
++// does not answer 5xx by default:
++//
++//   - ordinary marks fail open (RATE_LIMIT_FAIL_OPEN=false to opt out),
++//     because that traffic is already bounded by ALB/WAF CC rules;
++//   - authentication-critical marks keep a per-pod in-memory fixed window, so
++//     brute-force and credential-stuffing limits do not vanish while the
++//     backend is down. Failing those closed would lock every user out of login
++//     during a cache outage, which is the worse failure;
++//     RATE_LIMIT_CRITICAL_MEMORY_BACKSTOP=false selects that stricter option.
++//
++// memoryKey preserves the limiter's counting identity (IP or user id) in the
++// backstop window. Every branch increments newapi_rate_limit_degraded_total, so
++// the metric that justifies the fallback is also the one that alerts on it.
++func degradeRateLimit(c *gin.Context, mark string, maxRequestNum int, duration int64, memoryKey string, cause error) {
++	if isCriticalRateLimitMark(mark) {
++		if !common.RateLimitCriticalMemoryBackstop {
++			rejectRateLimitBackendDown(c, mark, cause)
++			return
++		}
++		logRateLimitDegraded(mark, cause)
++		httpmetrics.ObserveRateLimitDegraded(mark, "memory")
++		// It's safe to call multi times.
++		inMemoryRateLimiter.Init(common.RateLimitKeyExpirationDuration)
++		if !inMemoryRateLimiter.Request(memoryKey, maxRequestNum, duration) {
++			writeRateLimited(c, mark, duration)
++		}
++		return
++	}
++	if !common.RateLimitFailOpen {
++		rejectRateLimitBackendDown(c, mark, cause)
++		return
++	}
++	logRateLimitDegraded(mark, cause)
++	httpmetrics.ObserveRateLimitDegraded(mark, "pass")
++	c.Next()
++}
++
++func rejectRateLimitBackendDown(c *gin.Context, mark string, cause error) {
++	logRateLimitDegraded(mark, cause)
++	httpmetrics.ObserveRateLimitDegraded(mark, "reject")
++	c.Status(http.StatusServiceUnavailable)
++	c.Abort()
++}
++
++func isCriticalRateLimitMark(mark string) bool {
++	return mark == criticalRateLimitMark || strings.HasPrefix(mark, userCriticalRateLimitMark)
++}
++
++// rateLimitDegradeLogInterval throttles the warning so a Redis outage does not
++// emit one log line per request.
++const rateLimitDegradeLogInterval = 30 * time.Second
++
++var rateLimitDegradeLastLog sync.Map // mark -> time.Time
++
++func logRateLimitDegraded(mark string, cause error) {
++	now := time.Now()
++	if last, ok := rateLimitDegradeLastLog.Load(mark); ok && now.Sub(last.(time.Time)) < rateLimitDegradeLogInterval {
++		return
++	}
++	rateLimitDegradeLastLog.Store(mark, now)
++	common.SysError(fmt.Sprintf("rate limit backend unavailable (mark=%s), degraded: %v", mark, cause))
++}
++
+ func rateLimitFactory(maxRequestNum int, duration int64, mark string) func(c *gin.Context) {
+ 	if common.RedisEnabled {
+ 		return func(c *gin.Context) {
+@@ -173,7 +247,7 @@ func GlobalAPIRateLimit() func(c *gin.Context) {
+ 
+ func CriticalRateLimit() func(c *gin.Context) {
+ 	if common.CriticalRateLimitEnable {
+-		return rateLimitFactory(common.CriticalRateLimitNum, common.CriticalRateLimitDuration, "CT")
++		return rateLimitFactory(common.CriticalRateLimitNum, common.CriticalRateLimitDuration, criticalRateLimitMark)
+ 	}
+ 	return defNext
+ }
+@@ -185,7 +259,7 @@ func UserCriticalRateLimit(scope string) func(c *gin.Context) {
+ 	return userRateLimitFactory(
+ 		common.CriticalRateLimitNum,
+ 		common.CriticalRateLimitDuration,
+-		"UC:"+scope,
++		userCriticalRateLimitMark+scope,
+ 	)
+ }
+ 
+@@ -209,7 +283,8 @@ func userRateLimitFactory(maxRequestNum int, duration int64, mark string) func(c
+ 				c.Abort()
+ 				return
+ 			}
+-			userRedisRateLimiter(c, maxRequestNum, duration, redisUserRateLimitKey(mark, userID))
++			key := redisUserRateLimitKey(mark, userID)
++			userRedisRateLimiter(c, maxRequestNum, duration, key, mark)
+ 		}
+ 	}
+ 	// It's safe to call multi times.
+@@ -223,24 +298,23 @@ func userRateLimitFactory(maxRequestNum int, duration int64, mark string) func(c
+ 		}
+ 		key := fmt.Sprintf("%s:user:%d", mark, userID)
+ 		if !inMemoryRateLimiter.Request(key, maxRequestNum, duration) {
+-			writeRateLimited(c, duration)
++			writeRateLimited(c, mark, duration)
+ 			return
+ 		}
+ 	}
+ }
+ 
+ // userRedisRateLimiter is like redisRateLimiter but accepts a pre-built key
+-// (to support user-ID-based keys).
+-func userRedisRateLimiter(c *gin.Context, maxRequestNum int, duration int64, key string) {
++// (to support user-ID-based keys). That same key feeds the in-memory backstop,
++// so a degraded backend never switches the counting dimension from user to IP.
++func userRedisRateLimiter(c *gin.Context, maxRequestNum int, duration int64, key string, mark string) {
+ 	allowed, _, ttlSeconds, err := redisFixedWindowTake(c.Request.Context(), key, maxRequestNum, duration)
+ 	if err != nil {
+-		logger.LogError(c.Request.Context(), fmt.Sprintf("rate limit check failed (key=%s): %v", key, err))
+-		c.Status(http.StatusInternalServerError)
+-		c.Abort()
++		degradeRateLimit(c, mark, maxRequestNum, duration, key, err)
+ 		return
+ 	}
+ 	if !allowed {
+-		writeRateLimited(c, ttlSeconds)
++		writeRateLimited(c, mark, ttlSeconds)
+ 	}
+ }
+ 
+diff --git a/middleware/rate_limit_test.go b/middleware/rate_limit_test.go
+index 1ca48372b..95e6f232c 100644
+--- a/middleware/rate_limit_test.go
++++ b/middleware/rate_limit_test.go
+@@ -195,31 +195,70 @@ func TestRedisFixedWindowRepairsCounterWithoutTTL(t *testing.T) {
+ 	assert.False(t, redisServer.Exists(key), "a recovered counter must not remain permanently rate-limited")
+ }
+ 
++// TestRedisFailurePolicies pins the G8 degradation contract: an unreachable
++// rate-limit backend must never surface as a gateway error, and the
++// authentication-critical windows keep a per-pod backstop instead of vanishing.
+ func TestRedisFailurePolicies(t *testing.T) {
+ 	gin.SetMode(gin.TestMode)
+ 	_, redisClient := useRateLimitMiniRedis(t)
+ 	require.NoError(t, redisClient.Close())
+ 
+-	router := gin.New()
+-	require.NoError(t, router.SetTrustedProxies(nil))
+-	router.GET("/ip", rateLimitFactory(1, 30, "FAIL-IP"), func(c *gin.Context) {
+-		c.Status(http.StatusNoContent)
++	previousFailOpen := common.RateLimitFailOpen
++	previousBackstop := common.RateLimitCriticalMemoryBackstop
++	t.Cleanup(func() {
++		common.RateLimitFailOpen = previousFailOpen
++		common.RateLimitCriticalMemoryBackstop = previousBackstop
+ 	})
+-	router.GET(
+-		"/user",
+-		func(c *gin.Context) { c.Set("id", 7) },
+-		userRateLimitFactory(1, 30, "FAIL-USER"),
+-		func(c *gin.Context) { c.Status(http.StatusNoContent) },
+-	)
+-	router.GET("/email", EmailVerificationRateLimit(), func(c *gin.Context) {
++	common.RateLimitFailOpen = true
++	common.RateLimitCriticalMemoryBackstop = true
++
++	newRouter := func() *gin.Engine {
++		router := gin.New()
++		require.NoError(t, router.SetTrustedProxies(nil))
++		router.GET("/ip", rateLimitFactory(5, 30, "FAIL-IP"), func(c *gin.Context) {
++			c.Status(http.StatusNoContent)
++		})
++		router.GET(
++			"/user",
++			func(c *gin.Context) { c.Set("id", 7) },
++			userRateLimitFactory(5, 30, "FAIL-USER"),
++			func(c *gin.Context) { c.Status(http.StatusNoContent) },
++		)
++		router.GET("/email", EmailVerificationRateLimit(), func(c *gin.Context) {
++			c.Status(http.StatusNoContent)
++		})
++		return router
++	}
++
++	router := newRouter()
++	// Ordinary limiters fail open and the handler still runs.
++	assert.Equal(t, http.StatusNoContent, performRateLimitRequest(router, "/ip", "192.0.2.60:12345").Code)
++	assert.Equal(t, http.StatusNoContent, performRateLimitRequest(router, "/user", "192.0.2.61:12345").Code)
++	assert.Equal(t, http.StatusNoContent, performRateLimitRequest(router, "/email", "192.0.2.62:12345").Code)
++
++	// Opt-out keeps the request rejected, but as a dependency failure (503)
++	// rather than a server bug, so clients can retry with backoff.
++	common.RateLimitFailOpen = false
++	assert.Equal(t, http.StatusServiceUnavailable, performRateLimitRequest(newRouter(), "/ip", "192.0.2.63:12345").Code)
++	common.RateLimitFailOpen = true
++
++	// Authentication-critical marks fall back to an in-memory window: the limit
++	// keeps being enforced at pod granularity instead of disappearing.
++	criticalRouter := gin.New()
++	require.NoError(t, criticalRouter.SetTrustedProxies(nil))
++	criticalRouter.GET("/critical", rateLimitFactory(2, 30, criticalRateLimitMark), func(c *gin.Context) {
+ 		c.Status(http.StatusNoContent)
+ 	})
++	assert.Equal(t, http.StatusNoContent, performRateLimitRequest(criticalRouter, "/critical", "192.0.2.64:12345").Code)
++	assert.Equal(t, http.StatusNoContent, performRateLimitRequest(criticalRouter, "/critical", "192.0.2.64:12345").Code)
++	assert.Equal(t, http.StatusTooManyRequests, performRateLimitRequest(criticalRouter, "/critical", "192.0.2.64:12345").Code)
+ 
+-	ipResponse := performRateLimitRequest(router, "/ip", "192.0.2.60:12345")
+-	assert.Equal(t, http.StatusInternalServerError, ipResponse.Code)
+-	assert.Empty(t, ipResponse.Body.String())
+-	userResponse := performRateLimitRequest(router, "/user", "192.0.2.61:12345")
+-	assert.Equal(t, http.StatusInternalServerError, userResponse.Code)
+-	assert.Empty(t, userResponse.Body.String())
+-	assert.Equal(t, http.StatusNoContent, performRateLimitRequest(router, "/email", "192.0.2.62:12345").Code)
++	// Disabling the backstop turns the same limiter fail-closed on purpose.
++	common.RateLimitCriticalMemoryBackstop = false
++	rejectRouter := gin.New()
++	require.NoError(t, rejectRouter.SetTrustedProxies(nil))
++	rejectRouter.GET("/critical", rateLimitFactory(2, 30, userCriticalRateLimitMark+"reauth"), func(c *gin.Context) {
++		c.Status(http.StatusNoContent)
++	})
++	assert.Equal(t, http.StatusServiceUnavailable, performRateLimitRequest(rejectRouter, "/critical", "192.0.2.65:12345").Code)
+ }
+diff --git a/model/main.go b/model/main.go
+index 917d4e051..7f1d83769 100644
+--- a/model/main.go
++++ b/model/main.go
+@@ -318,6 +318,14 @@ func is64BitIntegerType(dbType common.DatabaseType, dataType string) bool {
+ }
+ 
+ func migrateDB() error {
++	// MIGRATE_MODE=off hands schema ownership to an external migration job
++	// (golang-migrate) so no pod can issue DDL at startup. A fresh database
++	// needs the job to run first; AutoMigrate stays on by default so existing
++	// deployments are unaffected.
++	if common.MigrateMode == "off" {
++		common.SysLog("MIGRATE_MODE=off: skipping startup AutoMigrate for the primary database")
++		return nil
++	}
+ 	if err := migrateTokenKeyUniqueness(DB); err != nil {
+ 		return err
+ 	}
+@@ -393,6 +401,10 @@ func migrateDB() error {
+ }
+ 
+ func migrateLOGDB() error {
++	if common.MigrateMode == "off" {
++		common.SysLog("MIGRATE_MODE=off: skipping startup AutoMigrate for the log database")
++		return nil
++	}
+ 	if err := MigrateAuditLogs(); err != nil {
+ 		return err
+ 	}
+diff --git a/pkg/httpmetrics/metrics.go b/pkg/httpmetrics/metrics.go
+new file mode 100644
+index 000000000..f9ba6fdb9
+--- /dev/null
++++ b/pkg/httpmetrics/metrics.go
+@@ -0,0 +1,289 @@
++// Package httpmetrics publishes operational metrics consumed by the
++// deployment probes and SLO dashboards: request volume, latency histogram,
++// rate-limit rejections and degradations, and upstream channel errors.
++//
++// It is intentionally a leaf package: callers opt in through Init so the
++// package stays usable from tests and from the standalone metrics listener.
++package httpmetrics
++
++import (
++	"database/sql"
++	"net/http"
++	"strconv"
++	"time"
++
++	"github.com/QuantumNous/new-api/common"
++
++	"github.com/gin-gonic/gin"
++	"github.com/go-redis/redis/v8"
++	"github.com/prometheus/client_golang/prometheus"
++	"github.com/prometheus/client_golang/prometheus/collectors"
++	"github.com/prometheus/client_golang/prometheus/promhttp"
++)
++
++const namespace = "newapi"
++
++// durationBuckets covers both the management-plane millisecond calls and the
++// relay SSE streams, which legitimately run for minutes.
++var durationBuckets = []float64{0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300, 600}
++
++var (
++	registry *prometheus.Registry
++	live     bool
++
++	httpRequestsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
++		Namespace: namespace,
++		Subsystem: "http",
++		Name:      "requests_total",
++		Help:      "Count of HTTP requests handled, by route template, method and status code.",
++	}, []string{"route", "method", "code"})
++
++	httpRequestDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
++		Namespace: namespace,
++		Subsystem: "http",
++		Name:      "request_duration_seconds",
++		Help:      "End-to-end request duration, including streamed responses.",
++		Buckets:   durationBuckets,
++	}, []string{"route", "method"})
++
++	httpInFlight = prometheus.NewGaugeVec(prometheus.GaugeOpts{
++		Namespace: namespace,
++		Subsystem: "http",
++		Name:      "in_flight_requests",
++		Help:      "Requests currently being handled, by method.",
++	}, []string{"method"})
++
++	rateLimitedTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
++		Namespace: namespace,
++		Subsystem: "rate_limit",
++		Name:      "rejected_total",
++		Help:      "Requests rejected with 429, by limiter mark.",
++	}, []string{"mark"})
++
++	rateLimitDegradedTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
++		Namespace: namespace,
++		Subsystem: "rate_limit",
++		Name:      "degraded_total",
++		Help:      "Rate limit checks that could not reach Redis, by limiter mark and fallback taken.",
++	}, []string{"mark", "fallback"})
++
++	upstreamErrorsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
++		Namespace: namespace,
++		Subsystem: "relay",
++		Name:      "upstream_errors_total",
++		Help:      "Upstream channel errors observed, by channel id, upstream status and error code.",
++	}, []string{"channel", "status", "error_code"})
++
++	buildInfo = prometheus.NewGaugeVec(prometheus.GaugeOpts{
++		Namespace: namespace,
++		Name:      "build_info",
++		Help:      "Build identity of this process; always 1.",
++	}, []string{"version", "node_type"})
++)
++
++// Init enables collection. Until it is called every Observe* function is a
++// no-op, so an unconfigured deployment pays nothing for this package.
++func Init(version string) {
++	registry = prometheus.NewRegistry()
++	registry.MustRegister(
++		collectors.NewGoCollector(),
++		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
++		httpRequestsTotal,
++		httpRequestDuration,
++		httpInFlight,
++		rateLimitedTotal,
++		rateLimitDegradedTotal,
++		upstreamErrorsTotal,
++		buildInfo,
++	)
++	buildInfo.WithLabelValues(version, nodeType()).Set(1)
++	live = true
++}
++
++func nodeType() string {
++	if common.IsMasterNode {
++		return "master"
++	}
++	return "slave"
++}
++
++// Handler serves the private registry; the metrics listener is the only
++// consumer. It must never be mounted on the public application port.
++func Handler() http.Handler {
++	if !live {
++		return http.NotFoundHandler()
++	}
++	return promhttp.HandlerFor(registry, promhttp.HandlerOpts{
++		ErrorHandling:       promhttp.ContinueOnError,
++		MaxRequestsInFlight: 4,
++	})
++}
++
++// RegisterSQLPool exposes database connection-pool saturation, which is the
++// only way to see the 640-connection budget being approached.
++func RegisterSQLPool(instance string, db *sql.DB) {
++	if !live || db == nil {
++		return
++	}
++	registry.MustRegister(newSQLPoolCollector(instance, db.Stats))
++}
++
++// RegisterRedisPool exposes the client-side pool so Tair saturation is visible
++// before it turns into rate-limit degradation.
++func RegisterRedisPool(instance string, client *redis.Client) {
++	if !live || client == nil {
++		return
++	}
++	registry.MustRegister(newRedisPoolCollector(instance, client.PoolStats))
++}
++
++func sqlDesc(name, help string) *prometheus.Desc {
++	return prometheus.NewDesc(namespace+"_sql_"+name, help, []string{"instance"}, nil)
++}
++
++type sqlPoolCollector struct {
++	instance string
++	stats    func() sql.DBStats
++	descs    map[string]*prometheus.Desc
++}
++
++func newSQLPoolCollector(instance string, stats func() sql.DBStats) prometheus.Collector {
++	return &sqlPoolCollector{
++		instance: instance,
++		stats:    stats,
++		descs: map[string]*prometheus.Desc{
++			"max_open_connections":      sqlDesc("max_open_connections", "Configured maximum number of open connections."),
++			"open_connections":          sqlDesc("open_connections", "Number of established connections (in use plus idle)."),
++			"in_use":                    sqlDesc("in_use", "Number of connections currently in use."),
++			"idle":                      sqlDesc("idle", "Number of idle connections."),
++			"wait_count_total":          sqlDesc("wait_count_total", "Total connections waited for because the pool was exhausted."),
++			"wait_duration_seconds":     sqlDesc("wait_duration_seconds", "Total time blocked waiting for a connection."),
++			"max_idle_closed_total":     sqlDesc("max_idle_closed_total", "Total idle connections closed because of MaxIdleTime."),
++			"max_lifetime_closed_total": sqlDesc("max_lifetime_closed_total", "Total connections closed because of MaxLifetime."),
++		},
++	}
++}
++
++func (c *sqlPoolCollector) Describe(ch chan<- *prometheus.Desc) {
++	for _, desc := range c.descs {
++		ch <- desc
++	}
++}
++
++func (c *sqlPoolCollector) Collect(ch chan<- prometheus.Metric) {
++	stats := c.stats()
++	ch <- prometheus.MustNewConstMetric(c.descs["max_open_connections"], prometheus.GaugeValue, float64(stats.MaxOpenConnections), c.instance)
++	ch <- prometheus.MustNewConstMetric(c.descs["open_connections"], prometheus.GaugeValue, float64(stats.OpenConnections), c.instance)
++	ch <- prometheus.MustNewConstMetric(c.descs["in_use"], prometheus.GaugeValue, float64(stats.InUse), c.instance)
++	ch <- prometheus.MustNewConstMetric(c.descs["idle"], prometheus.GaugeValue, float64(stats.Idle), c.instance)
++	ch <- prometheus.MustNewConstMetric(c.descs["wait_count_total"], prometheus.CounterValue, float64(stats.WaitCount), c.instance)
++	ch <- prometheus.MustNewConstMetric(c.descs["wait_duration_seconds"], prometheus.CounterValue, stats.WaitDuration.Seconds(), c.instance)
++	ch <- prometheus.MustNewConstMetric(c.descs["max_idle_closed_total"], prometheus.CounterValue, float64(stats.MaxIdleClosed), c.instance)
++	ch <- prometheus.MustNewConstMetric(c.descs["max_lifetime_closed_total"], prometheus.CounterValue, float64(stats.MaxLifetimeClosed), c.instance)
++}
++
++func redisDesc(name, help string) *prometheus.Desc {
++	return prometheus.NewDesc(namespace+"_redis_"+name, help, []string{"instance"}, nil)
++}
++
++type redisPoolCollector struct {
++	instance string
++	stats    func() *redis.PoolStats
++	descs    map[string]*prometheus.Desc
++}
++
++func newRedisPoolCollector(instance string, stats func() *redis.PoolStats) prometheus.Collector {
++	return &redisPoolCollector{
++		instance: instance,
++		stats:    stats,
++		descs: map[string]*prometheus.Desc{
++			"hits_total":       redisDesc("hits_total", "Total connection pool hits."),
++			"misses_total":     redisDesc("misses_total", "Total connection pool misses that opened a new connection."),
++			"timeouts_total":   redisDesc("timeouts_total", "Total pool waits that timed out."),
++			"total_conns":      redisDesc("total_conns", "Current number of connections in the pool."),
++			"idle_conns":       redisDesc("idle_conns", "Current number of idle connections."),
++			"stale_conns":      redisDesc("stale_conns", "Current number of stale connections removed from the pool."),
++			"pending_requests": redisDesc("pending_requests", "Number of commands waiting for a connection."),
++		},
++	}
++}
++
++func (c *redisPoolCollector) Describe(ch chan<- *prometheus.Desc) {
++	for _, desc := range c.descs {
++		ch <- desc
++	}
++}
++
++func (c *redisPoolCollector) Collect(ch chan<- prometheus.Metric) {
++	stats := c.stats()
++	if stats == nil {
++		return
++	}
++	ch <- prometheus.MustNewConstMetric(c.descs["hits_total"], prometheus.CounterValue, float64(stats.Hits), c.instance)
++	ch <- prometheus.MustNewConstMetric(c.descs["misses_total"], prometheus.CounterValue, float64(stats.Misses), c.instance)
++	ch <- prometheus.MustNewConstMetric(c.descs["timeouts_total"], prometheus.CounterValue, float64(stats.Timeouts), c.instance)
++	ch <- prometheus.MustNewConstMetric(c.descs["total_conns"], prometheus.GaugeValue, float64(stats.TotalConns), c.instance)
++	ch <- prometheus.MustNewConstMetric(c.descs["idle_conns"], prometheus.GaugeValue, float64(stats.IdleConns), c.instance)
++	ch <- prometheus.MustNewConstMetric(c.descs["stale_conns"], prometheus.GaugeValue, float64(stats.StaleConns), c.instance)
++	ch <- prometheus.MustNewConstMetric(c.descs["pending_requests"], prometheus.GaugeValue, float64(stats.TotalConns-stats.IdleConns), c.instance)
++}
++
++// ObserveRateLimited counts a 429 emitted by a limiter.
++func ObserveRateLimited(mark string) {
++	if !live {
++		return
++	}
++	rateLimitedTotal.WithLabelValues(mark).Inc()
++}
++
++// ObserveRateLimitDegraded counts a limiter check that could not consult
++// Redis together with the fallback actually applied ("pass" or "memory").
++func ObserveRateLimitDegraded(mark, fallback string) {
++	if !live {
++		return
++	}
++	rateLimitDegradedTotal.WithLabelValues(mark, fallback).Inc()
++}
++
++// ObserveUpstreamError counts an upstream channel failure for SLO burn-rate
++// alerts. Labels stay low-cardinality: channel ids are operator-bounded and
++// error codes come from the fixed types.ErrorCode set.
++func ObserveUpstreamError(channelID int, statusCode int, errorCode string) {
++	if !live {
++		return
++	}
++	if errorCode == "" {
++		errorCode = "unknown"
++	}
++	upstreamErrorsTotal.WithLabelValues(strconv.Itoa(channelID), strconv.Itoa(statusCode), errorCode).Inc()
++}
++
++// Middleware records request count, in-flight gauge, and duration histogram.
++// The route label is the gin route template, never the raw URL, so path
++// parameters cannot explode series cardinality.
++//
++// Register it as the outermost middleware: the recovery handler must sit
++// inside it, otherwise a panicking request unwinds before the status code is
++// written and gets counted as 200.
++func Middleware() gin.HandlerFunc {
++	if !live {
++		return func(c *gin.Context) { c.Next() }
++	}
++	return func(c *gin.Context) {
++		method := c.Request.Method
++		inFlight := httpInFlight.WithLabelValues(method)
++		inFlight.Inc()
++		start := time.Now()
++		defer func() {
++			inFlight.Dec()
++			// Runs on the panic path too, so an aborted request is still counted.
++			route := c.FullPath()
++			if route == "" {
++				route = "unmatched"
++			}
++			httpRequestsTotal.WithLabelValues(route, method, strconv.Itoa(c.Writer.Status())).Inc()
++			httpRequestDuration.WithLabelValues(route, method).Observe(time.Since(start).Seconds())
++		}()
++		c.Next()
++	}
++}
+diff --git a/pkg/httpmetrics/metrics_test.go b/pkg/httpmetrics/metrics_test.go
+new file mode 100644
+index 000000000..f32e4a8a7
+--- /dev/null
++++ b/pkg/httpmetrics/metrics_test.go
+@@ -0,0 +1,62 @@
++package httpmetrics
++
++import (
++	"net/http"
++	"net/http/httptest"
++	"testing"
++
++	"github.com/gin-gonic/gin"
++	"github.com/stretchr/testify/assert"
++	"github.com/stretchr/testify/require"
++)
++
++func gather(t *testing.T) string {
++	t.Helper()
++	recorder := httptest.NewRecorder()
++	Handler().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/metrics", nil))
++	require.Equal(t, http.StatusOK, recorder.Code)
++	return recorder.Body.String()
++}
++
++// TestMiddlewareAndCountersCoverTheG8Signals: the SLO dashboard and the P1
++// alerts are built on these series, so a rename here is a dashboard break.
++func TestMiddlewareAndCountersCoverTheG8Signals(t *testing.T) {
++	Init("test-version")
++	t.Cleanup(func() { live = false })
++
++	gin.SetMode(gin.TestMode)
++	router := gin.New()
++	router.Use(Middleware())
++	router.POST("/v1/chat/completions", func(c *gin.Context) { c.Status(http.StatusTooManyRequests) })
++	router.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil))
++
++	ObserveRateLimited("GA")
++	ObserveRateLimitDegraded("GA", "pass")
++	ObserveUpstreamError(7, 503, "bad_response_status_code")
++
++	body := gather(t)
++	assert.Contains(t, body, `newapi_http_requests_total{code="429",method="POST",route="/v1/chat/completions"} 1`)
++	assert.Contains(t, body, `newapi_rate_limit_rejected_total{mark="GA"} 1`)
++	assert.Contains(t, body, `newapi_rate_limit_degraded_total{fallback="pass",mark="GA"} 1`)
++	assert.Contains(t, body, `newapi_relay_upstream_errors_total{channel="7",error_code="bad_response_status_code",status="503"} 1`)
++	assert.Contains(t, body, `newapi_build_info{`)
++	assert.Contains(t, body, "newapi_http_request_duration_seconds_bucket")
++}
++
++// TestMiddlewareIsANoopBeforeInit keeps an unconfigured deployment (the default,
++// METRICS_ENABLED=false) from recording anything or panicking.
++func TestMiddlewareIsANoopBeforeInit(t *testing.T) {
++	live = false
++	gin.SetMode(gin.TestMode)
++	router := gin.New()
++	router.Use(Middleware())
++	router.GET("/api/status", func(c *gin.Context) { c.Status(http.StatusOK) })
++
++	recorder := httptest.NewRecorder()
++	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/status", nil))
++	assert.Equal(t, http.StatusOK, recorder.Code)
++
++	handlerRecorder := httptest.NewRecorder()
++	Handler().ServeHTTP(handlerRecorder, httptest.NewRequest(http.MethodGet, "/metrics", nil))
++	assert.Equal(t, http.StatusNotFound, handlerRecorder.Code)
++}
+diff --git a/pkg/httpmetrics/server.go b/pkg/httpmetrics/server.go
+new file mode 100644
+index 000000000..eefefac53
+--- /dev/null
++++ b/pkg/httpmetrics/server.go
+@@ -0,0 +1,63 @@
++package httpmetrics
++
++import (
++	"context"
++	"errors"
++	"fmt"
++	"net"
++	"net/http"
++	"time"
++)
++
++// Server is the internal metrics listener. It is deliberately separate from
++// the public application port: /metrics must not be reachable through the
++// ALB, WAF or GTM. Exposure is limited by container port plus NetworkPolicy,
++// and only the in-cluster Prometheus scrape should reach it.
++type Server struct {
++	srv *http.Server
++	ln  net.Listener
++}
++
++// ListenAndServe binds addr:port and serves /metrics in the background.
++// A read-header timeout is set so a stuck client cannot hold a connection.
++func ListenAndServe(addr string) (*Server, error) {
++	mux := http.NewServeMux()
++	mux.Handle("/metrics", Handler())
++
++	ln, err := net.Listen("tcp", addr)
++	if err != nil {
++		return nil, fmt.Errorf("metrics listener on %s: %w", addr, err)
++	}
++
++	srv := &http.Server{
++		Handler:           mux,
++		ReadHeaderTimeout: 5 * time.Second,
++	}
++	go func() {
++		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
++			ln.Close()
++			return
++		}
++	}()
++	return &Server{srv: srv, ln: ln}, nil
++}
++
++// Addr reports the bound address, useful when port 0 is requested.
++func (s *Server) Addr() string {
++	if s == nil || s.ln == nil {
++		return ""
++	}
++	return s.ln.Addr().String()
++}
++
++// Shutdown stops accepting scrapes; in-flight ones get the ctx deadline.
++func (s *Server) Shutdown(ctx context.Context) error {
++	if s == nil || s.srv == nil {
++		return nil
++	}
++	err := s.srv.Shutdown(ctx)
++	if s.ln != nil {
++		s.ln.Close()
++	}
++	return err
++}
+diff --git a/router/main.go b/router/main.go
+index d605206b1..1a9a63726 100644
+--- a/router/main.go
++++ b/router/main.go
+@@ -13,6 +13,7 @@ import (
+ )
+ 
+ func SetRouter(router *gin.Engine, assets WebAssets) {
++	SetProbeRouter(router)
+ 	SetApiRouter(router)
+ 	SetDashboardRouter(router)
+ 	SetRelayRouter(router)
+diff --git a/router/probe-router.go b/router/probe-router.go
+new file mode 100644
+index 000000000..6ed27f122
+--- /dev/null
++++ b/router/probe-router.go
+@@ -0,0 +1,19 @@
++package router
++
++import (
++	"github.com/QuantumNous/new-api/controller"
++
++	"github.com/gin-gonic/gin"
++)
++
++// SetProbeRouter registers the Kubernetes/ALB liveness and readiness probes.
++// They sit outside the /api group on purpose: that group applies gzip, access
++// audit and the global API rate limiter, and a probe that can be rate limited
++// is a probe that restarts healthy pods under load. Registering at engine scope
++// keeps the probe handlers clear of those middlewares; middleware.ProbePaths
++// keeps them out of the access log too, since kubelet and ALB probe every few
++// seconds per pod and that volume would dominate the log bill.
++func SetProbeRouter(router *gin.Engine) {
++	router.GET("/healthz", controller.Healthz)
++	router.GET("/readyz", controller.Readyz)
++}
+diff --git a/service/relay_error.go b/service/relay_error.go
+index 32a0fe3be..4551cd5f5 100644
+--- a/service/relay_error.go
++++ b/service/relay_error.go
+@@ -8,6 +8,7 @@ import (
+ 	"github.com/QuantumNous/new-api/constant"
+ 	"github.com/QuantumNous/new-api/logger"
+ 	"github.com/QuantumNous/new-api/model"
++	"github.com/QuantumNous/new-api/pkg/httpmetrics"
+ 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+ 	"github.com/QuantumNous/new-api/relaykit/types"
+ 	"github.com/QuantumNous/new-api/setting/operation_setting"
+@@ -66,6 +67,7 @@ func ProcessChannelError(c *gin.Context, channelError types.ChannelError, err *t
+ 		return
+ 	}
+ 	logger.LogError(c, fmt.Sprintf("channel error (channel #%d, status code: %d): %s", channelError.ChannelId, err.StatusCode, common.LocalLogPreview(err.MaskSensitiveErrorWithStatusCode())))
++	httpmetrics.ObserveUpstreamError(channelError.ChannelId, err.StatusCode, string(err.GetErrorCode()))
+ 	if ShouldDisableChannel(err) && channelError.AutoBan {
+ 		reason := err.MaskSensitiveErrorWithStatusCode()
+ 		gopool.Go(func() {

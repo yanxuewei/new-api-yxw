@@ -6,17 +6,7 @@
 
 ### Day 2 · 任务 10｜ACK Pro 马尼拉集群（人员A，2 人时，09:00–11:00）
 
-**前置/状态**：马尼拉 VPC/vSwitch 已建成（网络泳道）；机型验证（任务 11 Step 1）可与本卡并行开工，但建节点池前必须出结果。专有版（Dedicated）已停售，只建 ACK 托管版 Pro（`ack.pro.small`）。
-
-> ⚠️ **SLA 口径更正（2026-09-29 实测 + SLA 原文）**：ACK SLA（版本生效日期 **2023-04-01**）§1.4/§1.5 把
-> 「**区域级集群 regional**」定义为*地域 AZ 数 **≥3***，「**可用区级集群 zonal**」定义为*AZ 数 **≤2*** ——
-> **这是地域属性，不是建簇时可选的形态**。马尼拉 `ap-southeast-6` 只有 **6a / 6b 两个 AZ**，
-> 故本集群在 SLA 定义上**就是 zonal**，控制面承诺 **99.50%**（月不可用上限 ≈3.6 h），
-> **无法通过任何创建选项提升到 99.95%**。
-> 另：ACK 控制面**不在** §8.2 的五项串联链（`0.9999^5 ≈ 0.99950`）之内，8.2 推导链**不受影响** ——
-> 原「选错形态会让 8.2 从根上错」的说法系**双重误判，已作废**。
-> 影响与对冲：控制面不可用**不影响已运行 Pod**（数据面继续服务），但**部署 / 扩缩容 / HPA 扩节点会停摆**；
-> 对冲 = 冻结期内不依赖临时扩缩容 + 常态已含 4+2 节点弹性余量。
+**前置/状态**：马尼拉 VPC/vSwitch 已建成（网络泳道）；机型验证（任务 11 Step 1）可与本卡并行开工，但建节点池前必须出结果。专有版（Dedicated）已停售，只建 ACK 托管版 Pro（`ack.pro.small`，**多可用区 regional 控制面**，否则 SLA 只有 99.50% 而非 99.95%，方案 8.2 推导链从根上错）。
 
 **操作步骤（CLI-first）**
 
@@ -91,9 +81,7 @@ aliyun vpc DescribeVSwitchAttributes --VSwitchId $VSW_MNL_APP_A | jq .AvailableI
 - 坑 1｜CNI 选错不可回退：选 Flannel 永远没有 Pod 级安全组，`sg-mnl-app` 只允许 ALB 访问 3000 的设计落不了地 → 现象：后期只能退化 NetworkPolicy → 后果：安全组设计作废 → 改进：创建页截图存档 + 评审签字（见上图占位）。
 - 坑 2｜Service CIDR 与对端重叠：接云企业网/VPN 时路由进不来或回程丢包，且不可修改只能重建 → 改进：现在就确认办公网/未来 CEN 不占 `172.21.0.0/20`。
 - 坑 3｜Pod vSwitch 地址容量：Terway 下每个 Pod IP 消耗真实 VPC 地址，交换机耗尽 → 新 Pod 永久 `ContainerCreating` 报 `no available ip addresses`，HPA 全线失效 → 改进：建簇后立即记录 `AvailableIpAddressCount` 基线，每里程碑复核。
-- 坑 4｜**误信「选 regional 就能拿 99.95%」**：ACK SLA（2023-04-01）§1.4/§1.5 判 regional/zonal 的依据是**地域 AZ 数**（≥3 / ≤2），**马尼拉只有 2 个 AZ → 永远 zonal、承诺 99.50%**，**没有可选的「regional 形态」**。→ 后果：以为能拿到 99.95% 而放松控制面可观测与应急处置。→ 改进：① 接受 **99.50%** 为控制面基线并**书面记录**（业务 SLO 99.95% 由三源外部拨测度量，**不含**控制面）；② 控制面停摆不影响已跑 Pod，但**部署/扩缩容/HPA 会停**，冻结期内不得依赖临时扩缩容；③ 落实自动升级通道 + 维护窗口（本卡步骤 5 已配 `stable` / 周二 03:00–06:00）。
-- 坑 5｜**漏写 `resource_group_id` → 集群静默落到 default 组，且 ACK 集群不支持资源组迁移**（`MoveResources` → `UnsupportedOperation.MoveResources`，`Service=cs|ack` × `ResourceType=cluster|Cluster` 四组合全拒），唯一解法是关删除保护后**删除重建**。→ 现象：**无任何报错**，`resource_group_id=rg-acfnssmgwnsb5oa`；→ 后果：违反铁律「默认组禁放 new-api 资源」；→ 改进：body 显式写 `resource_group_id` + **终验加资源组断言**（本次实测已踩中：`ca9dc…` 落 default → 删除 → `cd57e40c…` 带 RG 重建）。
-- 坑 6｜**删集群 ≠ 清干净；带对 RG 重建才会连带继承**：ACK 自动建的**内网 SLB**（名 `ManagedK8SSlbIntranet-<cluster_id>`，**是 SLB 不是 ALB**，`aliyun slb DescribeLoadBalancers` 才查得到）、**集群安全组**、**SLS 审计项目** 都是独立资源。带对 RG 重建时三者**自动继承集群 RG**（实测三项全落 `rg-ph-mnl` ✅）；而 `DeleteCluster` **不会**删除 SLS 项目 `k8s-log-<old-cid>`，会残留在 default，须手工 `aliyun sls DeleteProject --project <name> --region <region>`。
+- 坑 4｜控制面形态选成 zonal：SLA 只有 99.50% → 后果：SLA 推导链从根上错 → 改进：确认 regional 多可用区控制面。
 
 ### Day 2 · 任务 11｜马尼拉 ECS 节点池：4×g9i.2xlarge 跨 2 可用区 + nofile 调优（人员A，4 人时，09:00 验证机型 / 11:00–14:00 建池）
 
@@ -124,36 +112,22 @@ aliyun quotas ListProductQuotas --ProductCode ecs --QuotaCategory Common \
 
 ```bash
 cat <<'EOF' > nodepool-mnl.json
-{"nodepool_info":{"name":"np-mnl-app","type":"ess","resource_group_id":"rg-aek4nyivmmsb6iy"},
+{"nodepool_info":{"name":"np-mnl-app"},
  "scaling_group":{"instance_types":["ecs.g9i.2xlarge","ecs.g8ine.2xlarge","ecs.g9ae.2xlarge"],
    "vswitch_ids":["${VSW_MNL_APP_A}","${VSW_MNL_APP_B}"],
-   "system_disk_category":"cloud_essd","system_disk_size":100,"system_disk_performance_level":"PL1",
-   "data_disks":[{"category":"cloud_essd","size":300,"performance_level":"PL1"}],
-   "desired_size":4,"instance_charge_type":"PostPaid",
+   "system_disk_category":"cloud_essd","system_disk_size":100,
+   "data_disks":[{"category":"cloud_essd","size":300}],
+   "desired_size":4,"min_size":4,"max_size":8,"instance_charge_type":"PostPaid",
    "internet_max_bandwidth_out":0,"multi_az_policy":"BALANCE",
-   "key_pair":"${ECS_KEYPAIR}",
-   "security_group_ids":["sg-5tsil3ca5dfkqefks1g9"],
+   "key_name":"${ECS_KEYPAIR}","login_password":"",
    "tags":[{"key":"site","value":"ph-mnl"},{"key":"env","value":"prod"},{"key":"track","value":"stable"}]},
- "kubernetes_config":{"runtime":"containerd","cpu_policy":"none","labels":[{"key":"site","value":"ph-mnl"},{"key":"track","value":"stable"}],
-   "user_data":"<base64(Step 3 脚本)>"}}
+ "kubernetes_config":{"runtime":"containerd","cpu_policy":"none","labels":[{"key":"track","value":"stable"}],
+   "user_data":"<base64(Step 3 脚本)>"},
+ "auto_scaling":{"enable":true,"health_check_type":"NODE","scale_unsupported":false}}
 EOF
 envsubst < nodepool-mnl.json > nodepool-mnl.rendered.json
 aliyun cs CreateClusterNodePool --ClusterId $ID_MNL --body "$(cat nodepool-mnl.rendered.json)"
 ```
-
-> ⚠️ 上面是**手动模式**（只给 `desired_size:4`，让 ESS 按 `MultiAZPolicy=BALANCE` 均分 6a/6b 各 2）。
-> **一步到位的写法必失败** —— 实测 `auto_scaling.enable=true` 与 `scaling_group.desired_size` **互斥**，
-> 同 body 提交报 `InvalidDesiredSizeOrCount.NotNull: desired_size/count setting or modification is not supported for autoscaling-enabled nodepool`。
-
-**2b. 打开节点池自动伸缩**（min 4 / max 8；不变量 `max 8 × 8 vCPU = 64` = 马尼拉 ECS vCPU 配额）：
-
-```bash
-aliyun cs ModifyClusterNodePool --ClusterId $ID_MNL --NodepoolId $NP_MNL --region ap-southeast-6 \
-  --body '{"auto_scaling":{"enable":true,"type":"cpu","min_instances":4,"max_instances":8}}'
-```
-
-> ⚠️ 开伸缩瞬间 ESS 会**先备 6 台再收敛到 min=4**（实测 4→6→8→4）；收敛后须复核跨区仍为 **2/2**，
-> 若被削成 `6a:3 / 6b:1` 需删除重建（见坑 10 / 坑 11）。
 
 3. **nofile=200000 用户数据脚本**（填入 `user_data`；ACK user data 在节点初始化脚本之后执行，能覆盖。三处都要设：systemd Manager、kubelet/containerd unit、Pod securityContext——节点 `ulimit -n` 对容器不生效，容器继承 containerd/kubelet）：
 
@@ -175,9 +149,7 @@ systemctl daemon-reload && systemctl restart containerd || true
 
 > `limits.conf` 不影响**已运行**的 containerd，脚本必须带 `systemctl restart`；缺 `#!/bin/bash` 或填错字段会导致整段不执行。
 
-4. **数据盘自动挂载（无需手工干预）**：body 里 `data_disks` 创建的数据盘，**ACK 会自动格式化「最后一块」数据盘**，并把 `/var/lib/containerd`、`/var/lib/kubelet` 一并挂到该盘（实测 4 台 × `/dev/vdb` 300G ESSD PL1，全部 `In_use`，**0 孤儿盘**）。**原文档「`data_disks` 只创建不挂载」的表述有误。**
-
-> 只有需要**额外**挂 `/var/log`、或指定**非末块**盘时，才需显式写 `disk_init`（TS SDK 实测 schema：`disk_name` / `local_disk` / `mkfs_type` / `mount_for_runtime` / `mount_target`）。【控制台】节点池创建页可看机型过滤列表（含 **Terway 支持 Pod 数**，顺手记下每机型 `SupportedPods`）。
+4. 数据盘挂给容器运行时：body 里 `data_disks` 只创建不挂载 → 在节点池配置勾选"数据盘挂载到 `/var/lib/containerd` 与 `/var/log`"（新版 ACK 支持），或自定义数据里 `systemctl stop containerd` → 格式化 → `mv` → 挂载。【控制台】节点池创建页可看机型过滤列表（含 **Terway 支持 Pod 数**，顺手记下每机型 `SupportedPods`）。
    `[图 D2-A-11｜拍摄对象：节点池创建页机型可购列表+数据盘挂载选项；打码：账号 UID、节点池 ID]`
 
 **验证方法**
@@ -209,34 +181,11 @@ kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.metadata
 - 坑 4｜单可用区建池：AZ 故障副本全灭，R15「单 AZ 故障仍有 2 副本」不成立 → 双 AZ + §7.3 拓扑打散。
 - 坑 5｜节点分配公网 IP：Terway 下 Pod/节点绕过 NAT 出网 → EIP 白名单形同虚设，上游偶发 403 查不到原因 → `internet_max_bandwidth_out:0`，出口 IP 核验每里程碑重跑。
 - 坑 6｜`SupportedPods` 上限：`(EniQuantity-1)×EniPrivateIpAddressQuantity` 限制每节点 Pod 数 → 报 `Insufficient attachable network interfaces`，16 副本 + DaemonSet 最易撞 → 记每机型 Pod 容量、池配 ≥2 机型、预留 DaemonSet 额度。
-- 坑 7｜按量付费遇库存抖动扩不出机器 → 多机型 + `auto_scaling.min_instances` 常备，配额留 ≥20% 余量（马尼拉 max 8 台已顶满 64 配额，无余量，扩容依赖 HPA 前核配额）。
+- 坑 7｜按量付费遇库存抖动扩不出机器 → 多机型 + `min_size` 常备，配额留 ≥20% 余量（马尼拉 max 8 台已顶满 64 配额，无余量，扩容依赖 HPA 前核配额）。
 - 坑 8｜节点池"自动升级 OS 镜像"与手动 nofile 脚本冲突：升级后 ulimit 静默回 1024 → 升级窗口对齐变更冻结，加 node-exporter `process_max_fds` 巡检告警。
 - 坑 9｜`instance_types` 混不同内存比（g 8C32G 与 r 8C64G）→ request/limit 与 HPA 口径错乱 → 只混同规格族，HPA 用 CPU 利用率（基于 request）。
-- 坑 10｜**`auto_scaling.enable=true` 与 `scaling_group.desired_size` 互斥** → 同 body 报 `InvalidDesiredSizeOrCount.NotNull` → 后果：按原文「一次提交」必失败，且报错不提示字段冲突 → 改进：**严格两步走**（手动模式建池 → `ModifyClusterNodePool` 开伸缩），本卡已改。
-- 坑 11｜**开伸缩瞬间 ESS 先备 6 台再削到 min=4，削节点会破坏跨区均衡**（实测被削成 `6a:3 / 6b:1`）→ 后果：违反「每区 ≥2」，单 AZ 故障承受力不达标 → 改进：**先手动模式建池**（ESS 按 `BALANCE` 给 2/2）**再开伸缩**；一旦被削坏，停伸缩后**删除重建**（见坑 12）。
-- 坑 12｜**删节点池 ≠ 删干净：ESS 组 `MinSize>0` 会无限重建被删节点，节点池卡 `delete_failed`**（`RemoveNodePoolNodes` 报 `InvalidNodePoolStatus.Forbidden`）→ 根因：`DeleteClusterNodepool` 只删 ACK 侧，**ESS 伸缩组继续补机器**；再叠加 `GroupDeletionProtection=true` 则彻底删不掉 → 修复：`aliyun ess ModifyScalingGroup --GroupDeletionProtection false` → `--MinSize 0 --MaxSize 0 --DesiredCapacity 0` → 再 `DeleteClusterNodepool`（两步收敛）。详见 `deploy/nodepool_ledger.md`。
-- 坑 13｜**手动模式建池需账号级服务角色 `AliyunOOSLifecycleHook4CSRole`**，缺失直接 `MissingAuth.AliyunOOSLifecycleHook4CSRole` → 改进：`aliyun ram CreateRole --region ap-southeast-1`（信任 `oos.aliyuncs.com` + `cs.aliyuncs.com`）+ `AttachPolicyToRole --PolicyType System --PolicyName AliyunOOSLifecycleHook4CSRolePolicy`；若不需要生命周期钩子，**不传 `management`** 即可绕开。
-- 坑 14｜**字段名陷阱**：密钥对是 `key_pair`（**不是 `key_name`**）；数据盘加密 `data_disks[].encrypted` 是**字符串**（传布尔 → `Unmarshal type error: expected=string, got=bool`）；`auto_scaling` **没有** `health_check_type` / `scale_unsupported`（臆造字段）；ACK 托管节点池**无** `scaling_group.min_size/max_size`，上下限统一走 `auto_scaling.min_instances/max_instances`。
-- 坑 15｜**节点托管 `management.enable=true` 依赖插件 `ack-node-problem-detector`**，未装报 `InvalidParameter.Management` → 改进：本卡默认**关闭节点托管**；确需托管则先装插件。自动升级 OS 镜像走 `management.auto_upgrade_policy.auto_upgrade_os: false`（与坑 8 呼应）。
-- 坑 16｜**aliyun CLI 3.x 具名参数调用必须带 `--region`**：`aliyun cs ModifyClusterNodePool --ClusterId … --NodepoolId … --body …` 缺 `--region` 会报 `InvalidAction.NotFound: Specified api is not found`（**极易误判为 API 不可用/权限不足**）→ 改进：所有 `cs` / `ess` / `ecs` 具名调用一律带 `--region`（马尼拉 `ap-southeast-6`，新加坡 `ap-southeast-1`）。
 
 ### Day 2 · 任务 24｜新加坡 ACK 集群 + 常态 2 节点节点池（人员A，1 人时，14:00–15:00，前移）
-
-> **✅ 已落地（2026-09-29）** · 集群 `ca75829e3492d491d9d434de087913798`、节点池 `npab9d46aefe3a4649b074543f36f32599`
->
-> | 项 | 实测值 |
-> | --- | --- |
-> | 集群 | `ack-newapi-sg` / `1.35.7-aliyun.1` / `ack.pro.small` / `rg-aek4zvb3ldoiyua` |
-> | 内网端点 | `https://10.1.19.73:6443`（**公网端点未开**） |
-> | **Service CIDR** | **`172.22.0.0/20`** —— **刻意与马尼拉的 `172.21.0.0/20` 错开**。两集群 Service 网段相同，将来接云企业网/CEN 时会成死锁，且该属性**建后不可改**（马尼拉任务 10 坑 2 原话） |
-> | 密钥对 | `newapi-sg` —— 密钥对**不跨 region**，且 `DescribeKeyPairs` **取不到 `PublicKeyBody`**（实测 `body_len=0`），只能重新 `ImportKeyPair` 导入本地公钥 |
-> | 节点池 / ESS | `np-sg-ph-standby` / `asg-t4ngzbg7m9u84y59dkxl`；auto_scaling **min 2 / max 12** |
-> | 节点（2 台） | `g9ae.2xlarge`@**1a** + `g8ine.2xlarge`@**1b**（**勿硬编码机型分布** —— 1b 没有 g9i） |
-> | 终验 | 集群 12/12 + 节点池 **17/17 PASS**；集群内 2/2 `Ready`、`site=sg`、nofile=**200000**、Terway CNI、300G 盘已挂 `/var/lib/containerd` |
->
-> 完整台账 → **`deploy/nodepool_ledger_sg.md`**；脚本 `deploy/task24_ack_sg.sh`（建集群）+ `deploy/task24_nodepool_sg.sh`（**复用任务 11 同一份逻辑与 user_data**）+ `deploy/nodepool_azbalance_fix.sh`（跨区均衡断言）。
->
-> **★ 建完集群第 1 件事：核对控制面安全组有没有 6443。** 新加坡**同构复现**了马尼拉那条缺陷（见下方坑 6）；本卡已在**建节点池之前**补上，所以 2 台节点**首次引导即成功**，完全没重演马尼拉那条 6 小时排障链。
 
 **前置/状态**：v2 将原 D4 的备站集群前移到本时段——集群创建 5–15 分钟是天然等待窗口，可并行做任务 42/46。新加坡不部署任何数据库；VPC `vpc-t4nimmwvruexbnene0a3r`；配额 50→96 已批（`Agree`）；机型候选与马尼拉相同（新加坡目录更大，但仍需先跑 `DescribeAvailableResource --RegionId ap-southeast-1` 复核）。
 
@@ -257,18 +206,11 @@ export ID_SG=c<sg_cluster_id>
 2. 建节点池（常态 2 / 自动伸缩 2–12）：
 
 ```bash
-# nodepool-sg.json：instance_types=[ecs.g9ae.2xlarge,ecs.g9i.2xlarge,ecs.g8ine.2xlarge]  ← 顺序见坑 5
-# multi_az_policy:BALANCE、internet_max_bandwidth_out:0、tags site=sg/env=prod
-# user_data 与任务 11 Step 3 完全同一份脚本（禁止手工点两遍）
-# ⚠️ 两步走（同任务 11）：先手动模式 desired_size:2 建池 → 再 ModifyClusterNodePool 开
-#    auto_scaling{enable,type:"cpu",min_instances:2,max_instances:12}
-#    （开伸缩后**禁止**再给 scaling_group.desired_size，否则 InvalidDesiredSizeOrCount.NotNull）
-# ⚠️ resource_group_id 必须显式写（同任务 10 坑 5，漏写静默落 default 组且不可迁移）
+# nodepool-sg.json：instance_types=[ecs.g9i.2xlarge,ecs.g8ine.2xlarge,ecs.g9ae.2xlarge]、
+# desired_size:2、min_size:2、max_size:12、multi_az_policy:BALANCE、internet_max_bandwidth_out:0、
+# tags site=sg/env=prod；user_data 与任务 11 Step 3 完全同一份脚本（禁止手工点两遍）
 envsubst < nodepool-sg.json > nodepool-sg.rendered.json
 aliyun cs CreateClusterNodePool --ClusterId $ID_SG --body "$(cat nodepool-sg.rendered.json)"
-# ★ 建池后【两件事必做】：
-#   ① bash deploy/nodepool_azbalance_fix.sh sg        # ESS 跨区均衡，否则全落一个区（坑 5）
-#   ② 核对控制面安全组有无 6443，没有就补（坑 6）
 ```
 
 3. 等待就绪并接好 context（与马尼拉并行等待窗口内做任务 46 的新加坡侧授权）：
@@ -307,9 +249,6 @@ kubectl --context sg debug node/${NODE} -it --image=busybox -- sh -c \
 - 坑 2｜两集群 SA/KMS/RRSA 角色串用：OIDC Provider 是 region+cluster 维度 → 新加坡 Pod 拿不到马尼拉的 Secret → Pod env 核对 `OIDC_PROVIDER_ARN`（任务 17 V4）。
 - 坑 3｜把常态 2 副本 + 冷备池当"热备"：接管要等扩容 90–180s，RTO 掉到分钟级，M4 不过 → desired=2 常跑、`NODE_TYPE=slave` 且保持连接池 warm，GTM 备地址池只在压测通过后加入。
 - 坑 4｜节点标签/污点不统一 → 主备反亲和失效 → 两集群统一 `site`/`env`/`track`，`topologySpreadConstraints` 用 `DoNotSchedule`（软约束会让 4 副本挤一个 AZ）。
-- 坑 5｜**`multi_az_policy: BALANCE` ≠ 开启跨区均衡（2026-09-29 实测，两地同源）**。现象：建池 body 写了 `BALANCE`、`DescribeScalingGroups` 也回读 `MultiAZPolicy=BALANCE`，但 desired=2 建出来是 **1a:2 / 1b:0**。根因：ESS 有**独立的 `AzBalance` 开关**，**ACK 不设置它** → 实例创建阶段不做跨区均衡，顺着「能买到机型 / 有库存」的交换机把实例全塞一个区。佐证：把 `instance_types` 首位换成两区都在售的 `g9ae` **仍然全落 1a** → 与机型无关。修复：`aliyun ess ModifyScalingGroup --ScalingGroupId <asg> --AzBalance true --BalanceMode BalancedBestEffort [--AutoRebalance true]`（幂等脚本 `deploy/nodepool_azbalance_fix.sh mnl|sg`），生效后 ESS 会先在另一区补 1 台再削掉多余的那台，收敛 1:1。**⚠️ 该字段 `DescribeScalingGroups` 不回读，且经 ACK 侧改池后可能被覆盖 → 每次改完节点池都要重跑断言。** `BalanceMode` 取 `BalancedBestEffort`（可用性优先）而非 `BalancedOnly`（目标区没货则整个伸缩活动失败）—— 备站扩不出容比短暂失衡危险得多。
-- 坑 6｜**ACK 建集群漏放行控制面 6443 —— 两个地域都复现，是平台缺陷不是个案**。现象：集群 `security_group_id`（名 `alicloud-cs-auto-created-security-group-<集群ID>`）入向**只有 ICMP 一条**，**没有任何 6443** → 节点 bootstrap 用**内网域名**连 API Server 报 `curl (7) Connection timed out`，重试 120 次 × 2s、卡满 **10 分钟**才放弃 → 节点不注册 / Terway 起不来 / 节点永久 `NotReady`（完整故障链见 `deploy/nodepool_ledger.md` §7）。**易误判点**：错误码是 `curl (7)` **不是** `(6)` —— DNS 是通的、TCP 连不上；且 `ping` 能通（ICMP 恰在白名单里）。**SOP**：建完集群先查该 SG 有无 6443，没有就 `AuthorizeSecurityGroup` 放行 `TCP 6443 ← <VPC 段>`，**再**建节点池。**新加坡实测**：`sg-t4nevyfflaeo3tdvi510` 建出时同样只有 ICMP。
-- 坑 7｜**删节点池必须等 ESS 真正清零，否则必得 `delete_failed`**。现象：`--MinSize 0 --MaxSize 0 --DesiredCapacity 0` 之后立刻 `DeleteClusterNodepool` → ACK 任务报 **`ScalingGroup's instances not empty`**，池变 `delete_failed`（该状态下连 `RemoveNodePoolNodes` 也被拒，报 `InvalidNodePoolStatus.Forbidden`）。根因：容量归零是**异步**的，实例先进入 `Removing:Wait`，**实测约 6–7 分钟**才真正释放。修复：**轮询 `DescribeScalingGroups.TotalCapacity == 0`** 再删；若已 `delete_failed`，清零后**重发一次删除**即可恢复（无需重建集群）。
 
 ### Day 2 · 任务 42｜cluster-autoscaler 与两集群自动伸缩（人员A，1 人时，15:00–16:00，前移）
 
@@ -323,18 +262,13 @@ kubectl --context sg debug node/${NODE} -it --image=busybox -- sh -c \
 aliyun cs DescribeClusterNodePools --ClusterId $ID_MNL \
   | jq '.nodepools[]|{name:.nodepool_info.name,enable:.auto_scaling.enable,min:.auto_scaling.min_instances,max:.auto_scaling.max_instances}'
 # 期望：np-mnl-app enable=true min=4 max=8；对新加坡同跑，期望 np-sg-ph-standby enable=true min=2 max=12
-# ⚠️ 除 min/max 外还必须断言 ESS 的**跨区均衡开关**（该字段不回读，同任务 24 坑 5）：
-#    bash deploy/nodepool_azbalance_fix.sh mnl     # 再对 sg 跑一遍
-#    实测：马尼拉此前 `AzBalance` 也是关的 —— 它的 6a:2/6b:2 只是「运气好」，本次已补正。
 ```
 
 2. 若未开启（建池 body 遗漏）：
 
 ```bash
-aliyun cs ModifyClusterNodePool --ClusterId $ID_MNL --NodepoolId $NP_MNL --region ap-southeast-6 \
-  --body '{"auto_scaling":{"enable":true,"type":"cpu","min_instances":4,"max_instances":8}}'
-# ⚠️ 具名调用必须带 --region（否则报误导性的 InvalidAction.NotFound）；
-#    auto_scaling 无 health_check_type / scale_unsupported（臆造字段，已删除）
+aliyun cs ModifyClusterNodePool --ClusterId $ID_MNL --NodepoolId $NP_MNL \
+  --body '{"auto_scaling":{"enable":true,"health_check_type":"NODE","scale_unsupported":false}}'
 ```
 
 3. 与 HPA（后续任务）对齐容量口径：节点数按 **request** 规划并留 30% 余量，不按 limit。马尼拉 8C 节点可分配约 7.2C，2C request 下每节点约容 3 个 stable 副本。
@@ -376,7 +310,6 @@ kubectl get nodes -o custom-columns=NAME:.metadata.name,CREATING:.metadata.creat
 - 坑 1｜HPA max 16 看似 ≤ 池容量（8 台×~3 副本），但按 limit 4C 实际每节点只塞得下 1–2 个 → HPA 显示"副本已达标"而 Pod 全 Pending = 扩容失败假象 → 按 request 规划 + 「Pending>0 持续 3 分钟」做 P1 告警。
 - 坑 2｜`PDB minAvailable: 3` 硬挡缩容，autoscaler 驱逐重试刷屏 → 低峰允许 2（百分比口径）。
 - 坑 3｜自动伸缩的新节点不带手工调优：只有初始 4 台"是对的" → 一切节点调优必须进节点池 User Data。
-- 坑 4｜**`MultiAZPolicy=BALANCE` ≠ 已开跨区均衡**：ACK 不设 ESS 独立的 `AzBalance`，伸缩时会把新节点**全塞进有库存的那个可用区**（实测 1a:2 / 1b:0）→ 可用区级故障会一次打掉整个节点池。**改进**：每池建后 / **每次经 ACK 改池后**都跑 `deploy/nodepool_azbalance_fix.sh <mnl|sg>` 断言，并用「实例的可用区分布」间接验证（`AzBalance` 不可回读）。
 
 ### Day 2 · 任务 17｜RRSA + KMS + Secret 注入链路 + Namespace/ConfigMap/Secret（人员B，3 人时，09:00–12:00，合并预置与正式两段）
 

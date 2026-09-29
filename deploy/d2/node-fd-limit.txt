@@ -1,0 +1,35 @@
+# 任务 11 证据 · 节点 nofile / 内核参数落地核查（4/4 台）
+# 采集时间 : 2026-09-29 15:32 (CST)
+# 采集方式 : 云助手在节点内执行 `bash -lc 'ulimit -n'` + systemctl show
+# 等价命令 : kubectl run u --image=busybox --rm -it --restart=Never -- sh -c 'ulimit -n'
+#            （因容器继承 containerd/kubelet 的 LimitNOFILE，此处直接核对 unit 值更直接）
+
+节点                                    软限        硬限        systemd默认   containerd   kubelet    结果
+iZ5ts9wk588cliiweawindZ  (10.0.22.194)  262144      262144      200000        200000       200000     PASS
+iZ5tsaatp5w68w13n4z1w8Z  (10.0.22.195)  262144      262144      200000        200000       200000     PASS
+iZ5tsawhljdqzwqhmadqv0Z  (10.0.43.200)  262144      262144      200000        200000       200000     PASS
+iZ5tsfiz0wh6r2kymp6jwhZ  (10.0.43.201)  262144      262144      200000        200000       200000     PASS
+
+→ 4/4 PASS。目标 ≥200000 全部满足。
+
+--- 口径说明：为什么登录 shell 是 262144 而不是 200000 ---
+   脚本写入 `/etc/security/limits.d/99-newapi.conf` 的 `* soft nofile 200000`，
+   但 **pam_limits 会把 RLIMIT_NOFILE 向上取整到 2 的幂**（200000 → 262144 = 2^18）。
+   这是 PAM 的历史行为（规避 select() 的 FD_SETSIZE 问题），非脚本写错。
+   systemd 侧不取整：`systemd.show -p LimitNOFILE` 与 `DefaultLimitNOFILE` 均为 200000（原值）。
+   文档验收写「ulimit -n = 200000」应改为「**≥ 200000（实测软/硬限 262144）**」。
+
+--- 其他内核参数 ---
+   net.core.somaxconn            = 32768
+   net.ipv4.ip_local_port_range  = 10240 65535
+   net.ipv4.tcp_tw_reuse         = 1
+
+--- 数据盘 ---
+   /dev/nvme1n1  290G  →  /var/lib/containerd（同时挂 /var/lib/kubelet、/var/log/pods、/var/lib/etcd 若需要）
+   ACK 自动格式化「最后一块」数据盘并挂给容器运行时（300G ESSD PL1，规格值 300G，df 显示 290G 为文件系统开销）
+
+--- 其他终验收项 ---
+   /var/log/ack-deploy-error-code.log   空（修前为 FailGetKubeVersion）
+   /var/log/newapi-node-init.log        以 `+ set -e` 正常收尾（`===== done =====`）
+   /etc/hosts workaround 条数            0（**本次修复后无需任何 hosts hack**）
+   containerd                           2.3.4
