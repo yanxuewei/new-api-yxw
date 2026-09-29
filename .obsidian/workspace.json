@@ -10,7 +10,7 @@
           {
             "id": "7d7b45c35d8d64dc",
             "type": "split",
-            "dimension": 40.905542544886806,
+            "dimension": 45.51131928181108,
             "children": [
               {
                 "id": "c61469379079cbe3",
@@ -60,7 +60,7 @@
           {
             "id": "7a132fbf59c4c6f9",
             "type": "split",
-            "dimension": 59.0944574551132,
+            "dimension": 54.48868071818892,
             "children": [
               {
                 "id": "5da66b33f5bbf458",
@@ -277,20 +277,21 @@
   },
   "active": "74c2c0cef545cd40",
   "lastOpenFiles": [
+    "deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md.tmp.27564.1790678985860",
+    "deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md.tmp.27564.1790678896631",
+    "deploy/logs/task41_ruling_20260929-1830/tpl_template_engineversion_17.json",
+    "deploy/logs/task41_ruling_20260929-1830/readback_parameters.json",
+    "deploy/logs/task41_ruling_20260929-1830/running_parameters.json",
+    "deploy/logs/task41_ruling_20260929-1830/describe_dbinstance_attribute.json",
+    "deploy/logs/task41_ruling_20260929-1830/describe_accounts.json",
+    "deploy/logs/task41_ruling_20260929-1830/modify_stats.json",
+    "deploy/logs/task41_ruling_20260929-1830/tpl17.json",
+    "deploy/logs/task41_ruling_20260929-1830/rb.json",
+    "deploy/logs/task41_ruling_20260929-1830/params.json",
     "deploy/ai_model_price/国内模型价格.png",
     "deploy/ai_model_price/自己部署.jpg",
     "deploy/ai_model_price/cc_claude.jpg",
-    "deploy/ai_model_price",
-    "deploy/新建文件夹",
     "deploy/zhuoyanplus域名证书.jpg",
-    "deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md.tmp.27564.1790671132582",
-    "deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md.tmp.27564.1790671113999",
-    "deploy/logs/task15_20260929-153704/final_attr.json",
-    "deploy/logs/task15_20260929-153704/final_net.json",
-    "deploy/logs/task15_20260929-153704/final_params.json",
-    "deploy/logs/task15_20260929-153704/final_ip.json",
-    "deploy/logs/task15_20260929-153704/final_ssl.json",
-    "deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md.tmp.27564.1790671038424",
     "deploy/任务45环境隔离修订_2026-09-29.md",
     "deploy/nodepool_ledger_sg.md",
     "deploy/工单_ACK马尼拉控制面安全组缺失.md",
