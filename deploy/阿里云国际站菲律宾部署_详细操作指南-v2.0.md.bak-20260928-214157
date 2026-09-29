@@ -3,8 +3,7 @@
 > **文档定位**：本指南是《阿里云国际站菲律宾部署_详细操作指南-ch.md》（v2.1 方案配套，D1–D9 口径）的 **v2.0 重写版**，两处根本变化：
 > 1. **排期口径**：按用户决定压缩为 **1 人 × 4 个高强度日历日（Day 1–Day 4）**，每日分**日间窗（A）/午后窗（B）**两个串行执行窗口，全部 56 项任务重新挂窗（人力前提与顺延清单见 §0.2）；
 > 2. **操作口径**：每步以 `aliyun` CLI / `kubectl` / `psql` 真实命令为主路径（AI agent 可直接执行），控制台独有操作标 **【控制台】** 并配截图占位；关键命令一律附「期望输出」文本作为即贴即证。
-> 3. **决策修订（2026-09-27）**：日志库改为**马尼拉云数据库 ClickHouse 企业版（单 AZ）**（F9）；连接收敛改为**自建 PgBouncer**（F10）；线上 RDS PG 实测 `max_connections = 800`，连接预算按 **800 × 0.8 = 640** 全量重算（F11）。
-> 4. **付费方式修订（2026-09-28）**：**ECS 节点池与 Tair 实例全面改为包年包月（`PrePaid`，1 年 + 自动续费）**；配额核量口径随之从按量 `q_ecs_enterprise_postpay_c`（马尼拉 64 / 新加坡 96）切换为包年包月 **`q_ecs_enterprise_prepay_c`（马尼拉 100 / 新加坡 100，2026-09-28 API 实测）**；**ACK 集群管理费官方口径为按量付费、不支持转包年包月**，等价手段 = 购买 **ACK 资源包**抵扣。连带影响见 §2.1 基线表、任务 10（资源包）、任务 11 坑 7/坑 7b/坑 10（扩容即预付、库存独立、数据盘勿转包月）与任务 52 成本表（单价必须取包年包月价）。
+> 3. **本轮决策修订（2026-09-27）**：日志库改为**马尼拉云数据库 ClickHouse 企业版（单 AZ）**（F9）；连接收敛改为**自建 PgBouncer**（F10）；线上 RDS PG 实测 `max_connections = 800`，连接预算按 **800 × 0.8 = 640** 全量重算（F11）。
 >
 > **配套文件**：`.deploy/菲律宾部署方案-v2.1-修订版.xlsx`（任务/人时/验收标准唯一权威源）、`impl_deploy.md`（架构依据）、`.deploy/` 各落地执行报告（已落地事实源）。
 > **任何一处与国际站控制台不一致，以控制台 + 工单答复为准。**
@@ -35,7 +34,7 @@
 - **泳道重定义**：泳道 A = **日间窗（08:30–14:00）**，泳道 B = **午后窗（14:00–22:00）**。单人按卡序**串行**执行，不存在双人并行；agent 可提前并行跑只读步骤，但人工核验仍串行。
 - **双人复核红线在单人模式不豁免**：破坏性操作（PITR 恢复、migrate、白名单摘除、GTM 强切、密钥轮换）一律改为**远程第二方（项目负责人）IM/工单核准留痕** + 本地命令输出归档；**核准不到 = 不动手**。
 - **顺延 backlog（不进 4 天线，T+14 内必须闭环，残余项写入移交已知限制）**：任务 52 成本量化（2h）、任务 45 staging 全量三库矩阵（3h→仅保留最小三库冒烟）、任务 39 全量拨测矩阵（1h→仅保留单点最小拨测）、任务 35 完整移交与影子值班（2h→Day 4 只备料，移交 T+3 执行）、Grafana 全量看板（1h→只建 P1 告警 4 面板）。
-- **不可顺延清单不变**：PITR/接管/灰度/轮换四项演练、G8 代码补项、PgBouncer 连接预算与经池兼容性验证、白名单收口、SESSION_SECRET 一致性——砍它们只能以**下调 SLA 承诺**为代价并书面签字。
+- **不可顺延清单不变**：PITR/接管/灰度/轮换四项演练、G8 代码补项、自建 PgBouncer 与连接预算、白名单收口、SESSION_SECRET 一致性——砍它们只能以**下调 SLA 承诺**为代价并书面签字。
 - 三条硬约束（详见 Day 4「4 天压缩的已知取舍」）：
   1. **外部等待项必须全部在 Day 0 前闭环**：企业实名（1–3 工作日）、域名 NS 生效（24–48h）、通配符证书签发（1–24h）、上游白名单提交（生效可能 1–3 工作日）、staging 审批——单人模式无并行度可吸收任何 24h 级等待；
   2. 窗口出口检查不通过 → 触发「裁剪三原则」降级或整体顺延，**不带病进入下一窗口**；
@@ -53,7 +52,7 @@ gantt
   section Day1 B窗 14:00-22:00 数据底座
   任务4_13_14 RDS+账号+备份 :crit, d1b1, 6, 3
   任务7 Tair+任务8_9 CK企业版复核+任务15 公网白名单 :d1b2, 9, 3
-  任务41 托管PgBouncer_800预算+任务29_30 跨区链路 :crit, d1b3, 12, 4
+  任务41 自建PgBouncer_800预算+任务29_30 跨区链路 :crit, d1b3, 12, 4
   section Day2 A窗 集群密钥
   任务10_11_24_42 ACK+节点池g9i+autoscaler :crit, d2a1, 16, 4
   任务17 RRSA_KMS+任务46 运维面+任务18 master迁移+任务54 :d2a2, 20, 4
@@ -78,7 +77,7 @@ gantt
 | 日历日           | 泳道 A = 日间窗（08:30–14:00）                                                                        | 泳道 B = 午后窗（14:00–22:00）                                                                             | 当日里程碑                          |
 | ------------- | ---------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------ |
 | **Day 0（前置）** | G1–G13 门禁全闭环（实名/域名/证书/配额/RAM/代码补项 G8 合并）                                                       | SP 逐条打勾，agent 跑全部复核命令出证据                                                                            | **G0 通过，否则 Day 1 不启动**         |
-| **Day 1**     | 网络、出口、证书、ACR、域名解析（任务 5/12/6/3/16/1/2）                                                          | 数据库、缓存、OSS、日志库（马尼拉企业 CK，F9）、托管 PgBouncer（RDS 内置，已启用）+ 800 连接预算（F10 撤销/F11）、跨区数据链路（任务 4/13/14/7/8/9/15/41/29/30）   | **M1**：网络+数据底座就绪               |
+| **Day 1**     | 网络、出口、证书、ACR、域名解析（任务 5/12/6/3/16/1/2）                                                          | 数据库、缓存、OSS、日志库（马尼拉企业 CK，F9）、自建 PgBouncer + 800 连接预算（F10/F11）、跨区数据链路（任务 4/13/14/7/8/9/15/41/29/30）   | **M1**：网络+数据底座就绪               |
 | **Day 2**     | ACK、节点池(g9i)、RRSA/KMS、master 迁移、autoscaler、migrate 版本化、运维访问面（任务 10/11/24/42/17/46/18/54）       | ALB、stable、备 Deployment、SG ALB、GTM、SYNC_FREQUENCY 收敛、staging 最小三库冒烟（任务 19/23/28/25/21/53/45）        | **M2**：集群+应用底座就绪，主站 token 备站可用 |
 | **Day 3**     | 安全组/白名单逐条核对、WAF、证书部署、回调白名单、双密钥轮换、上游配额、安全核查 15 项（任务 22/47/20/40/48/55/56/38；**52 成本量化顺延 T+14**） | SLS/Prometheus/Grafana（最小面板）、SLO 看板与值班、HPA 容量基线、canary 灰度演练、PITR、主库切换演练（任务 26/32/43/44/27/31/50/37） | **M3**：安全可观测收口 + 四项演练通过        |
 | **Day 4**     | 压测 S1–S10、限流参数校准、上线检查表、正式发布（任务 33/51/34）                                                       | 备区接管演练（预热+切换+回切）、备区最小拨测、移交备料（任务 36/49/39/35；完整移交 T+3）                                               | **M4 + M5**：容量达标、上线、进入 72h 冻结窗 |
@@ -103,9 +102,9 @@ gantt
 | 10  | ACK Pro 马尼拉                              | D2      | Day2·A                | A   | 2        |
 | 11  | 马尼拉节点池 4×g9i.2xlarge                     | D2/D4   | Day2·A                | A   | 4        |
 | 12  | 新加坡 VPC/NAT/EIP                          | D2      | Day1·A（VPC ✅已建）       | A   | 2        |
-| 13  | RDS 账号最小化                                | D2      | Day1·B ✅已执行(09-29)     | B   | 1        |
-| 14  | RDS 备份 PITR+WAL                          | D2      | Day1·B ✅策略+链路已验证      | B   | 1        |
-| 15  | RDS 公网+白名单收死                             | D3      | Day1·B ✅已执行(09-29)   | B   | 2        |
+| 13  | RDS 账号最小化                                | D2      | Day1·B                | B   | 1        |
+| 14  | RDS 备份 PITR+WAL                          | D2      | Day1·B                | B   | 1        |
+| 15  | RDS 公网+白名单收死                             | D3      | Day1·B                | B   | 2        |
 | 16  | 马尼拉 ACR+CI 推镜像（单地域）                       | D1      | Day1·A                | B   | 1        |
 | 17  | RRSA+KMS+ExternalSecret+ConfigMap/Secret | D2/D3   | Day2·A                | B   | 3        |
 | 18  | master AutoMigrate 幂等                    | D4      | Day2·A                | B   | 3        |
@@ -131,7 +130,7 @@ gantt
 | 38  | 上线前安全核查 15 项                             | D6      | Day3·A                | A+B | 3        |
 | 39  | 备区链路拨测与告警                                | D8–D9   | Day4·B                | B   | 2        |
 | 40  | 证书部署 ALB/WAF/DCDN+SNI                    | D6      | Day3·A                | A   | 1        |
-| 41  | 托管 PgBouncer（已启用）+ 800 连接预算 I-1/I-2/I-3      | D2      | Day1·B 🔶池已启用+四项裁定(09-29)，CK 前 I-1 待处置 | B   | 3        |
+| 41  | 自建 PgBouncer + 800 连接预算 I-1/I-2/I-3      | D2      | Day1·B                | B   | 3        |
 | 42  | cluster-autoscaler 双集群                   | D6      | Day2·A                | A   | 2        |
 | 43  | 主站 HPA 4–16+容量基线 C                       | D7      | Day3·B                | A   | 3        |
 | 44  | 备区 HPA 2–24+1.5× 接管                      | D7      | Day3·B                | A   | 2        |
@@ -155,7 +154,7 @@ gantt
 | # | 事实 | 状态 | 对指南的影响 |
 | --- | --- | --- | --- |
 | F1 | **节点池机型 = ecs.g9i.2xlarge（8C32G）**：g8i 全系未在马尼拉上架（2026-09-25 API 实测，`控制台核实四问_结论.md` §3），备选 g8ine.2xlarge | 已修订入任务 11/24 | Day 2 开工第一动作 = `aliyun ecs DescribeAvailableResource` 复验库存 |
-| F2 | **ECS vCPU 配额已批**：马尼拉 50→64、新加坡 50→96（工单 `b140e263-…` / `e117bf2b-…`，状态 `Agree`，分钟级生效）—— **按量口径**；**包年包月走独立额度 `q_ecs_enterprise_prepay_c` = 100 / 100（2026-09-28 实测，无需工单）** | G2/G10 部分闭环 | 任务 11 节点上限 8、任务 24 上限 12 与配额对齐；**付费方式全面转包年包月后以 prepay 额度为准** |
+| F2 | **ECS vCPU 配额已批**：马尼拉 50→64、新加坡 50→96（工单 `b140e263-…` / `e117bf2b-…`，状态 `Agree`，分钟级生效） | G2/G10 部分闭环 | 任务 11 节点上限 8、任务 24 上限 12 与配额对齐 |
 | F3 | **配额 API 口径**：必须带 `--Dimensions.1.Key regionId --Dimensions.1.Value <regionId>`（否则返回 cn-hangzhou）；申请参数拼写 `--DesireValue`；状态值 `Agree` | 已修订入 §3.4 口径与附录速查 | 所有配额命令按此改写 |
 | F4 | **真实 VPC 已建**：`vpc-newapi-mnl-prod`=`vpc-5tst1tgeessxn1azwasg2`（10.0.0.0/16，6 vSwitch 按 §2.2 网段落地）；`vpc-newapi-sg-prod`=`vpc-t4nimmwvruexbnene0a3r`（10.1.0.0/16） | 任务 5 ✅、12 部分 | 对应卡降级为复核 |
 | F5 | **OSS 已建**：生命周期 30d→IA/90d→Archive **被双可用区 ZRS 产品限制否决**，实际落地 `backup-data-tiering` / `backup-audit-tiering` / `backup-cleanup`；CRR→`oss-newapi-backup-sgp` 实测成功 | 任务 8 ✅ | 所有引用旧分层规则的核查项改按新规则 |
@@ -163,20 +162,13 @@ gantt
 | F7 | Tair / RDS 配额需在**产品开通后复查**（配额中心按产品分组，未开通时查不到） | 未闭环 | Day 1 泳道 B 首步执行 |
 | F8 | 账号 ID `5108890064395960`；域名 `api.likha.com` / `ops.likha.com`；**镜像源改单地域马尼拉**，前缀以实测 EE 域名为准（见任务 16 基线表） | 基线参数 | §2 参数表按真值更新；全文旧 `registry-vpc.ap-southeast-6.aliyuncs.com/newapi/new-api` 已订正 |
 | F9 | **马尼拉可用「云数据库 ClickHouse 企业版（单可用区）」**（2026-09-27 复核）：社区版无马尼拉，企业版单 AZ 可在 `ap-southeast-6` 购买 | ✅ 决策已修订 | 日志库 `LOG_SQL_DSN` 收口马尼拉，**不再购买新加坡 CK**；任务 9/29/52、差异表 #1、M1 证据、风险表、裁剪表全部按此改写；单 AZ 故障域以「日志不入 SLA 证据链 + 写失败可降级」对冲 |
-| F10 | ~~**PgBouncer 采用自建方案**（ACK 集群内 3 副本），RDS 托管数据库代理不启用~~ → **2026-09-29 实测撤销：改用 RDS PG 内置托管 PgBouncer，实例上已启用（`PGBouncerEnabled="true"`），无任何自建部署动作** | ❌ 原结论作废（立论"托管功能面不足"经实测不成立） | 任务 41 已按托管口径重写（预算参数取实测 `max_client_conn 2000`/`default_pool_size 50`/`pool_mode transaction`，验证手段由 `SHOW POOLS` 换为 CMS `db.pgbouncer.*` + `pg_stat_activity`）；**"备站必须直连公网、不经池"这一连带结论也不成立**（公网串同样监听 6432），**2026-09-29 四项裁定已下：① `SQL_MAX_OPEN_CONNS=100`（`max_client_conn` 保持 2000）、② 备站走乙＝公网串 6432 经池（任务 15/30 的甲路作废）、③ `pool_mode` 维持 transaction（不临时切 session）、④ `stats_users=newapi_ops` 已下发生效**；⚠ 裁定 ① 后 I-1 **仅 CK 日志库分支成立**（1840 ≤ 2000），日志库仍为 PG 时 3680 > 2000 ⇒ CK 实例创建前的窗口仍需处置；「池化是切流硬性前置」不变 |
+| F10 | **PgBouncer 采用自建方案**（ACK 集群内 3 副本），RDS 托管数据库代理不启用 | ✅ 已定 | 任务 41 改写为自建部署 + 分层 TLS；任务 15/30 明确新加坡备站**直连 RDS 公网、不经池**；PgBouncer 从「保险」升级为**切流硬性前置** |
 | F11 | **线上购买 RDS PostgreSQL 规格实测 `max_connections = 800` 且用户不可改** | ✅ 实测 | 服务端可用预算封顶 800×0.8=**640**；`SQL_MAX_OPEN_CONNS` 默认 1000 与「16 副本 × 数百」直连方案在数学上全部作废；连接预算（任务 41/43、G11）按 640 重算；更换规格必须重跑 `SHOW max_connections` |
 
 ## 0.6 进展快照（截至 2026-09-27，开工前必读，防止重做）
 
 **已完成、只做复核**：任务 5（VPC/vSwitch）、任务 8（OSS 桶与规则）、任务 9（日志库决策**已按 F9 修订**：马尼拉 ClickHouse 企业版单 AZ 可用，日志库收口马尼拉，不再购买新加坡 CK）、任务 12 之 VPC、G2/G10（ECS 配额 Agree）、G9（RAM/MFA/ActionTrail 投递）、G3（可下单已验证）。
 **复核后仍欠一项写操作**：任务 16（ACR 实例已建，但 **VPC 端点未关联马尼拉 VPC → `LinkedVpcs=[]`**，VPC 内拉取当前不通；CI 推送亦待复验）。详见该卡 2b。
-**已执行（2026-09-29）**：任务 13 全部四步完成 —— 第 0/1/3 步（`newapi_ops` Super + 库 `newapi` + 三业务账号 + 白名单由整 VPC 收窄到应用/数据网段）；**第 2 步权限 SQL 于 13:00 经"同 VPC 临时跳板 ECS"落地，四行探测与 `_adp_probe` 端到端 DML 复验全部通过**（13:2x）。schema 级最小化生效：`public` 去掉 PUBLIC 的 CREATE、`newapi_migrate` 独享 CREATE、运行账号仅 USAGE、三条 `ALTER DEFAULT PRIVILEGES FOR ROLE newapi_migrate` 已验证会传播到新表。**两项说明**：① database 级 `REVOKE/GRANT CONNECT` 在 RDS 上**根本无法生效**（库 owner 是内部账号 `aurora`，Super 账号非真超级用户，两条语句只回 WARNING 就静默 no-op ⇒ 四个账号仍可 CONNECT，见坑 14）—— **2026-09-29 已裁定接受现状**，靠白名单网段 + 口令轮换 + KMS 兜底，不做"重建库交 owner"；这是既定权衡，后续复核不要再当成待办返工。② 跳板 ECS 与临时安全组已按"用完即删"回收（`RequestId 01A0EBA4-2012-…`、`…-2872-…`），后续 SQL 的执行位改由 13:3x 复核时**已存在的 `ack-newapi-mnl`**（4 台 worker，节点 IP 全在白名单网段内）承担，但 Pod 到 `5432` 的连通性尚未实测。`newapi_ops` 口令已按裁定轮换（新值仅存 WSL `~/.newapi_rds_ops_password`，600）。任务 13 的 D1 出口项现只剩截图与 AutoMigrate 冒烟。详见该卡执行记录。
-**已执行（2026-09-29）**：任务 14 的策略下发与备份链路验证完成 —— 卡片原样 `ModifyBackupPolicy` 被接受，回读 `BackupRetentionPeriod=7` / `EnableBackupLog=1` / `LogBackupRetentionPeriod=7` / 全周 / 窗口 `18:00Z-19:00Z`（**未改动实例原有窗口**：它等于马尼拉 02:00–03:00 真低峰，卡片原文的 `10:00Z-11:00Z` 换算后是马尼拉 18:00–19:00 晚间业务时段，属卡片笔误，已订正）；两次同值下发逐字段全等（幂等成立）；`CreateBackup` 手动全量走通并 `Success`（`BackupId=502518000`，实测 **2 分 36 秒**）。**三点要留意**：① PG 上**没有** `EnablePitrProtection` 这个开关（MySQL 专用），PITR 判据改用 `DescribeLocalAvailableRecoveryTime`，已能回连续区间 ⇒ WAL 在传；但"覆盖近 7 天"在 D1 结构性不可能（区间左端被首个备份钉死），该判据顺延为 D7 周期复核项。② **跨地域备份"支持但从未开启"**（`ap-southeast-1` 在可选目标地域里，`DescribeInstanceCrossBackupPolicy` 空返回），而 RDS 自动备份不落在客户 OSS ⇒ 方案里"新加坡有数据面副本"目前不成立；开启是计费写操作，**未擅自执行，待裁定**（该卡坑 5）。③ 本次 2 分 36 秒是**备份**耗时，不是恢复耗时，任务 36/任务 50 的 RTO 上限 4 小时申报**继续有效**，别拿它当已重测。详见该卡执行记录。
-**已执行（2026-09-29）**：任务 15 全量四步完成（按"暴露面单调递增"顺序，零断连）—— 公网地址 `pgm-5tstdhko64x2c01wpub.pgsql.ap-southeast-6.rds.aliyuncs.com`（`43.118.96.65:5432`，**永不释放**）；SSL 绑**公网串**（`SSLEnabled=on`，证书 CN/SAN 即公网串，有效期至 2027-09-29）；白名单三层 `default=127.0.0.1` / `mnl_vpc=四个业务 vSwitch 网段` / `sg_standby_eip=新加坡 4 个 SNAT EIP 全放 /32`，隐藏组 `hdm_security_ips` 未动；TLS 下限 `ssl_min_protocol_version` `TLSv1`→**`TLSv1.2`**（`ForceRestart=false`，无闪断，约 15 秒生效）。**四点要留意**：① 卡片原写法 `ModifyDBInstanceSSL --Port/--CaEnabled/--RequireUpdate` 三个参数在 PG 上不存在；真实后缀是 `.pgsql.<region>.rds.aliyuncs.com`，不是 `.pg.rds.`。② **"强制 TLS 只允许"在 PG 上没有入口**（`ForceEncryption`/`TlsVersion` 非 PG，`--ACL verify-full` 需 mTLS，`pg_hba` 不可改，`ACL` 回读恒 `prefer`）⇒ 判据改为"低版本握手被服务端拒"（实测 `-tls1_1` 得 `alert protocol version`），明文连接是否放行仍由客户端 `sslmode` 决定。③ **证书只能绑一个连接地址** ⇒ 主站内网串（含经托管池 6432，实测同证书）**不可能 `verify-full`**（`-checkhost` 得 "does NOT match"），任务 41 坑 9 已按此订正为 `verify-ca`。④ **`DescribeDBInstanceSSL` 响应含服务器 RSA 私钥明文**（`ServerKey`），任何取证动作必须先 `jq del(.ServerKey,.ServerCert)`——本次已踩到并清理。详见该卡执行记录。
-
-**已复核并改判（2026-09-29）**：任务 41 —— **F10 的"自建 PgBouncer"撤销，实测改用 RDS PG 内置托管池，且实例上早已启用**：`DescribeDBInstanceAttribute` 回 `PGBouncerEnabled="true"`，16 条 `pgbouncer.*` 运行参数已下发（`max_client_conn=2000`、`default_pool_size=50`、`pool_mode=transaction`、`query_wait_timeout=120`、`server_idle_timeout=600`、`max_prepared_statements=200`、`ignore_startup_parameters=extra_float_digits`、`stats_users` 初始为 `''`），内网串与公网串的 **5432/6432 四格连通矩阵实测全 `OPEN`**、6432 上 TLS 下限继承 `TLSv1.2`。**同日四项裁定已下并落到本指南**：① `SQL_MAX_OPEN_CONNS` 150→**100**、`max_client_conn` 保持 2000；② 备站改走 **乙＝公网串 6432 经池**（甲路作废）；③ `pool_mode` **维持 transaction**（不临时切 session）；④ `pgbouncer.stats_users=newapi_ops` **已下发并回读生效**（`ModifyParameter --Forcerestart false`，实例 `Running` 无重启）。**五点要留意**：① 判断 PG 有没有开池**不能**用 `DescribeDBProxy`/`DescribeDBProxyEndpoint`——那是 PolarProxy（MySQL 产品线）的 API，对 PG 恒空，本卡一度据此误判"没开、仍需自建"；② **6432 不出现在 `DescribeDBInstanceNetInfo`**（只回两条 5432），池端口在 API 层不可见；③ **裁定 ① 之后 I-1 只在 CK 分支成立**：`16×100 + 24×10 = 1840 ≤ 2000 ✅`（余量 160），而日志库仍为 PG 时 `16×200 + 24×20 = 3680 ❌`——**CK 实例尚未创建 ⇒ 当下正是 PG 分支，这个窗口没有被裁定 ① 关掉**，剩余动作是"CK 提前创建"或"窗口内临时 conns=45"（任务 41 步骤 2 的 (a)/(b)）；④ **`LOG_SQL_MAX_OPEN_CONNS` 在代码里根本不存在**（`model/main.go:211-213` 与 `:258-260` 读的是同一组 `SQL_MAX_OPEN_CONNS`/`SQL_MAX_IDLE_CONNS`/`SQL_MAX_LIFETIME`）⇒ 任务 17 ConfigMap 那行是空转配置，预算没有"只降日志库"这条路（详见该卡步骤 2 的事实修订与坑 11）；⑤ 托管侧参数集**不提供 `admin_users`**，裁定 ④ 只恢复 `SHOW` 类**只读**观测，`RELOAD`/`PAUSE` 仍不可用，且 **admin 库能否登录尚未实测**（要 VPC 内执行位）⇒ 实测前 `SHOW POOLS` 不得写进应急手册，观测仍走 CMS `db.pgbouncer.*` + `pg_stat_activity`。另外 `pool_mode=transaction` 是托管**默认值**而非我们的选择，原"先 session 再切"的安全垫消失；**裁定 ③ 之后这条退路主动关闭**，任务 41 步骤 3 的四项兼容性子集成为**无退路的 D2 硬门槛**（代码事实给出的底气：应用侧 PG 分支已是 `PreferSimpleProtocol: true` + `PrepareStmt: false`，全仓无 session 级 `pg_advisory_lock`、无 `LISTEN/NOTIFY`、生产路径无 `SET`）。详见该卡执行记录。
-
-**新增阻塞（2026-09-29 实测）**：**主站马尼拉没有 DMS 数据面**（`ap-southeast-6` 不在 DMS 支持地域表；实例已登记成功 `InstanceId=2997880`/`NORMAL`，但 `ListDatabases` 恒 0、`GetDatabase` 报"网络不通"，`ExecuteScript` 无 `DbId` 可用）。凡依赖"DMS 里跑 SQL / DMS 定时任务"的卡（任务 13 第 2 步与其验证、任务 15 的 `pg_dump` 副本、D2 出口清单）全部需要改执行位。**已裁定并执行**：任务 13 用"同 VPC 临时跳板 ECS"完成（DMS 登记按裁定保留），但跳板已回收 ⇒ **任务 15 的 `pg_dump` 落点仍未定**，需另行决策（ECS 定时任务或 FC）。规格基线已裁定：`pg.n4.2c.2m` = 2C/8G（`max_connections=800`）为准，§14 成本表与任务 33 压测口径已按此修订，原 16C64G 假设作废。
 
 **统一复核命令（跑完贴输出即销账）**：
 
@@ -189,7 +181,7 @@ aliyun clickhouse DescribeDBInstances --RegionId ap-southeast-6 | jq '.Data.Tota
 aliyun quotas ListQuotaApplications | jq -r '.QuotaApplications[]|[.ProductCode,(.DesireValue|tostring),.Status]|@tsv'   # G2/G10：期望 ecs-spec 64 / 96 均 Agree
 aliyun quotas ListProductQuotas --ProductCode ecs-spec --QuotaCategory CommonQuota --RegionId ap-southeast-6 \
   --Dimensions.1.Key regionId --Dimensions.1.Value ap-southeast-6 \
-  | jq -r '.Quotas[]|[.QuotaActionCode,(.TotalQuota|tostring),(.TotalUsage|tostring)]|@tsv'   # 期望 q_ecs_enterprise_prepay_c=100（包年包月口径；按量 postpay_c=64 仅作对照）
+  | jq -r '.Quotas[]|[.QuotaActionCode,(.TotalQuota|tostring),(.TotalUsage|tostring)]|@tsv'   # 期望 q_ecs_enterprise_postpay_c=64
 aliyun ram ListUsers | jq -r '.Users.User[]|.UserName'   # 期望 admin/ops/cicd-push/iac-terraform/dev-*（另有 zhangzijun/xiangdong/yanxuewei 待核）
 ```
 
@@ -221,7 +213,7 @@ aliyun ram ListUsers | jq -r '.Users.User[]|.UserName'   # 期望 admin/ops/cicd
 | 编号 | 事项 | 证据 | 当前状态 | 通过 |
 | --- | --- | --- | --- | --- |
 | G1 | 企业实名 `Verified` | 截图 | 待闭环 | ☐ |
-| G2 | 马尼拉配额批复 | 工单号 b140e263-…（按量 Agree）；**包年包月 `q_ecs_enterprise_prepay_c`=100 实测可用** | ECS 部分闭环，Tair/RDS 待 F7 复查 | ☐ |
+| G2 | 马尼拉配额批复 | 工单号 b140e263-…（ECS 已 Agree） | ECS 部分闭环，Tair/RDS 待 F7 复查 | ☐ |
 | G3 | 可下单（测试 EIP） | 资源 ID | 已验证 | ☐ |
 | G4 | `dig NS` 指向阿里云 | 命令输出 | 待闭环 | ☐ |
 | G5 | 证书 `Issued` + SAN `*.likha.com` | openssl 输出 | 待闭环 | ☐ |
@@ -229,7 +221,7 @@ aliyun ram ListUsers | jq -r '.Users.User[]|.UserName'   # 期望 admin/ops/cicd
 | G7 | 全部产品开通（含 CK 决策按 F9 修订：马尼拉企业版单 AZ） | 控制台列表 | 待闭环 | ☐ |
 | G8 | `/healthz` `/readyz` `/metrics` + 限流降级 **已合并** | commit/MR | **待闭环——未完成则 SLA 承诺下调** | ☐ |
 | G9 | RAM + MFA + 操作审计投递 | 跟踪状态 | 已落地（F6），补 yanxuewei 降权 | ☐ |
-| G10 | 新加坡 ≥96 vCPU | 工单号 e117bf2b-…（按量 Agree）；**包年包月 `prepay_c`=100（需求 96，仅余 4 vCPU）** | 已闭环 | ☐ |
+| G10 | 新加坡 ≥96 vCPU | 工单号 e117bf2b-…（Agree） | 已闭环 | ☐ |
 | G11 | 连接数预算表（真实 env 值与 **800 上限（F11）**，默认 1000 陷阱） | 文档 | 待闭环 | ☐ |
 | G12 | SLA 口径五条 + 4 排除项书面确认 | 邮件回执 | 待闭环 | ☐ |
 | G13 | staging/perf 方案 | 文档 | 待闭环 | ☐ |
@@ -246,7 +238,6 @@ aliyun ram ListUsers | jq -r '.Users.User[]|.UserName'   # 期望 admin/ops/cicd
 - Day 3 · 泳道 B：可观测、HPA 容量与灰度/故障演练（part3b）
 - Day 4：验收、压测、接管演练、正式上线与移交 + 里程碑/SLA（part4）
 - 回滚与应急预案 + 附录（part5）
-  - 附录内含：命令速查 / 上线前 60 分钟检查 / 引用与事实来源 / **运维上手：登录节点与 Pod（新人必读）** / 术语与缩写 / 交付前自检
 
 ---
 
@@ -261,7 +252,7 @@ aliyun ram ListUsers | jq -r '.Users.User[]|.UserName'   # 期望 admin/ops/cicd
 | 1 | 马尼拉 RDS ClickHouse 社区版承载 `LOG_SQL_DSN` | 社区版无马尼拉；**企业版（单可用区）可在马尼拉购买**（2026-09-27 复核） | 社区版方案不成立；企业版单 AZ 故障域 = 1 个 AZ | **改用马尼拉云数据库 ClickHouse 企业版（单 AZ）**；以「日志库不入 SLA 证据链 + 写失败可降级」对冲单 AZ 风险 | ✅ 决策已修订（F9），任务 9/29 已按新决策改写 |
 | 2 | ACK 1.31+ | 仅可建 **1.34/1.35/1.36**，1.31/1.33 已 EOL | 选不到/EOL 裸奔 | 统一 1.35，一次只升一个次版本 | 任务 10/24 已按 1.35 写 |
 | 3 | 节点规格 g8i.2xlarge | **g8i 全系未在马尼拉上架**（2026-09-25 实测） | 节点池选不到机型，Day2 卡死 | 先 `DescribeAvailableResource` 再定机型；多机型+双 AZ | ✅ 已改 **g9i.2xlarge**，备选 g8ine.2xlarge（F1） |
-| 4 | 备区经 RDS 公网 `verify-full` 读主库 | SSL 证书 CN/SAN 绑定开 SSL 时所选连接地址；经池时由实例出具同一张证书 | 握手失败，备区连不上主库 | 证书地址**选公网**；主站侧降 `verify-ca`，三条路径 | ✅ 已改**托管 PgBouncer**（F10 撤销，任务 41）：证书绑公网串 ⇒ 备站经公网串 **5432 或 6432 都能** `verify-full`（实测 6432 复用同证书）；主站经池走内网串只能 `verify-ca`（任务 15 坑 7 / 任务 41 坑 9）。备站走池（乙）还是直连（甲）**待裁定**（任务 30） |
+| 4 | 备区经 RDS 公网 `verify-full` 读主库 | SSL 证书 CN/SAN 绑定开 SSL 时所选连接地址；经 PgBouncer 由代理出具 | 握手失败，备区连不上主库 | 证书地址**选公网**；走 PgBouncer 降 `verify-ca`+代理侧证书，三条路径 | ✅ 已定**自建 PgBouncer**（F10）：SG 直连公网 `verify-full`（路径 A 为主路径）+ 应用→池→RDS 分层 TLS；任务 15/30/41 保留全部分支 |
 | 5 | ALB `requestTimeout=180s` | ALB 超时范围 [1,600]s，默认 60 | >600s 请求无解；60s 掐长回答 | 显式 600s + 网关 15–20s SSE ping；600s 硬上限写进合同 | 任务 19/25 卡保留 |
 | 6 | SG 仅放行 WAF/DCDN 回源段 | WAF 3.0 对 ALB 支持**云原生接入（透明集成）**且支持马尼拉，不产生回源网段 | 按 CNAME 配白名单=白做，漏一条大面积 5xx | 优先 WAF 云原生接入；仅 DCDN 才 `DescribeDcdnL2Ips` | 任务 20/22/47 卡已按此写 |
 | 7 | 申请免费通配符证书 | 国际站**无免费 DV 额度**；2026-02-25 起单证最长约 199/200 天，1 年拆两张 | 半年后全站 HTTPS 报错 | 购 DigiCert/GlobalSign/Rapid 通配符 + 托管自动续期与部署 | 任务 3/40 卡保留 |
@@ -271,14 +262,14 @@ aliyun ram ListUsers | jq -r '.Users.User[]|.UserName'   # 期望 admin/ops/cicd
 | # | 方案原写法 | 现实 | 调整 | v2.0 状态 |
 | --- | --- | --- | --- | --- |
 | 8 | 隐含多可用区 | 马尼拉仅 **6a/6b 两个 AZ** | 3AZ 一律不可行，ALB/RDS 锁死双 AZ | 全指南按双 AZ |
-| 9 | RDS `max_connections` 可调 | 由规格决定，**用户不可改**；**线上购买规格实测上限 800（F11）** | 服务端预算封顶 640；三选一：升规格（重测）/提池参数/降 `SQL_MAX_OPEN_CONNS` | ✅ 预算已重算（任务 41/43、G11） |
-| 10 | RDS 代理疑似 MySQL 专属 | PG 高可用系列支持**数据库代理** | 两路可用，代理省事但功能面窄 | ✅ 实测**改用托管 PgBouncer**（RDS PG 内置、实例已启用、免费，F10 撤销）：内/公网串都监听 6432、按 `(user,db)` 分池 ⇒ 原判"功能面不足以覆盖日志库/迁移旁路"不成立。真实限制是另外两条：无 `reserve_pool_size` 可调、初始 `stats_users=''` 导致 admin 命令不可用（任务 41 坑 3；**2026-09-29 裁定 ④ 已设 `stats_users=newapi_ops`，但只恢复 `SHOW` 类只读、admin 库登录尚未实测**） |
+| 9 | RDS `max_connections` 可调 | 由规格决定，**用户不可改**；**线上购买规格实测上限 800（F11）** | 服务端预算封顶 640；三选一：升规格（重测）/自建 PgBouncer/降 `SQL_MAX_OPEN_CONNS` | ✅ 预算已重算（任务 41/43、G11） |
+| 10 | RDS 代理疑似 MySQL 专属 | PG 高可用系列支持**数据库代理** | 两路可用，代理省事但功能面窄 | ✅ v2.0 弃用托管代理，定**自建 PgBouncer**（F10）：transaction pooling 可控、单一收敛层 |
 | 11 | Grafana 建马尼拉 | Grafana 版不含马尼拉 | 工作区建 `ap-southeast-1`，数据源指马尼拉 Prometheus | 任务 26 卡保留 |
 | 12 | Prometheus+APM 马尼拉 | Prometheus ✅ 可用；ARMS **APM 未确认** | APM 未确认前不入 SLA 证据链 | 任务 26/32 卡保留 |
 | 13 | 云监控站点监控当证据 | 海外探测点少，马尼拉未确认 | 三重兜底：GTM 探测 + 多地 ECS 自建 + blackbox | 任务 26/39 卡保留 |
 | 14 | OSS ZRS | 马尼拉是否可选需购买页确认 | 无 ZRS 则 LRS+版本控制+CRR 新加坡 | ✅ 实际按新规则落地（F5） |
 | 15 | “增强型 NAT 网关” | 官方现称 公网 NAT / VPC NAT；绑 EIP 上限口径 10–20 | 4 EIP 安全，但勿照抄“增强型” | 任务 6/12 卡已改口径 |
-| 16 | 配额 ≥64/≥96 vCPU | 已改按规格族 vCPU 配额、按地域计，默认不公开 | `DescribeAccountAttributes`/配额中心实时读再申差额 | ✅ ECS 已批 Agree（F2/F3）；**包年包月口径 `prepay_c`=100/100（2026-09-28 实测）** |
+| 16 | 配额 ≥64/≥96 vCPU | 已改按规格族 vCPU 配额、按地域计，默认不公开 | `DescribeAccountAttributes`/配额中心实时读再申差额 | ✅ ECS 已批 Agree（F2/F3） |
 | 17 | ActionTrail 留 180 天 | 控制台免费只查 90 天 | 180 天必须投递 OSS/SLS | ✅ 投递已落地（F6） |
 | 18 | “禁止 DTS”当产品限制 | DTS 马尼拉**可用** | 改述为**架构红线（决策）** | 全指南已改口径 |
 | 19 | 云解析旗舰版/GTM 旗舰版 | GTM 分标准/旗舰；DNS 付费对照仅中文 | 规格名以国际站购买页为准 | 任务 21 卡保留 |
@@ -304,13 +295,11 @@ aliyun ram ListUsers | jq -r '.Users.User[]|.UserName'   # 期望 admin/ops/cicd
 | 镜像前缀（公网/跨区拉取）     | `${ACR_PUB_PREFIX}` = `acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com/newapi-prod/new-api`             | CI 推送 + 新加坡节点用          |
 | ACK 版本               | 1.35                                                                                                                    | 勿用 EOL 版本                |
 | 节点机型                 | `ecs.g9i.2xlarge` 8C32G                                                                                                 | g8i 未上架，备选 g8ine.2xlarge |
-| 节点池                  | 马尼拉 4×（上限 8，**包年包月**配额 64/100 vCPU）/ 新加坡 2×（上限 12，**包年包月**配额 96/100 vCPU）                                                                       | 配额工单 Agree               |
+| 节点池                  | 马尼拉 4×（上限 8，配额 64 vCPU）/ 新加坡 2×（上限 12，配额 96 vCPU）                                                                       | 配额工单 Agree               |
 | SESSION_SECRET       | KMS 凭据 `newapi/prod/session-secret`，**双区域同源一致**                                                                         | 轮换见任务 55                 |
 | SYNC_FREQUENCY       | 生产 30（代码默认 60）                                                                                                          | 任务 53 验证收敛               |
 | BATCH_UPDATE_ENABLED | **false**（红线）                                                                                                           | 见任务 41/37 额度对账           |
-| SQL_MAX_OPEN_CONNS   | **2026-09-29 裁定 ①：主站 `100`**（一个值同时管主库与日志库，代码里没有 `LOG_SQL_MAX_OPEN_CONNS`）经**托管 PgBouncer**（内网串 6432）；**裁定 ②：新加坡备站 `10` 走乙＝公网串 6432 经池**（甲路 5432 直连已作废）。**服务端上限口径 = 实测 `max_connections 800 × 0.8 = 640`（F11），客户端上限 = 实测 `pgbouncer.max_client_conn 2000` ⇒ I-1 **仅 CK 日志库分支成立（1840 ✅）**，日志库仍为 PG 时 3680 ❌**；`SQL_MAX_IDLE_CONNS`（代码默认 100，本方案取 **50**/备站 **5**）与 `SQL_MAX_LIFETIME`（默认 60s）也必须显式给值，勿按代码默认 1000 推算 | G11、任务 41                |
-| RDS（实测）             | `pgm-5tstdhko64x2c01w` / **PostgreSQL 17.0** / HighAvailability / **`pg.n4.2c.2m` 2C8G** / 主可用区 **6b** / Prepaid / 内网串 + 公网串（任务 15 已开，证书绑**公网串**）/ **托管 PgBouncer 已启用（`PGBouncerEnabled=true`，两条串均监听 6432）** | ✅ 已建；规格与可用区**均以实况为基线**（见任务 4/13） |
-| RDS 账号（实测 2026-09-29）           | `newapi_ops`(Super，仅运维/DMS) + `newapi_migrate`(DDL) + `newapi`(DML) + `newapi_sg`(DML)；实测**已建 4 账号 + 库 `newapi`（`UTF8/C/en_US.utf8`）**，第 2 步权限 SQL 已经临时跳板 ECS 落地并通过四行探测复验（**库级 CONNECT 受坑 14 限制未能收紧，2026-09-29 裁定接受现状**），`newapi_ops` 口令已轮换） | 任务 13                     |
+| SQL_MAX_OPEN_CONNS   | 主站 `150`（日志库 `50`）走自建 PgBouncer；新加坡备站 `10` 直连公网 RDS。**上限口径 = 实测 `max_connections 800 × 0.8 = 640`（F11），勿按代码默认 1000 推算** | G11、任务 41                |
 
 ### 2.2 网段规划（已按此落地，照抄勿改）
 
@@ -344,10 +333,9 @@ aliyun ram ListUsers | jq -r '.Users.User[]|.UserName'   # 期望 admin/ops/cicd
 | K8s / CNI | 1.35（原 1.31 已 EOL）/ **Terway**（不可后期更换；Pod IP 是真实 VPC IP，节点与 Pod 共用 app 交换机） |
 | 镜像前缀（实测） | `${ACR_MNL_PREFIX}` = `acr-newapi-mnl-registry-vpc.ap-southeast-6.cr.aliyuncs.com/newapi-prod/new-api`（EE 实例带实例名前缀；旧 `registry-vpc.ap-southeast-6.aliyuncs.com/newapi/` 形态为个人版域名，实测不存在该命名空间） |
 | 节点池机型（实测修订） | **`ecs.g9i.2xlarge`**——`ecs.g8i` 未在马尼拉上架（2026-09-25 实测），旧文档 g8i 描述作废 |
-| **付费方式（2026-09-28 修订）** | **ECS 节点池 = 包年包月**（`instance_charge_type: PrePaid`，`period_unit: Month` / `period: 12`，`auto_renew: true`）· **Tair = 包年包月**（`ChargeType: PrePaid`，`Period: 12`，`AutoRenew: true`）· **RDS PostgreSQL = 包年包月**（`PayType: Prepaid`，**`Period: Year` / `UsedTime: 1`** —— 月付周期上限 <12，`Period=Month&UsedTime=12` 报 `Order.PeriodInvalid`）· **ACK 集群管理费不支持包年包月**（官方口径）→ 用 **ACK 资源包**抵扣 · ALB/WAF/NAT/EIP/SLS 仍各自按量 |
 | 命名标签 | `project=new-api site=ph-mnl\|sg env=prod cost-center=<按财务> managed-by=console` |
 
-**配额 API 实测坑（全局适用）**：调用配额中心查询/申请**必须**带 `--Dimensions.1.Key regionId --Dimensions.1.Value <regionId>`，不带会返回 cn-hangzhou 的配额（假数据）；申请参数拼写为 `--DesireValue`；审批通过状态值为 **`Agree`**。ECS vCPU 配额已批：马尼拉 50→64、新加坡 50→96（**按量口径 `q_ecs_enterprise_postpay_c`**），**分钟级生效**。**2026-09-28 付费方式修订后：包年包月走独立额度 `q_ecs_enterprise_prepay_c`（马尼拉 100 / 新加坡 100，属默认值、无需工单）——核量时必须查 prepay 而非 postpay，两者分别计量、互不抵扣。**
+**配额 API 实测坑（全局适用）**：调用配额中心查询/申请**必须**带 `--Dimensions.1.Key regionId --Dimensions.1.Value <regionId>`，不带会返回 cn-hangzhou 的配额（假数据）；申请参数拼写为 `--DesireValue`；审批通过状态值为 **`Agree`**。ECS vCPU 配额已批：马尼拉 50→64、新加坡 50→96，**分钟级生效**。
 
 ---
 
@@ -417,7 +405,7 @@ aliyun vpc DescribeVSwitches --RegionId ap-southeast-6 --VpcId "$VPC_ID" --PageS
 - **坑 3｜与新加坡网段重叠**：现象/后果：将来接云企业网/VPC 对等时地址冲突，只能重划网段（≈重建集群）。改进：10.0.0.0/16 vs 10.1.0.0/16 已错开，建第二个 VPC 前再核对一次（见任务 12 复核）。
 - **坑 4｜「开启 DNS 主机名解析」**（方案 R4）在国际站英文文档未见对应开关。改进：以控制台 VPC 详情页实际项为准，找不到就跳过，不影响主链路，别为它卡住 D1。
 
-### Day 1 · 任务 12｜新加坡 VPC + vSwitch + NAT + EIP（单人，2 人时，S1）✅ 已完成，勿重做
+### Day 1 · 任务 12｜新加坡 VPC + vSwitch + NAT + EIP（单人，2 人时，S1）
 
 **前置/状态**：依赖任务 5 复核通过。**VPC `vpc-newapi-sg-prod`=`vpc-t4nimmwvruexbnene0a3r`（10.1.0.0/16，RG=`rg-sg`）已建**，本卡以复核为主；NAT 网关与 4 个 EIP 为本卡新建。
 
@@ -532,7 +520,7 @@ for i in $(seq 1 8); do curl -s -m5 https://ifconfig.me; echo; done | sort | uni
 - **坑 1（本卡特有）｜这 4 个 EIP 有双重身份**：① 上游白名单；② **必须是马尼拉 RDS 公网白名单里唯一的来源**（§6.1）。现象：忘了第二层。后果：RDS 白名单只加了马尼拉 EIP → 备 region Pod 连不上主库，M4 直接挂。改进：**8 个 EIP（mnl 4 + sg 4）列在同一张台账**，标注「已进 RDS 白名单？」「已交供应商？」「生效确认时间」。
 - 任务 5 的坑 2/坑 3（地址耗尽、网段重叠）对新加坡 vSwitch 同样适用；app 段保持 `/20` 下限并记录 free 基线。
 
-### Day 1 · 任务 6｜马尼拉 NAT 网关 + 上游出口 EIP 池 4 个（单人，2 人时，S2）✅ 已完成，勿重做
+### Day 1 · 任务 6｜马尼拉 NAT 网关 + 上游出口 EIP 池 4 个（单人，2 人时，S2）
 
 **前置/状态**：任务 5 复核通过（`vsw-mnl-pub-a` 已存在）。本卡新建 `nat-mnl-prod` + `eip-mnl-upstream-01..04`；是全案对外依赖最重的一张卡（上游白名单的地基）。
 
@@ -704,7 +692,7 @@ aliyun kms DescribeSecret --SecretName "new-api/prod/tls-wildcard" \
 
 - **坑｜私钥 `kubectl create secret generic` 后误提交 Git**。现象：仓库里出现 base64 私钥。后果：仓库可读即可解密会话/冒充站点。改进：只允许 KMS + 注入；CI 加 **gitleaks/密钥扫描门禁**（`skill security-scan-gates`），「密钥不落 Git」列为上线一票否决。
 
-### Day 1 · 任务 16｜马尼拉 ACR 企业版 + CI 推镜像（单人，1 人时，S2，A 窗串行其后）✅ 已完成，勿重做
+### Day 1 · 任务 16｜马尼拉 ACR 企业版 + CI 推镜像（单人，1 人时，S2，A 窗串行其后）
 
 **决策**：**单地域镜像源**，只用马尼拉 `acr-newapi-mnl`。新加坡备站不建 ACR 实例，节点跨区走**公网端点**拉马尼拉镜像（已接受的权衡，代价与缓解见坑 2）。
 
@@ -841,12 +829,11 @@ time kubectl --context sg run pulltest-sg --rm -it --restart=Never \
 aliyun quotas ListProductQuotas --ProductCode ecs-spec --QuotaCategory CommonQuota \
   --Dimensions.1.Key regionId --Dimensions.1.Value ap-southeast-6 \
   | jq -r '.Quotas[]|[.QuotaActionCode,(.TotalQuota|tostring),(.TotalUsage|tostring)]|@tsv'
-# vCPU 额度看 q_ecs_enterprise_prepay_c（**包年包月**，2026-09-28 实测 ap-southeast-6 = 100、ap-southeast-1 = 100）
-# 按量口径对照：q_ecs_enterprise_postpay_c（马尼拉 64 / 新加坡 96）—— 包年包月**不共享**该额度，两者分别计量
+# vCPU 额度看 q_ecs_enterprise_postpay_c（2026-09-28 实测 ap-southeast-6 = 64）
 # 注：--ProductCode ecs 只返回 26 条通用配额，查不到 vCPU；--QuotaCategory 合法值为 CommonQuota（Common 报 InvalidQuotaCategory）
 ```
 
-期望输出：马尼拉 ECS **包年包月** vCPU 配额 `q_ecs_enterprise_prepay_c` 的 `TotalQuota=100`，新加坡同为 `100`（2026-09-28 实测，属默认额度、无需工单）。按量口径（`q_ecs_enterprise_postpay_c`）作对照：马尼拉 64 / 新加坡 96（工单 `b140e263-…` / `e117bf2b-…`，状态 `Agree`）。状态核验：
+期望输出：马尼拉 ECS vCPU 配额 `TotalQuota=64`（申请 50→64 已批）。新加坡同理应为 `96`（50→96）。状态核验：
 
 ```bash
 aliyun quotas GetQuotaApplication --ApplicationId $APP_ID   # 期望 Status=Agree（不是 "Agreed"/"Approved"）
@@ -918,7 +905,7 @@ dig SOA likha.com +short          # 改记录后期望 SOA 序列号递增
 ☐ 证书 *.likha.com 状态「已签发」，notAfter ≥ 今+30 天；私钥在 KMS new-api/prod/tls-wildcard；到期告警已建；部署模板备好未执行
 ☐ ACR 马尼拉企业版 RUNNING、**VPC 端点已关联马尼拉 VPC（`LinkedVpcs` 非空；实测 2026-09-28 为空，未通过）**、马尼拉 VPC 域名 kubectl 拉取输出 ok、新加坡跨区公网域名拉取输出 ok 且**耗时已记录**（§11 RTO 输入）
 ☐ 镜像 tag=git sha 且 CI 拒绝 latest；credential-helper 覆盖 new-api namespace
-☐ G0 表全部通过（含配额：**包年包月** vCPU 马尼拉=100、新加坡=100（`q_ecs_enterprise_prepay_c`）；按量对照 64/96 工单 `Agree`）；机型统一 ecs.g9i.2xlarge；**付费方式：ECS/Tair = 包年包月（PrePaid），ACK 集群管理费走 ACK 资源包**
+☐ G0 表全部通过（含配额：马尼拉 vCPU=64、新加坡=96，Status=Agree）；机型统一 ecs.g9i.2xlarge
 ☐ likha.com NS 指向阿里云；api/ops/static 三条记录已预建，api TTL=60
 ```
 
@@ -930,95 +917,60 @@ dig SOA likha.com +short          # 改记录后期望 SOA 序列号递增
 > **配额 API 实测坑（适用于本泳道全部资源申请）**：调用配额中心 API 必须带 `--Dimensions.1.Key regionId --Dimensions.1.Value <地域>`，否则返回 cn-hangzhou 的配额；审批通过的状态值是 `Agree`（不是 Approved）；申请量参数拼写是 `--DesireValue`；**Tair/RDS 配额需在产品开通后复查**（ECS 配额已批：马尼拉 64 / 新加坡 96）。
 > 所有密码、DSN、连接串一律以 `${PLACEHOLDER}` 出现，真实值只进**密钥管理服务（凭据管家）**，经 ExternalSecret 注入集群，严禁落盘 Git/CI 变量。
 
-### Day 1 · 任务 4｜马尼拉 RDS PostgreSQL 高可用版（计费：选择包年包月）
+### Day 1 · 任务 4｜马尼拉 RDS PostgreSQL 高可用版（单人，2 人时，S1）
 
-**前置/状态**：产品：**云数据库 RDS PostgreSQL 版**。**付费方式 = 包年包月（2026-09-28 修订）**：`PayType=Prepaid` + **`Period=Year` / `UsedTime=1`**（= 12 个月）。**RDS 无 vCPU 配额闸门**——配额中心 `ProductCode=rds` 不接受 `CommonQuota`（实测 `PARAMETER.ILLEGALL`，文档原写的 `CommonConfig` 亦非法），改用「包年包月可售规格 + 存量实例」双验代替配额复查。
-
-> **实测定标（2026-09-28，ap-southeast-6）**：规格 **`pg.x4.2xlarge.2c`**（订单口径原文：*16核 64GB（独享）*）· PG **16.0** · 6a/6b 双区**包年包月均可售**（各 73 个规格）· 100G ESSD PL1。
-> 价格：**标价 15134.47 USD/年 → 实付 10594.13 USD/年（折扣 4540.34，≈30% 优惠）**；月单价 1261.21（月付 9 个月上限 = 11350.85，无额外折扣）；按量对照 2.63232 USD/小时 ⇒ 月约 1921.59 → **包年包月省约 54%**。
+**前置/状态**：G1–G13 门禁已过；RDS 配额已确认（用上述带 regionId 维度的配额命令复查，状态 `Agree`）。产品：**云数据库 RDS PostgreSQL 版**。
 
 > **事实修订（实测，F11）**：线上购买规格 `max_connections` 上限为 **800** 且用户不可改；凡连接预算一律按 `800 × 0.8 = 640` 计算（见任务 41）。若更换规格，必须重跑 `SHOW max_connections;` 复测后再更新预算表。
-> ⚠️ **口径冲突待实测裁决**：官方规格表标注 `pg.x4.2xlarge.2c` 的 `max_connections = 6400`，与 F11 的 800 差 8 倍。实例 Running 后**必须** `SHOW max_connections;` 定论——若为 6400，任务 41 的 640 预算属过度保守（安全但浪费），需重算。
 
 **操作步骤（CLI-first）**：
 
 1. 先验证可买性（决定后续一切，不要跳）：
 
 ```bash
-# 0. RDS 配额：配额中心不支持 → 跳过（实测会报错，勿浪费时间）
-#    aliyun quotas ListProductQuotas --ProductCode rds --QuotaCategory CommonQuota   # ❌ PARAMETER.ILLEGALL
-#    aliyun quotas ListProductQuotas --ProductCode rds --QuotaCategory CommonConfig  # ❌ not allowed
-# 1. 可用区（注意：DescribeRegions 返回全球列表，必须按 RegionId 过滤）
-aliyun rds DescribeRegions \
-  | jq -r '.Regions.RDSRegion[]|select(.RegionId=="ap-southeast-6")|[.RegionId,.ZoneId]|@tsv'
+# 0. 先复查 RDS 配额（实测坑：不带 regionId 维度会返回 cn-hangzhou 的配额）
+aliyun quotas ListProductQuotas --ProductCode rds --QuotaCategory CommonConfig \
+  --RegionId ap-southeast-6 | jq '.Quotas[]|{QuotaActionCode,TotalQuota}'
+aliyun quotas GetProductQuota --ProductCode rds --QuotaActionCode <code> \
+  --Dimensions.1.Key regionId --Dimensions.1.Value ap-southeast-6 \
+  | jq '{Status: .QuotaInfo.Status, TotalQuota: .QuotaInfo.TotalQuota}'   # 期望 Status=Agree
+# 1. 验证可买性（决定后续一切，不要跳）
+aliyun rds DescribeRegions --RegionId ap-southeast-6 \
+  | jq -r '.Regions.RDSRegion[]|.ZoneId' | sort -u
 ```
 
-期望输出：`ap-southeast-6a` / `ap-southeast-6b` 两行。
+期望输出：可用区列表含 `ap-southeast-6a`/`ap-southeast-6b`。
 
 ```bash
-# 2. 包年包月可售规格（关键：Prepaid 与 Postpaid 的可售池不共享）
 aliyun rds DescribeAvailableClasses --RegionId ap-southeast-6 --ZoneId ap-southeast-6a \
-  --Engine PostgreSQL --EngineVersion 16.0 --DBInstanceStorageType cloud_essd \
-  --InstanceChargeType Prepaid --Category HighAvailability | jq '.DBInstanceClasses[]|.DBInstanceClass'
+  --Engine PostgreSQL --EngineVersion 15.0 --DBInstanceStorageType cloud_essd \
+  --InstanceChargeType Postpaid --Category HighAvailability | jq '.DBInstanceClasses'
 ```
 
-期望输出：**73 个规格**，含目标 `pg.x4.2xlarge.2c`（16C64G）。空结果依次换 `EngineVersion` 17.0/16.0/15.0、`StorageType` cloud_essd/cloud_essd2、`Category` HighAvailability/Basic。
-`cloud_ssd` / `local_ssd` 在马尼拉**不可售**（实测返回 0）。
+期望输出：非空规格列表（形如 `pg.x4.2xlarge.2c`，≈16C/64G）。空结果依次换 `EngineVersion` 14.0/15.0/16.0、`StorageType` cloud_essd/cloud_essd2、`Category` HighAvailability/Basic。
 
-
-2. 创建实例（CLI 为主路径；规格/多可用区以购买页列表为准，购买页核对标【控制台】）。
-   **`CreateDBInstance` 有 9 个必填参数**（缺一个 CLI 直接本地报错）：`DBInstanceClass` `DBInstanceNetType` `DBInstanceStorage` `DBInstanceStorageType` `Engine` `EngineVersion` `PayType` `RegionId` `SecurityIPList`。
+2. 创建实例（CLI 为主路径；规格/多可用区以购买页列表为准，购买页核对标【控制台】）：
 
 ```bash
-# 安全预演：--AutoPay false → 只生成「未支付订单」，不扣费、不建实例（零资金风险，可反复验证参数）
-# 真实下单：--AutoPay true（余额 > 0 才会成功）
 aliyun rds CreateDBInstance --RegionId ap-southeast-6 \
-  --Engine PostgreSQL --EngineVersion 16.0 \
-  --DBInstanceClass pg.x4.2xlarge.2c --DBInstanceStorage 100 --DBInstanceStorageType cloud_essd \
+  --Engine PostgreSQL --EngineVersion <上一步实测版本> \
+  --DBInstanceClass <实测规格> --DBInstanceStorage <GB> --DBInstanceStorageType cloud_essd \
   --Category HighAvailability --ZoneId ap-southeast-6a --ZoneIdSlave1 ap-southeast-6b \
-  --VPCId vpc-5tst1tgeessxn1azwasg2 --VSwitchId vsw-5tswufq2pi26l4ahoiu84 \
-  --DBInstanceNetType Intranet --InstanceNetworkType VPC --ConnectionMode Standard \
-  --SecurityIPList "127.0.0.1" \
-  --PayType Prepaid --Period Year --UsedTime 1 \
-  --AutoPay true --AutoRenew true \
-  --DBInstanceDescription newapi-pg-mnl \
-  --ResourceGroupId rg-aek4nyivmmsb6iy \
-  --ClientToken "task4-newapi-pg-mnl-Year1-v1"   # 必须跨调用稳定，否则重复执行会堆出多张订单
+  --VPCId vpc-5tst1tgeessxn1azwasg2 --VSwitchId <vsw-mnl-data-a ID> \
+  --InstanceNetworkType VPC --PayType Postpaid
 ```
 
-期望输出（AutoPay=true 且余额充足）：`{"DBInstanceId":"pgm-...","OrderId":"..."}`；
-AutoPay=false 时输出：`{"Message":"The order has been placed successfully, but payment has not been made...","DBInstanceId":"pgm-...（预分配）","OrderId":"..."}` —— **注意此时实例并未创建**，列表里查不到。
-
-⚠️ **`Period=Month` + `UsedTime=12` 会报 `Order.PeriodInvalid`**（月付上限 < 12 个月）→ 12 个月必须写成 `Period=Year` / `UsedTime=1`。
-
-【控制台】购买页复核「多可用区部署（主 6a/备 6b）+ 不勾选外网地址（任务 15 再开）」。
+期望输出：`{"DBInstanceId":"pgm-...", ...}`。【控制台】购买页复核「多可用区部署（主 6a/备 6b）+ 不勾选外网地址（任务 15 再开）」。
 `[图 D1-B-4｜拍摄对象：RDS 购买页多可用区部署与不勾外网地址选项；打码：账号 ID、订单金额]`
 
 3. 记下 `${RDS_MNL_ID}` 供后续全部任务卡引用；按 §2.3 补标签 `project=new-api site=ph-mnl env=prod`。
-
-**支付与幂等（实测补充）**：
-
-```bash
-# 查未支付订单（下单后订单与实例不会自动创建，必须支付）
-aliyun bssopenapi QueryOrders --region ap-southeast-1 --PageSize 50 --ProductCode rds \
-  | jq -r '.Data.OrderList.Order[]|"\(.OrderId)\t\(.PaymentStatus)\t\(.PretaxAmount)\t\(.CreateTime)"'
-# 取订单明细（含实付额与折扣）
-aliyun bssopenapi GetOrderDetail --region ap-southeast-1 --OrderId <OrderId> \
-  | jq '.Data.OrderList.Order[0]|{OrderId,PretaxGrossAmount,PretaxAmount,ExtendInfos,PaymentStatus,UsageStartTime,UsageEndTime}'
-# 支付：控制台「费用中心 → 订单管理 → 未支付订单」付款（或 bssopenapi PayOrder）
-```
-
-- 支付成功后实例自动创建（1–10 分钟收敛），再跑下面的验证。
-- **充值前的安全操作顺序**：`--AutoPay false` 试单（确证参数与折扣价）→ 充值 → 支付 → 验证。**不要在余额为 0 时反复跑 `--AutoPay true`**：会留下多条失败记录；且若中途余额到账，可能一次扣掉整年费用。
-- **同描述重复下单保护**：`CreateDBInstance` 的 `ClientToken` 只对「同 token」幂等；换了 token/周期仍会新建订单。下单脚本必须先查 `QueryOrders ... PaymentStatus=Unpaid`，命中即拒绝。
 
 **验证方法**：
 
 ```bash
 aliyun rds DescribeDBInstanceAttribute --DBInstanceId ${RDS_MNL_ID} \
  | jq '.Items.DBInstanceAttribute[0]|{Engine,EngineVersion,Category,MasterZone,SlaveZone,DBInstanceClass,DBInstanceStorageType}'
-# 期望：Category=HighAvailability；★2026-09-29 实况：MasterZone=ap-southeast-6b（主节点落在 6b，非本卡原写的 6a），SlaveZone API 不回显
-#   → 多可用区是否真的"主 6a/备 6b"不能靠 API 字段判定，必须【控制台】实例基本信息页截图销账
+# 期望：Category=HighAvailability，MasterZone/SlaveZone=6a/6b
 # 连通性必须从同 VPC 跳板机执行（不要本地直连内网）：
 psql "host=<内网连接串> port=5432 dbname=postgres user=${ACCT} sslmode=require" -c "select version();"
 # 期望：PostgreSQL <实测版本> ...（把输出回填方案表作为交付基线）
@@ -1029,288 +981,104 @@ psql "host=<内网连接串> port=5432 dbname=postgres user=${ACCT} sslmode=requ
 - 购买页无「多可用区部署」→ 该地域/引擎未开多可用区 → 退化为单可用区 + 强备份，并**书面记录 SLA 降级**（RDS 高可用是 99.95% 最低配置之一，方案 R17）。
 - 实例 Running 但连不上 → 九成是白名单默认 `127.0.0.1` 拒绝一切（见任务 13 坑 1），先配白名单再排网络。
 - `InsufficientResourceCapacity` → 换可用区/换同族相邻规格；仍不行提工单查库存。
-- `Order.PeriodInvalid` → 周期写法不对，见坑 6。
-- 下单成功但实例列表为空 → 这是**未支付订单**，不是创建失败，见坑 8。
 
 **坑**：
-- 坑 1｜PG 版本以购买页为准：方案写"选 15"，国际站海外地域滞后。**后果**：文档承诺 16、实建 14，依赖新特性的 SQL/迁移踩空。**改进**：`select version();` 输出回填方案表作为交付基线。（实测马尼拉 17.0/16.0/15.0 三版均可售，选 **16.0**。）
+- 坑 1｜PG 版本以购买页为准：方案写"选 15"，国际站海外地域滞后。**后果**：文档承诺 16、实建 14，依赖新特性的 SQL/迁移踩空。**改进**：`select version();` 输出回填方案表作为交付基线。
 - 坑 2｜主备切换闪断约 30 秒。**后果**：应用未配重连时表现为一波集中 5xx。**改进**：D7 必做一次主动 HA 切换演练（`aliyun rds SwitchDBInstanceHA --DBInstanceId ${RDS_MNL_ID}`），验证客户端自动重连与成功率曲线。
 - 坑 3｜连接串被写死在 CI 变量/Git。**后果**：实例释放重建后连接串变，全站启动失败。**改进**：一律 KMS + ExternalSecret 注入。
 - 坑 4｜"Running" ≠ "可连"：创建需 1–10 分钟。**改进**：验收以 `psql` 实际连通为准。
-- **坑 5｜`PayType` 拼写与国际站口径（2026-09-28 实测）**：RDS 的计费参数是 **`PayType`**，取值 **`Prepaid`/`Postpaid`**（首字母大写、其余小写；全小写的 `prepaid`/`postpaid` 会被拒）；ECS/Tair 那套是 `InstanceChargeType`/`ChargeType`。**后果**：把 ECS 的参数名抄到 RDS 上会被 CLI 报 "not a valid parameter"。**改进**：三产品参数名对照——ECS `InstanceChargeType` · Tair `ChargeType` · RDS `PayType`。文档原写 `--PayType Postpaid` 已按包年包月修订为 `--PayType Prepaid`。
-- **坑 6｜包年包月周期不能写「12 个月」（2026-09-28 实测）**：`Period=Month` + `UsedTime=12` → `Order.PeriodInvalid: There is a problem with the period you selected`。月付周期上限 < 12 个月。**后果**：报错文案完全没提"上限"，极易误判为参数名写错。**改进**：12 个月必须写 **`Period=Year` + `UsedTime=1`**；月单价用 `DescribePrice --TimeType Month --UsedTime 1` 单独取。
-- **坑 7｜`DescribePrice` 的 `CommodityCode` 会反转口径（2026-09-28 实测）**：`--CommodityCode bards` = **按量**商品码，给 Prepaid 查询也强行按量计价并覆盖 `PayType` → 表现为"包月价 = 包年价 = 按量小时价"三个数字完全相同（2.63232），看起来像"包年包月没折扣"。反过来 `PayType=Postpaid` **不带** `CommodityCode` 则 `PriceInfo` 全 `null`（静默 n/a）。**改进**：Prepaid 用 `--CommodityCode rds`，Postpaid 用 `--CommodityCode bards`；比价前先看 `.PriceInfo.OrderLines."0".chargeType`（1=包年包月 / 2=按量）与 `commodityCode`（`rds_intl` / `bards_intl`）自校。
-- **坑 8｜`AutoPay=false` 下单成功 ≠ 实例创建（2026-09-28 实测）**：返回 `{"Message":"...payment has not been made...","DBInstanceId":"pgm-...","OrderId":"..."}`，`DBInstanceId` 是**预分配**但实例并不存在，`DescribeDBInstances` 查不到。**后果**：误以为已创建，后续任务 13/14/15 全部找不到实例。**改进**：下单后必须核对 `QueryOrders` 的 `PaymentStatus`；未支付即未创建，支付后 1–10 分钟收敛。**该特性可用于零成本试单**（确证参数合法性 + 拿到实付折扣价），充值后再支付。
 
-### Day 1 · 任务 13｜RDS 账号与权限最小化（单人，1 人时，S2）✅ 已完成，勿重做
+### Day 1 · 任务 13｜RDS 账号与权限最小化（单人，1 人时，S2）
 
 **前置/状态**：任务 4 实例 Running。三账号一主库：`newapi_migrate`（master 专用，含 DDL）、`newapi`（stable/canary 运行账号，仅 DML）、`newapi_sg`（备 region 运行账号，仅 DML）；高权限账号只留运维/DMS，**绝不写进任何 DSN**。
 
-**实测基线（2026-09-29，`DescribeDBInstanceAttribute` / `DescribeAccounts` / `DescribeDatabases` / `DescribeDBInstanceIPArrayList` / `DescribeClassDetails` / `ecs DescribeSecurityGroups` / `cs DescribeClusters`）**：
-
-| 项 | 真值 | 与方案口径的差异 |
-| --- | --- | --- |
-| 实例 | `pgm-5tstdhko64x2c01w`（`rds-mnl-newapi`）/ Running / HighAvailability / **Prepaid** / cloud_essd 100GB | — |
-| 引擎 | **PostgreSQL 17.0**（`DescribeDBInstanceAttribute`）；库内 `show server_version` 回 **17.10** | 方案与任务 4 按 15/16 查规格；两处版本号口径不同，以 `show server_version` 为行为依据（坑 4 的 `public` schema 收紧在 17.x 必现） |
-| 规格 | **`pg.n4.2c.2m` = 2C / 8G 通用型，`MaxConnections=800`** | **已裁定以实况为基线**：§14 成本表与任务 33 压测口径均按 2C/8G 修订，原 16C64G 作废 |
-| 可用区 | `ZoneId`=`MasterZone`=**ap-southeast-6b**，交换机 `vsw-mnl-data-b`（10.0.64.0/20）；`SlaveZone` API 未回显 | 任务 4 期望「主 6a/备 6b」，**实际主 6b** |
-| 网络 | 仅内网串 `pgm-5tstdhko64x2c01w.pgsql.ap-southeast-6.rds.aliyuncs.com:5432` | ✅ 公网留任务 15 |
-| 账号 | **`DescribeAccounts` = `[]`（0 个，连高权限账号都没有）** | 本表为**建卡时快照**；本次执行后已有 4 个，见下方执行记录 |
-| 库 | **`DescribeDatabases` = `[]`（0 个）** | 同上：本次已建 `newapi` |
-| 白名单 | `default` 组 = **`10.0.0.0/16`（整 VPC，过宽）**；另有隐藏组 `hdm_security_ips` = `100.104.188.192/26,100.104.53.0/26`（阿里内部/DMS，**勿删**） | 坑 1 说默认 `127.0.0.1` 拒绝一切 —— **实况相反，是过宽** |
-| 集群侧 | **建卡时快照**：VPC 内 0 台 ECS、0 个 ACK 集群，安全组只有 `sg-5tshna0oeautlmbvgefd`（`created_by_rds`）。**2026-09-29 13:3x 复核已变**：`ack-newapi-mnl`（`cd57e40ce9a634c1698c2f5c5e09bd93c`）`state=running`，4 台 worker 在跑（6a `10.0.22.189/190`、6b `10.0.43.195/196`），均挂 `sg-mnl-app`（`sg-5tsil3ca5dfkqefks1g9`）⇒ 步骤 3 备注的"`sg-mnl-app` 尚不存在"已不成立，且节点 IP 全落在收窄后的白名单网段内 | 该安全组现由 ACK 侧（任务 10/18 线）持有 |
-
-**★ 执行位置约束（2026-09-29 复核后改写：DMS 在马尼拉不可用）**：（以下为**当日 11 时点的时点态**，RDS 只有内网地址，本地与 CI 都直连不到，VPC 内此刻也没有任何跳板机/ECS 可跑 `psql`）原卡据此把第 2 步指向 DMS，**但实测 DMS 走不通**，证据链如下：
-
-1. `SimplyAddInstance` → `UnknownError`（两次复现，`RequestId …-987B`、`…-0E00`），该 API 对本实例不可用。
-2. 改 `RegisterInstance`（`InstanceSource=RDS`、`InstanceType=postgresql`、`NetworkType=VPC`、`EcsRegion=ap-southeast-6`、`SafeRule=自由操作`=`GroupId 23359987`/`GroupMode=NONE_CONTROL`、`DbaUid=219901390242410810`）→ **`Success=true`**，控制面登记成功：DMS `InstanceId=2997880`、`State=NORMAL`。
-3. 但数据面拿不到库：`SyncInstanceMeta` 返回 Success，`ListDatabases --InstanceId 2997880` 持续 `TotalCount=0`（跨 ~12 分钟、12 次轮询）；`GetDatabase --SchemaName newapi/postgres` 明确回 **`未获取到数据库相关信息，可能是因为DMS到数据库的网络不通`**（`RequestId …-A7FA`、`…-A1FA`）。
-4. `TestInstanceConnection --DbType postgresql` 反而 `Success=true`（`--DbType pg` 会被拒），说明该 API 只校验控制面，**不能**当作可连通证据。
-5. 官方《服务接入点/DMS regionId》支持地域表里**没有 `ap-southeast-6`**（含 `ap-southeast-1` 新加坡、`ap-southeast-5`、`us-east-1` 等，无马尼拉）。
-
-⇒ 结论（**当日 11 时点的判断，下一段已给出裁定与落地结果**）：**马尼拉侧 DMS 无数据面，`ExecuteScript` 因拿不到 `DbId` 而无法使用；DMS 网页控制台的 SQL 窗口走同一条数据面，人工贴 SQL 同样会失败**（此推论需在控制台复核一次再定案）。本卡第 2 步因此**没有可执行路径**，必须先补一个执行位（见坑 13 的三个备选），不能在文档里假装"DMS 里执行"就完事。新加坡（`ap-southeast-1`）在支持列表内，DMS 只在主站不可用。
-
-**已裁定的执行位（2026-09-29）**：上列①②③中选了 **① 同 VPC 临时跳板 ECS** —— 在 `vsw-mnl-app-a`（6a，`10.0.16.0/20`，已在收窄后的白名单内）建 1 台**无公网 IP** 的按量 ECS，全程只用云助手（Cloud Assistant）投递 `psql`，用完即删。实测补充两点：`ecs.t6-c1m1.large` 在 `ap-southeast-6b` 不可购（故跳板落在 6a）；云助手用 `/bin/sh` 执行，脚本首行必须写 `#!/bin/bash`，否则 `set -o pipefail` 直接 `ExitCode=2`。DMS 侧登记（`InstanceId=2997880`）经裁定**保留**，其内存的 `newapi_ops` 密文在本卡口令轮换后即为失效值（主站数据面本就不可用，无功能影响）。
-
-
-**执行记录（2026-09-29，本人以 CLI 完成第 0/1/3 步；第 2 步经临时跳板 ECS 落地 7/9 条并完成四行探测复验，余 2 条受坑 14 限制无法生效）**：
-
-| 步骤 | 状态 | 证据 |
-| --- | --- | --- |
-| 0 建 `newapi_ops`(Super) | ✅ Available，`CreateDB=t/CreateRole=t/BypassRLS=t/Replication=t` | `RequestId 01A0EB20-AC7B-…` |
-| 1a 建库 `newapi` | ✅ Running，回显 `CharacterSetName=UTF8`、`Collate=C`、`Ctype=en_US.utf8`，`ConnLimit=-1`，`Accounts.AccountPrivilegeInfo=[]` | `RequestId 01A0EB20-B083-…` |
-| 1b 建三账号 | ✅ `newapi_migrate`/`newapi`/`newapi_sg` 均 Normal、Available，**库权限条数全 0**（符合坑 6/11） | `RequestId …-B487-/…-B9CD-/…-BE73-` |
-| 2 权限 SQL | ⚠ **已执行，7/9 条生效**（2026-09-29 13:00，执行位=同 VPC 临时跳板 ECS `i-5ts2ay28ah0w6ztam4rm`，用户裁定；DMS 登记按裁定**保留**不删）。**生效**：`REVOKE CREATE ON SCHEMA public FROM PUBLIC`、`GRANT USAGE,CREATE ... TO newapi_migrate`、`GRANT USAGE ... TO newapi, newapi_sg`、三条 `ALTER DEFAULT PRIVILEGES FOR ROLE newapi_migrate`（`pg_default_acl` 回读 2 行：表 1 + 序列 1，符合预期）。**未生效**：`REVOKE ALL ON DATABASE ... FROM PUBLIC` 与 `GRANT CONNECT ...` 各回 `WARNING: no privileges could be revoked / were granted`（不是报错，极易漏看），根因见坑 14 ⇒ **库级 CONNECT 收不紧，四个账号目前都能 CONNECT**（经 PUBLIC 默认 ACL），但 schema/表级边界已按最小化落地。**该缺口 2026-09-29 经用户裁定为接受现状**（不重建库交 owner），不算本卡未完成项。**四行探测表已补跑通过**（13:2x，同一跳板，`InvokeId t-phl6yhyw2a45vr4`）：`newapi` 建表 → `ERROR: permission denied for schema public`；`newapi_sg` 建表 → 同样被拒（超出原表要求）；`newapi_migrate` 建表+删表 → 无报错；`pg_default_acl` 回读 `r={newapi=arwd/newapi_migrate,newapi_sg=arwd/…}`、`S={newapi=rU/…,newapi_sg=rU/…}`。**坑 8 的默认权限传播也当场证伪了失效模式**：以 `newapi_migrate` 建 `_adp_probe` → `newapi` `INSERT`+`SELECT` → `newapi_sg` `UPDATE` → 回 `newapi_migrate` `DROP`，全程零报错，收尾 `leftover_tables=0`。跑完立即 `ResetAccountPassword` 轮换 `newapi_ops`（`RequestId 01A0EB9C-535E-…`，新值仅落 WSL `~/.newapi_rds_ops_password`，600 权限，不进仓库/对话），跳板 ECS 与临时安全组随后删除 | 存档 `deploy/logs/task13_dms_20260929-1137*/`…`…1154*/`（DMS 尝试）、`deploy/logs/task13_jump_20260929-125031/`（跳板：`grants_output.txt` 逐条 SQL 回显、`f2_output.txt` 权限快照、`*_cmd.masked.sh` 已打码脚本） |
-| 3 白名单收窄 | ✅ `default` 由 `10.0.0.0/16` → `10.0.16.0/20,10.0.32.0/20,10.0.48.0/20,10.0.64.0/20`；隐藏组 `hdm_security_ips` 保留；实例仍 Running | `RequestId 01A0EB23-6B1F-…`；存档 `deploy/logs/task13_20260929-110920/whitelist-{before,after}.json` |
-
-**操作步骤（CLI 建对象 → 权限 SQL 在同 VPC 临时跳板 ECS 上执行，见上方"执行位置约束"）**：
-
-0. **先建高权限账号**（原卡漏掉的前置；没有它，第 2 步 SQL 谁都不是 owner，`GRANT`/`REVOKE` 无从执行）：
+**操作步骤（CLI-first）**：
 
 ```bash
-# PW_SUPER 由运维在本地终端 export，不入库、不进对话、不落 shell 历史
-aliyun rds CreateAccount --DBInstanceId ${RDS_MNL_ID} \
-  --AccountName newapi_ops --AccountPassword "$PW_SUPER" --AccountType Super \
-  --AccountDescription "ops/DMS only, never in DSN"
-# RDS 每实例最多 1 个 Super；PG15+ 建库时 public schema 已默认收紧，见坑 4
-aliyun rds DescribeAccounts --DBInstanceId ${RDS_MNL_ID} \
-  | jq -e -r '.Accounts.DBInstanceAccount[]|select(.AccountName=="newapi_ops")|"\(.AccountName)\t\(.AccountType)\t\(.AccountStatus)"'
-# 期望：newapi_ops  Super  Available
-# ★ 字段名实测：列表在 `.Accounts.DBInstanceAccount[]`，**不是 `.Accounts.DBAccount[]`**（后者恒为 null → jq 报 "Cannot iterate over null"，写错会误判成"账号没建成"）
-```
-
-1. 建库与三个业务账号（密码一律来自本地环境变量/KMS，**不写明文**）：
-
-```bash
-# PG 的 CharacterSetName 必须是「字符集,Collate,Ctype」三段，只写 UTF8 会报错（坑 5）
+# 1. 建库与账号（密码从 KMS 生成占位，创建后立刻把真实值写入凭据管家，不落 shell 历史）
 aliyun rds CreateDatabase --DBInstanceId ${RDS_MNL_ID} --DBName newapi \
-  --CharacterSetName 'UTF8,C,en_US.utf8'
-# 不在这里绑 AccountName/AccountPrivilege：库权限统一由第 2 步 SQL 精确授予（坑 6）
+  --CharacterSetName UTF8 --AccountPrivilege ReadOnly
 aliyun rds CreateAccount --DBInstanceId ${RDS_MNL_ID} --AccountName newapi_migrate \
-  --AccountPassword "$PW_MIGRATE" --AccountType Normal
+  --AccountPassword ${PW_MIGRATE} --AccountType Normal
 aliyun rds CreateAccount --DBInstanceId ${RDS_MNL_ID} --AccountName newapi \
-  --AccountPassword "$PW_APP" --AccountType Normal
+  --AccountPassword ${PW_APP} --AccountType Normal
 aliyun rds CreateAccount --DBInstanceId ${RDS_MNL_ID} --AccountName newapi_sg \
-  --AccountPassword "$PW_SG" --AccountType Normal
-# 任务 9 已按 F9 收口到马尼拉 CK，**不建 newapi_log 库**（旧「方案 C 另建库」分支作废）
+  --AccountPassword ${PW_SG} --AccountType Normal
+# 若任务 9 决策为方案 C，另建 newapi_log 库
 ```
 
 期望输出：各命令返回 `RequestId`。复核账号与库：
 
 ```bash
 aliyun rds DescribeAccounts --DBInstanceId ${RDS_MNL_ID} \
-  | jq -r '.Accounts.DBInstanceAccount[]|[.AccountName,.AccountType,.AccountStatus,(.DatabasePrivileges.DatabasePrivilege|length|tostring)]|@tsv'
-# 期望四行：newapi_ops=Super；newapi_migrate/newapi/newapi_sg 均 Normal、Available
-# 第 4 列=该账号绑定的库权限条数，**此时期望全为 0**（坑 6：粗粒度授权会把第 2 步 SQL 盖住）
-aliyun rds DescribeDatabases --DBInstanceId ${RDS_MNL_ID} \
-  | jq -r '.Databases.Database[]|"\(.DBName)\t\(.CharacterSetName)/\(.Collate)/\(.Ctype)\t\(.DBStatus)"'
-# 期望：newapi  UTF8/C/en_US.utf8  Running（三段式在建库后被拆成三个独立字段回显，不再带逗号）
+  | jq -r '.Accounts.DBAccount[]|[.AccountName,.AccountType,.AccountStatus]|@tsv'
+# 期望三行：newapi_migrate/newapi/newapi_sg 均 Normal、Available；高权限账号不在任何 DSN 中
+aliyun rds DescribeDatabases --DBInstanceId ${RDS_MNL_ID} | jq -r '.Databases.Database[].DBName'
 ```
 
-【控制台】账号管理页确认三个 Normal 账号**不绑定任何库权限**（授权留给第 2 步 SQL，避免 RDS 粗粒度授权覆盖精细授予）。
-`[图 D1-B-13｜拍摄对象：账号列表（newapi_ops=高权限 + 三业务账号无库授权）；打码：账号名后缀]`
+【控制台】账号管理页确认创建时绑定的授权库为 `newapi`（DML 账号勾选只读/读写，不给结构权限）。
+`[图 D1-B-13｜拍摄对象：账号列表与授权库下拉（migrate=读写、app/sg=DML）；打码：账号名后缀]`
 
-2. 权限落地 —— 以下 SQL **以 `newapi_ops` 登录、库选 `newapi`** 执行。执行位已定为 **① 同 VPC 临时跳板 ECS**（②临时外网串、③FC 挂 VPC 两个备选作废，理由见上方"执行位置约束"末尾）。跳板要点：无公网 IP、落在白名单已放行的 `10.0.16.0/20`、命令只经云助手投递、`psql` 口令走 `RunCommand`（会留在调用记录里 ⇒ **跑完立刻 `ResetAccountPassword` 轮换**；注意 RDS CLI **没有** `ModifyAccountPassword`，实测会报 `is not a valid api`，改密用 `ResetAccountPassword --DBInstanceId --AccountName --AccountPassword`）、用完删机与删安全组。原卡写的"DMS 里执行"在本地域不成立（坑 13）：
+2. 权限落地（用高权限账号经 DMS/psql 执行 SQL）：
 
 ```sql
--- (1) ⚠ 主站实测**无法生效**（坑 14）：库 `newapi` 的 owner 是 RDS 内部账号 `aurora`，
---     `newapi_ops` 只是 `pg_rds_superuser` 成员而非真超级用户，无权改动 database 级 ACL。
---     两条语句各回一句 WARNING 后静默 no-op，`datacl` 仍是 {=Tc/aurora,aurora=CTc/aurora}，
---     即 PUBLIC 仍持有 CONNECT+TEMP ⇒ 四个账号都能 CONNECT。**2026-09-29 已裁定接受此现状**：
---     "能不能连"由白名单网段 + 口令轮换 + KMS 兜底，PG 侧只保证 schema/表级边界（已验证有效）；
---     重建库交 owner 的方案见坑 14，裁定不做。
---     保留在此是为了说明：CONNECT 是 database 级权限，不能与 schema 权限写在同一条 GRANT 里（原卡语法错，坑 7）
-REVOKE ALL ON DATABASE newapi FROM PUBLIC;
-GRANT CONNECT ON DATABASE newapi TO newapi_migrate, newapi, newapi_sg;
-
--- (2) schema：只给迁移账号 CREATE，运行账号仅 USAGE
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
-GRANT USAGE, CREATE ON SCHEMA public TO newapi_migrate;
-GRANT USAGE ON SCHEMA public TO newapi, newapi_sg;
-
--- (3) 关键：默认权限必须 FOR ROLE newapi_migrate —— 建表的是它，不是执行本语句的 newapi_ops
---     不带 FOR ROLE 时语句"执行成功"但对后续表完全无效，运行账号要到 D4 AutoMigrate 后才全线 permission denied
-ALTER DEFAULT PRIVILEGES FOR ROLE newapi_migrate IN SCHEMA public
-  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO newapi;
-ALTER DEFAULT PRIVILEGES FOR ROLE newapi_migrate IN SCHEMA public
-  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO newapi_sg;
--- (4) 自增主键依赖 sequence，漏授权则 INSERT 直接失败（原卡未授，坑 8）
-ALTER DEFAULT PRIVILEGES FOR ROLE newapi_migrate IN SCHEMA public
-  GRANT USAGE, SELECT ON SEQUENCES TO newapi, newapi_sg;
+GRANT CONNECT, CREATE, USAGE ON SCHEMA public TO newapi_migrate;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT,INSERT,UPDATE,DELETE ON TABLES TO newapi;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT,INSERT,UPDATE,DELETE ON TABLES TO newapi_sg;
+GRANT USAGE ON SCHEMA public TO newapi, newapi_sg;        -- 注意：不给 CREATE
 ```
 
-跳板执行的落地方式（每条语句单独一次 `psql -c`，否则一条失败会连带吞掉后面的判断；`-v ON_ERROR_STOP=0` 配逐条回显才能看清哪条是 no-op）：
+3. **建实例的同一分钟配好白名单**：【控制台】或 `aliyun rds ModifySecurityIps` 内网组绑 `sg-mnl-app` 安全组（比 IP 列表可维护），网段用 `10.0.16.0/20,10.0.32.0/20` + 节点网段。
+`[图 D1-B-13｜拍摄对象：白名单命名组与安全组绑定；打码：具体公网 IP]`
+
+**验证方法**：
 
 ```bash
-# 云助手命令内容里含 $PW_SUPER（会进调用记录）⇒ 执行完立即轮换口令
-aliyun ecs RunCommand --RegionId ap-southeast-6 --Type RunShellScript \
-  --InstanceId.1 "$JUMP_ECS_ID" --Timeout 180 --Name task13-grants \
-  --ContentEncoding Base64 --CommandContent "$(printf '%s' "$CMD" | base64 -w0)"
-# 首行必须 #!/bin/bash：云助手用 /bin/sh，set -o pipefail 会被判 Illegal option
-aliyun ecs DescribeInvocationResults --RegionId ap-southeast-6 \
-  --InvokeId "$INVOKE_ID" --InstanceId "$JUMP_ECS_ID" \
-  | jq -r '.Invocation.InvocationResults.InvocationResult[0].Output' | base64 -d
-# ★ 判读要点：Status=Success / Exit=0 只代表脚本跑完了，**不代表 SQL 生效**；
-#   database 级授权失败是 WARNING 不是 ERROR，必须逐行看回显 + 用 has_*_privilege 回读（坑 14）
-```
-
-3. **白名单收口**（实况是整 VPC 过宽，本步是"收窄"而非"从零配起"）：
-
-```bash
-# 执行前先存档现状，ModifyMode=Cover 是整组覆盖，写错即自锁
-# 证据目录沿用仓库既有约定 deploy/logs/taskNN_<ts>/（.gitignore 第 13 行的 `logs` 规则已覆盖该目录，可安全放原始 JSON，勿用 .deploy/）
-# ★ 但口令不要落仓库：原始 API 响应里若含 CommandContent / DatabasePassword，一律先 mask 再存，或改存 /tmp
-mkdir -p deploy/logs/task13_$(date +%Y%m%d-%H%M%S)
-aliyun rds DescribeDBInstanceIPArrayList --DBInstanceId ${RDS_MNL_ID} \
-  | tee deploy/logs/task13_$(date +%Y%m%d-%H%M%S)/whitelist-before.json \
-  | jq -r '.Items.DBInstanceIPArray[]|"\(.DBInstanceIPArrayName)\t\(.DBInstanceIPArrayAttribute//"")\t\(.SecurityIPList)"'
-aliyun rds ModifySecurityIps --DBInstanceId ${RDS_MNL_ID} \
-  --DBInstanceIPArrayName default --ModifyMode Cover \
-  --SecurityIps "10.0.16.0/20,10.0.32.0/20,10.0.48.0/20,10.0.64.0/20"
-# 应用网段（Pod/节点）+ 数据网段（RDS 自身与后续 Tair）；隐藏组 hdm_security_ips 不动
-```
-
-任务 18 建出 `sg-mnl-app` 后，把内网组从 CIDR 列表换成安全组绑定（比 IP 列表可维护）；本卡不提前做，因为该安全组当前不存在。**2026-09-29 13:3x 更新：该前提已解除** —— `sg-mnl-app`（`sg-5tsil3ca5dfkqefks1g9`）与 4 台 ACK worker 均已存在且节点 IP 落在当前四条 CIDR 内。改用 `--SecurityGroupIdList` 绑定属独立写操作（会替换现有 CIDR 组，配错即自锁），且需与 ACK 线确认该组不会被集群重建，故本次未动，留作 D2 可选优化。
-`[图 D1-B-13｜拍摄对象：白名单命名组收窄后的列表；打码：具体公网 IP]`
-
-**验证方法**（在第 2 步选定的 SQL 执行位里按登录账号分别执行，**不是** DMS——主站 DMS 不可用，坑 13；本次执行位=同 VPC 临时跳板 ECS；**不往业务表写数据**，坑 9）：
-
-| 以谁登录执行 | 语句 | 期望 |
-| --- | --- | --- |
-| `newapi` | `CREATE TABLE _perm_probe(x int);` | `permission denied for schema public` |
-| `newapi_migrate` | `CREATE TABLE _perm_probe(x int); DROP TABLE _perm_probe;` | 成功且不留痕 |
-| `newapi_ops` | `SELECT datname, has_database_privilege(datname,'newapi','CONNECT') FROM pg_database WHERE datname='newapi';` | `true` |
-| `newapi_ops` | `SELECT nspname, has_schema_privilege('newapi',nspname,'USAGE,CREATE') FROM pg_namespace WHERE nspname='public';` | `USAGE,CREATE` 中 CREATE 必须为否 |
-
-> **跳板执行时的取巧法（2026-09-29 实测可用）**：前三行要"以谁登录"，但把 `newapi`/`newapi_migrate`/`newapi_sg` 的口令再投一遍 `RunCommand` 会成倍扩大泄露面。以 `newapi_ops` 连上后 **`SET ROLE <目标账号>`** 即可等价探测（RDS 把 `pg_rds_superuser` 建成所有业务账号的成员，实测 `set role newapi_migrate`/`set role newapi` 均成功），只需在同一条 `-c` 里连发。注意 `psql -Atc` 每次是新连接，`SET ROLE` 必须和探测语句同批。
->
-> **2026-09-29 实测结果**（`deploy/logs/task13_jump_20260929-125031/`：`f2_output.txt` 权限快照、`verify_cmd.masked.sh` 探测脚本）：`nspacl={pg_database_owner=UC/…, =U/pg_database_owner, newapi_migrate=UC/…, newapi=U/…, newapi_sg=U/…}` —— schema 侧完全符合设计（只有 `newapi_migrate` 有 `C`）；`datacl={=Tc/aurora, aurora=CTc/aurora}` —— database 侧仍是 PUBLIC 默认放行（坑 14）。四行探测已用上述 `SET ROLE` 法跑过：`newapi`/`newapi_sg` 建表均 `permission denied for schema public`，`newapi_migrate` 建删成功，收尾 `pg_tables` 计数 0。
-
-D1 只能验到这四条。**DML 权限（`newapi`/`newapi_sg` 能否 SELECT/INSERT）此刻无法验证** —— 库里还没有任何表，表要等任务 22 的 AutoMigrate 才出现；原卡的 `INSERT INTO users(id) VALUES(-1)` 既无表可插、又会留脏行，已删除。该项移到任务 22 出口复验：
-
-> **补充：默认权限的传播其实 D1 就能验，不必等任务 22**（2026-09-29）。坑 8 的失效模式是"语句成功但对后续建表无效"，用一个自建自删的探针表即可提前证伪：以 `newapi_migrate` 建 `_adp_probe(id serial primary key, v text)` → 切 `newapi` 做 `INSERT`+`SELECT` → 切 `newapi_sg` 做 `UPDATE` → 回到 `newapi_migrate` `DROP`。全程不碰业务表（符合坑 9），跑完 `count(*) from pg_tables where schemaname='public'` 必须回到 0。这样才能把"第 2 步 (3)/(4) 真生效"作为 D1 出口条件，而不是留到 D4 由应用报 `permission denied` 才发现。
-
-```sql
--- 任务 22 AutoMigrate 之后，以 newapi 登录执行；期望成功，随后必须删干净
-SELECT count(*) FROM users;
-INSERT INTO users(username,status) VALUES('__perm_probe__',1) RETURNING id;
--- 记下返回 id 后：
-DELETE FROM users WHERE username='__perm_probe__';
--- 另查默认权限是否真的落到新表上（验证第 2 步 (3) 生效）：
-SELECT grantee, privilege_type FROM information_schema.role_table_grants
- WHERE table_schema='public' AND table_name='users' ORDER BY 1,2;
+psql "<newapi DSN>" -c "CREATE TABLE _t(x int);"          # 期望：permission denied for schema public
+psql "<newapi_migrate DSN>" -c "CREATE TABLE _t(x int); DROP TABLE _t;"   # 期望：成功
+psql "<newapi_sg DSN>" -c "INSERT INTO users(id) VALUES(-1) ON CONFLICT DO NOTHING;"  # 期望：成功
 ```
 
 **不通过时修复**：
-- 一切连接超时 → 先复核 `DescribeDBInstanceIPArrayList`。**注意：本实例实况不是坑 1 的 `127.0.0.1` 拒绝一切，而是 `default=10.0.0.0/16` 过宽**；若收窄后超时，说明发起端网段不在四条 CIDR 内。
-- 第 0 步 `CreateAccount --AccountType Super` 报错 → 已存在 Super（每实例上限 1 个）或该地域/引擎不支持 → 走【控制台】账号管理创建，再回 CLI 复核。
-- `invalid privilege type CONNECT for schema` → 第 2 步 (1) 被合进 `ON SCHEMA` 语句了，拆开执行。
-- AutoMigrate 报 `permission denied for schema public` → PG15+ 的 public schema 权限收紧（坑 4），确认 `GRANT USAGE, CREATE ON SCHEMA public TO newapi_migrate` 已对**当前库**执行（连错库是最常见原因；主站不能用 DMS 选库，见坑 13）。
-- AutoMigrate 成功但运行账号读表被拒 → 第 2 步 (3) 漏了 `FOR ROLE newapi_migrate`（坑 7/8），补跑后对**已存在**的表还要手工 `GRANT`（默认权限只管此后新建的对象）。
-- `newapi` 能建表 → `REVOKE CREATE ON SCHEMA public FROM PUBLIC` 未生效，重跑第 2 步 (2)。
+- 一切连接超时 → 白名单默认组 `127.0.0.1` 拒绝一切（坑 1），先复核 `aliyun rds DescribeDBInstanceIPArrayList`。
+- AutoMigrate 报 `permission denied for schema public` → PG15+ 的 public schema 权限变化（坑 4），确认 `GRANT ... TO newapi_migrate` 已执行且账号无误。
+- `newapi` 能建表 → `REVOKE CREATE ON SCHEMA public FROM PUBLIC` 未生效，重跑第 2 步 SQL。
 
 **坑**：
-- 坑 1｜白名单默认分组 `127.0.0.1` 含义是"拒绝所有"而非"允许本机"。**后果**：实例建好后一切连接超时，容易误判为网络/安全组问题，白查一小时。**改进**：建实例同一分钟配好白名单，内网绑安全组。**2026-09-29 实况补记**：本实例走的是反方向 —— 控制台建实例时填了 `10.0.0.0/16`，白名单"能连"不等于"最小"，所以本卡第 3 步的动作是**收窄**；两种偏差都只在 `DescribeDBInstanceIPArrayList` 里看得见，别凭卡片措辞假设。
+- 坑 1｜白名单默认分组 `127.0.0.1` 含义是"拒绝所有"而非"允许本机"。**后果**：实例建好后一切连接超时，容易误判为网络/安全组问题，白查一小时。**改进**：建实例同一分钟配好白名单，内网绑安全组。
 - 坑 2｜两 region 共用同一账号（方案 R18 禁止）。**后果**：凭据泄露面翻倍、无法按 region 撤权、轮换没法分批。**改进**：分账号 + KMS 两个独立 Secret，轮换错开。
 - 坑 3｜迁移账号 ≠ 运行账号：DDL 权限只给 master，备 region 误以 master 启动时数据库直接拒绝它改 schema。**后果**：把方案 R19 红线从"靠约定"升级为"靠强制"——防"并发迁移 → 锁表/数据损坏"最有效的一招。
-- 坑 4｜PG15+ `public` schema 权限变化，且只在部分 RDS 版本/参数下出现。本实例是 **PG 17.0**，该行为必现。**改进**：建完账号立刻跑一次真实 AutoMigrate 冒烟，不要等到 D4。
-- 坑 5｜PG 的 `CreateDatabase --CharacterSetName` 不是单值，必须是 `字符集,Collate,Ctype` 三段（如 `UTF8,C,en_US.utf8`）。原卡写 `UTF8` 会被拒。后果：第 1 步第一步就失败，后面全堵。改进：CLI 命令一律以 `--help` 的 valid values 为准，不抄别的引擎的写法。
-- 坑 6｜`CreateDatabase --AccountPrivilege ReadOnly` 属 RDS 粗粒度授权，且与"`newapi` 需要读写 DML"自相矛盾；一旦在此绑定，后续 SQL 精细授权会被它盖住或冲突。改进：建库时**不绑账号**，权限全交第 2 步 SQL。
-- 坑 7｜`GRANT CONNECT, CREATE, USAGE ON SCHEMA public TO ...` 是**语法错**：`CONNECT` 是 database 级权限，不能出现在 `ON SCHEMA` 语句里。后果：SQL 直接报错，若被人改成"能跑通"的写法（只留 CREATE/USAGE），则库级 CONNECT 从未授予，连接阶段才失败。改进：database 级与 schema 级权限分句执行。
-- 坑 8｜`ALTER DEFAULT PRIVILEGES` **不带 `FOR ROLE`** 时只对"执行该语句的角色"后续创建的对象生效。实际建表的是 `newapi_migrate`，所以原卡写法全程静默无效。后果：AutoMigrate 建出的每张表，运行账号都无 DML 权限，而故障要到应用起流量才暴露（D4/D5）。改进：固定写 `FOR ROLE newapi_migrate`，并在任务 22 用 `information_schema.role_table_grants` 复验一次。
-- 坑 9｜原卡验证用 `INSERT INTO users(id) VALUES(-1)` 探 DML 权限：D1 时 `users` 表尚不存在（建表在任务 22），且插进去的行没有清理语句，会在生产表留脏行（`id` 还是自增列，负值探测本身也不可靠）。改进：权限探测一律用 `_perm_probe` 这类显式建删的临时对象，DML 探测推迟到有表之后并成对写 `INSERT`/`DELETE`。
-- 坑 10｜本卡没有可跑 `psql` 的位置（VPC 内 0 ECS、0 ACK，RDS 无公网串）。**后果**：照卡执行到第 2 步才发现无人可执行 SQL，D1 收口被单点卡住。~~改进：权限 SQL 走 DMS~~ —— **该改进已被实测推翻，见坑 13**；现实可选项只有同 VPC 跳板机、临时外网串、或 FC 挂 VPC 三种，都需要单独决策与授权。
-- 坑 13｜**马尼拉（`ap-southeast-6`）没有 DMS 数据面**（2026-09-29 实测）。现象极具迷惑性：`RegisterInstance` 成功、`GetInstance` 显示 `State=NORMAL`、连 `TestInstanceConnection --DbType postgresql` 都返回 `Success=true`，但 `SyncInstanceMeta` 后 `ListDatabases` 恒为 0，`GetDatabase` 报"未获取到数据库相关信息，可能是因为DMS到数据库的网络不通"，于是 `ExecuteScript` 因拿不到 `DbId` 完全不可用。官方 DMS 支持地域表里确实没有 `ap-southeast-6`（`ap-southeast-1` 新加坡在列）。**后果**：凡是把 DMS 当"唯一 SQL 入口"的卡（本卡第 2 步、验证方法四行探测表、任务 15 的 `pg_dump` 定时任务、D1/D2 出口清单）在主站全部落空，且控制台的假成功会让人误判成自己参数写错了。改进：① 主站不要依赖 DMS，先定一个 VPC 内 SQL 执行位并把它写进 Day 1 的前置任务；② 用 `ListDatabases`/`GetDatabase` 是否为空来判定数据面可用，**永远不要**拿 `TestInstanceConnection` 的成功当连通证据。
-- 坑 11｜**RDS API 给不了 PG 的最小权限**：`GrantAccountPrivilege --AccountPrivilege` 实测 valid values 注明 —— MySQL/MariaDB 可用 `ReadWrite/ReadOnly/DDLOnly/DMLOnly`，SQL Server 可用 `ReadWrite/ReadOnly/DBOwner`，而 **PostgreSQL + 云盘只支持 `DBOwner`**。后果：想"省事"用 API 授权，只能把运行账号提成库 owner，DDL 权限随之到手，坑 3 的强制隔离直接被绕过。改进：三账号的权限边界**只能**由第 2 步 SQL 落，API 侧一律保持"零库权限"（实测四账号 `DatabasePrivilege` 条数全 0 即为正确状态）。
-- 坑 12｜建完账号但未跑第 2 步 SQL 时，三个业务账号**没有任何 schema/表权限**。**2026-09-29 实测订正**：原写"连 `CONNECT` 都没有"不成立 —— RDS 建库的 `datacl` 默认给 PUBLIC `CONNECT+TEMP`（实测 `{=Tc/aurora,aurora=CTc/aurora}`，回读 `has_database_privilege(...,'CONNECT')` 四账号全 `true`），所以未落 SQL 时账号是能连上的，缺的是 schema 侧权限。这不改变结论：仍是 fail-closed（连上也读不到、写不了任何业务对象），也不是故障，但**排障时不要拿"能不能 CONNECT"当"权限有没有落"的判据**，要直接看 `nspacl`。改进：D1 只做第 0/1/3 步并在卡上标注"SQL 待落"，D2 出口前必须完成第 2 步并用四行探测表复验。
-- 坑 14｜**RDS PG 上收不紧 database 级 ACL，且失败只报 WARNING**（2026-09-29 实测）。用 `newapi_ops`（`AccountType=Super`）执行 `REVOKE ALL ON DATABASE newapi FROM PUBLIC` / `GRANT CONNECT ON DATABASE ... TO ...`，两条都不报错，各回一句 `WARNING: no privileges could be revoked for "newapi"` / `no privileges were granted for "newapi"`，`datacl` 原样不动。根因：`DescribeDatabases` 建的库 owner 是 RDS 内部账号（实测 `pg_get_userbyid(datdba)=aurora`），Super 账号只是 `pg_rds_superuser` 成员（`ops_member_of=pg_rds_superuser`）、`rolsuper=false`，改不了别人 owner 的 database 权限。**云助手的 `Status=Success`+`Exit=0` 会把这些 WARNING 一起判成成功**，脚本 `sed 's/^/   /'` 一压更看不见。后果：照卡执行会以为库级最小化已完成，实际任何拿到口令的账号都能 CONNECT。**两个可选出路（2026-09-29 用户已裁定：接受方案 ①，方案 ② 不实施）**：① **[已采纳]** 接受现状 —— 把"能不能连"交给白名单网段 + 口令轮换 + KMS 兜底，PG 侧只保证 schema/表级边界（本次即此路径，边界已验证有效）；② ~~重建库并交 owner~~ —— 先 `DeleteDatabase`（当前 `newapi` 空库，`public_tables=0`，代价低），再 `CreateDatabase --AccountName newapi_migrate` 让 owner 变成业务账号，此后由该 owner 执行 `REVOKE ... FROM PUBLIC` 才有效；代价是 DDL 账号同时是库 owner，与坑 11 的"RDS PG API 只能给 `DBOwner`"是同一件事的两面，且属破坏性重建，**裁定不做**。改进：权限 SQL 一律**逐条执行并回读 `has_*_privilege`/`datacl`/`nspacl` 判效**，绝不用"命令成功"当"权限落地"。
-- 坑 15｜`ap-southeast-6` 的 OpenAPI 网关会**整片间歇不可达**（2026-09-29 13:05–13:25 实测）：`ecs.ap-southeast-6`、`rds.ap-southeast-6` 同时 `context deadline exceeded` / `dial tcp 8.212.141.13x:443 i/o timeout`，而 `cn-hangzhou` 端点正常，Windows 与 WSL 两条本地网络路径表现一致 ⇒ 不是本机代理或 CLI 问题。更麻烦的是它**不是全断**：同一命令连发 12 次可能 11 次超时、第 12 次成功。**后果**：`RunCommand` 超时后无法判断指令到底提交成功没有，盲目重试会在跳板机上重复执行 DDL。改进：① 所有写操作前先 `DescribeInvocations --CommandName` 查有无声称已存在的同名指令（本次即靠这步确认超时的那次确实没落地）；② CLI 调用一律包"重试直到拿到可 `jq` 解析的响应"，把幂等判断放在重试之前；③ 关键窗口（D1/D2）不要把只能做一次的操作排在网络不稳的时段。
+- 坑 4｜PG15+ `public` schema 权限变化，且只在部分 RDS 版本/参数下出现。**改进**：建完账号立刻跑一次真实 AutoMigrate 冒烟，不要等到 D4。
 
-### Day 1 · 任务 14｜RDS 备份策略 PITR 7 天 + WAL（单人，1 人时，S2）✅ 已完成，勿重做
+### Day 1 · 任务 14｜RDS 备份策略 PITR 7 天 + WAL（单人，1 人时，S2）
 
-**前置/状态**：任务 4/13 完成。目标：数据备份保留 7 天（方案 R17 口径；范围 7–730，建议 30 天更稳）、日志备份（WAL）必开（PITR 前提）、备份窗口落在马尼拉业务低谷（**原卡"UTC+8 18:00–19:00"表述有歧义，实测应配 `18:00Z-19:00Z` = 马尼拉 02:00–03:00，见下方"窗口订正"**）。本卡在任务 15（开公网）之前完成：备份不可用时不得推进网络暴露面 —— **该前置门槛 2026-09-29 已满足**（备份链路实测可用），任务 15 可推进，但其 `pg_dump` 落点仍未定（见坑 5）。
-
-> **✅ 已执行并验证（2026-09-29 15:09–15:16，单人 1 人时内）** — 证据目录 `deploy/logs/task14_20260929-150446/`（参数核对）、`deploy/logs/task14_20260929-150937/`（下发/回读/手动备份全量原始响应）
->
-> | 出口项 | 实测值 | 判定 |
-> |---|---|---|
-> | 策略下发 | 卡片原样写法（不带 `--BackupPolicyMode`）`RequestId 01A0EBFF-6D59-…` | **通过** |
-> | 数据保留 | `BackupRetentionPeriod=7` | 达标（卡片口径） |
-> | WAL/日志备份 | `EnableBackupLog=1` 且 `BackupLog=Enable`、`LogBackupRetentionPeriod=7` | 达标 |
-> | 备份周期 | `Monday…Sunday` 全周 | 达标 |
-> | 备份窗口 | `18:00Z-19:00Z` = **马尼拉 02:00–03:00**（未改动，见下方"窗口订正"） | 达标（比卡片字面更低峰） |
-> | 备份方式 | `BackupMethod=Snapshot`、`Category=Standard`、`BackupInterval=-1` | 见坑 4 |
-> | 手动备份链路 | `CreateBackup` → `BackupJobId=100087184` → `BackupId=502518000`，`BackupStatus=Success`、`IsAvail=1`、`MetaStatus=OK` | **通过** |
-> | 实测备份耗时 | `07:09:55Z → 07:12:31Z` = **2 分 36 秒**（2C/8G、100GB ESSD 云盘、库内仅 `public` schema） | 见坑 3 订正 |
-> | **PITR 可恢复时间点** | `DescribeLocalAvailableRecoveryTime`：`2026-09-28T15:11:49Z → 2026-09-29T07:16:08Z`（**连续区间**，且右端随查询时刻推进） | **WAL 链路可用**；区间长度仅 ~16h，"覆盖近 7 天"**结构上不可能在 D1 达成**，见坑 6 |
-> | 幂等 | 两次同值下发后逐字段 diff：除 `EnablePitrProtection` 键**时有时无**（响应形状抖动，值恒 `false`）外，配置字段全等 | **可重复执行**成立 |
-> | 跨地域备份（马尼拉→新加坡） | `DescribeAvailableCrossRegion --RegionId ap-southeast-6` 返回含 `ap-southeast-1` ⇒ **支持**；`DescribeInstanceCrossBackupPolicy` 仅回 `LockMode:"null"` ⇒ **当前未开启** | 卡片"需控制台核实"一项已用 API 回答；**开启是计费写操作，待裁定**（见坑 5） |
->
-> 备份记录现状（`DescribeBackups`，`TotalRecordCount=3`，全部 `Snapshot/FullBackup/Success`）：`502516161` 09-28 15:09:48Z、`502516561` 09-28 18:40:26Z（自动窗口首个）、`502518000` 09-29 07:09:55Z（本次手动）。**【控制台】截图仍缺**（本卡出口清单里的 `[图 D1-B-14]`），API 证据已等价，截图按 §0.6 口径补拍即可。
-
-**窗口订正（照卡执行会下错时段）**：卡片写 `--PreferredBackupTime "10:00Z-11:00Z"` 即"UTC+8 18:00–19:00（马尼拉低峰）"——算术对（10:00Z+8h=18:00），但**马尼拉 UTC+8 的 18:00–19:00 是晚间业务时段，不是低峰**；真正的低峰是凌晨。实例实测已配 `18:00Z-19:00Z`（= 马尼拉 02:00–03:00，且 `PreferredNextBackupTime=2026-09-29T18:43Z` 与之一致），**本次未改动该窗口**（卡片本就注明"按实际调"）。若后续有人照卡片下发 `10:00Z-11:00Z`，等于把备份挪到业务时段，属回退。
-
-**PITR 在 PG 上的正确判据（原卡未给可执行验证）**：`EnablePitrProtection` 是 **MySQL 专用**参数（PG 上不可配，回读恒 `false`），`DescribePitrBackup` 该版本不存在。RDS PG 的时间点恢复由 `EnableBackupLog=1` + `BackupLog=Enable` + WAL 上传构成，**唯一可自动化的判据是 `DescribeLocalAvailableRecoveryTime`**：返回 `RecoveryBeginTime/RecoveryEndTime` 连续区间即代表"有可选时间点"，只有备份集而无 WAL 时该接口给不出区间。原卡片把这一步留给【控制台】人工看，已订正到验证方法里。
+**前置/状态**：任务 4/13 完成。目标：数据备份保留 7 天（方案 R17 口径；范围 7–730，建议 30 天更稳）、日志备份（WAL）必开（PITR 前提）、备份窗口 UTC+8 18:00–19:00（马尼拉低峰，按实际调）。本卡在任务 15（开公网）之前完成：备份不可用时不得推进网络暴露面。
 
 **操作步骤（CLI-first）**：
 
 ```bash
 aliyun rds ModifyBackupPolicy --DBInstanceId ${RDS_MNL_ID} \
   --BackupRetentionPeriod 7 --EnableBackupLog 1 --LogBackupRetentionPeriod 7 \
-  --PreferredBackupTime "18:00Z-19:00Z" --BackupLog "1"
+  --PreferredBackupTime "10:00Z-11:00Z" --BackupLog "1"
 ```
 
-期望输出：`RequestId` 正常返回。注意 `PreferredBackupTime` 用 **UTC** 表示：`"HH:mmZ-HH:mmZ"`（实测 `"18:00Z-19:00Z"` = 马尼拉 02:00–03:00，真正的低峰；原卡写的 `10:00Z-11:00Z` 换算成马尼拉时间是 18:00–19:00 晚间业务时段，已订正）。若容量允许，`--BackupRetentionPeriod` 直接取 30（建议口径），并同步放大 `LogBackupRetentionPeriod`（范围 7–730，且必须 ≤ 数据保留天数，否则会被拒）。触发一次手动备份验证链路：
+期望输出：`RequestId` 正常返回。注意 `PreferredBackupTime "10:00Z-11:00Z"` 即 UTC+8 18:00–19:00（UTC 表示）；若容量允许，`--BackupRetentionPeriod` 直接取 30（建议口径），并同步放大 `LogBackupRetentionPeriod`。触发一次手动备份验证链路：
 
 ```bash
-# 下发前先确认没有并发备份任务（否则 CreateBackup 会被排队或失败）
-aliyun rds DescribeBackupTasks --DBInstanceId ${RDS_MNL_ID} \
-  | jq -c '(.Items.BackupJob)[]|{BackupJobId,BackupStatus,JobMode}'
-
 aliyun rds CreateBackup --DBInstanceId ${RDS_MNL_ID} --BackupMethod Physical
-# 期望：返回 BackupJobId；稍后 DescribeBackups 出现 BackupStatus=Success 记录
+# 期望：返回 BackupJobID；稍后 DescribeBackups 出现 BackupStatus=Success 记录
 ```
 
-★ `--BackupMethod Physical` 对 PostgreSQL **合法且被接受**，但**落成的备份记录里 `BackupMethod` 回读为 `Snapshot`**（ESSD 云盘实例走快照），别把"回读不是 Physical"当成下发失败。`Logical` 仅用于 MySQL 本地盘。
+策略变更命令可重复执行（改→验→再改确认幂等），避免在实例变配窗口内下发。
 
-策略变更命令可重复执行（改→验→再改确认幂等），避免在实例变配窗口内下发。实测幂等判据：两次同值下发后各回读一次，`diff <(jq -S 'del(.RequestId,.PreferredNextBackupTime)' a) <(jq -S 'del(...)' b)`；`PreferredNextBackupTime` 会因重算漂移 1 分钟、`EnablePitrProtection` 键可能整个消失，这两项属响应噪声，**其余配置字段全等即为幂等**。
-
-跨地域备份（马尼拉→新加坡）**已用 API 核实，不再需要【控制台核实】**：
-
-```bash
-aliyun rds DescribeAvailableCrossRegion --RegionId ap-southeast-6 | jq -c '.Regions.Region'
-# 实测含 ap-southeast-1（新加坡）⇒ 马尼拉源区域支持跨地域备份
-aliyun rds DescribeInstanceCrossBackupPolicy --DBInstanceId ${RDS_MNL_ID}
-# 实测仅回 {"LockMode":"null"} ⇒ 当前未配置/未开启
-```
-
-结论：**功能支持、当前未开启**。开启走 `ModifyInstanceCrossBackupPolicy`（先 `--help` 核参数），属跨区存储+跨区流量**计费写操作**，本卡未擅自开启，列为待裁定项（坑 5）。不开启时的替代路径仍是 DBS（数据灾备）或逻辑备份到 OSS + 跨区域复制（任务 8 的 CRR 通道已实测可用，可直接复用）。
-`[图 D1-B-14｜拍摄对象：跨地域备份可选项与备份策略页；打码：账号 ID]`（API 已给出等价证据，此图按 §0.6 口径补拍）
+跨地域备份（马尼拉→新加坡）是否支持需【控制台核实】：备份恢复页看跨地域备份开关；不支持则改用 DBS（数据灾备）或逻辑备份到 OSS + 跨区域复制（任务 8 的 CRR 通道已实测可用，可直接复用）。
+`[图 D1-B-14｜拍摄对象：跨地域备份可选项与备份策略页；打码：账号 ID]`
 
 > **⚠ 现实约束（实测确认）**：ESSD 云盘实例的备份文件**不能直接下载**（只有老本地 SSD 支持）；方案 R17 写的"每日全量 + WAL 归档 OSS"——**RDS 自动备份并不落在你自己的 OSS 里**。三选一写进方案：
 > 1. 接受备份在 RDS 托管侧，用**恢复到新实例**做演练（够用、最省）；
 > 2. **DBS（数据灾备 Database Backup）** 做物理/逻辑备份到 OSS + 跨区域复制到新加坡 → 满足"OSS 归档"字面要求；
-> 3. 每周 `pg_dump` 到 OSS，仅作离线合规副本。**落点待定**：原写"DMS 定时任务"，但主站马尼拉无 DMS 数据面（任务 13 坑 13），需改由 ECS 定时任务或 FC 承担。
+> 3. 每周 `pg_dump` 到 OSS（DMS 定时任务），仅作离线合规副本。
 
 选路线 2/3 时与任务 8 衔接：产物写入 `oss-newapi-mnl` 的 `rds-backup/` 前缀即可，CRR 规则已覆盖该前缀，自动复制到 `oss-newapi-backup-sgp`，无需另配跨区通道。
 
@@ -1318,49 +1086,34 @@ aliyun rds DescribeInstanceCrossBackupPolicy --DBInstanceId ${RDS_MNL_ID}
 
 ```bash
 aliyun rds DescribeBackupPolicy --DBInstanceId ${RDS_MNL_ID} \
-  | jq '{BackupRetentionPeriod,EnableBackupLog,LogBackupRetentionPeriod,PreferredBackupTime,BackupMethod}'
-# 期望：EnableBackupLog=1 且 BackupRetentionPeriod>=7；BackupMethod=Snapshot（ESSD 云盘）
-aliyun rds DescribeBackups --DBInstanceId ${RDS_MNL_ID} --PageNumber 1 --PageSize 30 \
-  | jq -r '.Items.Backup[]|[.BackupId,.BackupStartTime,.BackupEndTime,.BackupMethod,.BackupStatus,.BackupMode,.IsAvail]|@tsv'
-# 期望：至少一条 BackupStatus=Success；耗时 = BackupEndTime - BackupStartTime
-# 手动备份任务进度按 JobId 复查（★参数名是 --BackupJobId，不是 --BackupJobID）：
-aliyun rds DescribeBackupTasks --DBInstanceId ${RDS_MNL_ID} --BackupJobId ${JOB_ID} \
-  | jq -c '(.Items.BackupJob)[]|{BackupId,BackupStatus,BackupProgressStatus,Process}'
-# 完成态实测：BackupStatus=Finished / BackupProgressStatus=Finished，并回填 BackupId
-# ★ 不带 --BackupJobId 的全量任务列表里，已完成的临时备份任务会直接消失（实测只剩下一条 NoStart/Preparing 的自动任务）
-#   ⇒ 用"列表里查不到"判失败是错的，必须按 JobId 查或回到 DescribeBackups 看 BackupStatus
-
-# PITR 判据（替代【控制台】看可选时间点；PG 上没有 EnablePitrProtection 这个开关）
-aliyun rds DescribeLocalAvailableRecoveryTime --DBInstanceId ${RDS_MNL_ID} \
-  | jq '{RecoveryBeginTime,RecoveryEndTime}'
-# 期望：能回一个连续区间（而非空/报错）即代表 WAL 链路可用；区间右端应随当前时间推进
+  | jq '{BackupRetentionPeriod,EnableBackupLog,LogBackupRetentionPeriod,PreferredBackupTime}'
+# 期望：EnableBackupLog=1 且 BackupRetentionPeriod>=7
+aliyun rds DescribeBackups --DBInstanceId ${RDS_MNL_ID} \
+  | jq '.Items.Backup[]|{BackupId,BackupStartTime,BackupMethod,BackupStatus}' | head
+# 期望：至少一条 BackupStatus=Success；手动备份任务进度可用 BackupJobID 复查：
+aliyun rds DescribeBackupTasks --DBInstanceId ${RDS_MNL_ID} --BackupJobID ${JOB_ID} \
+  | jq '.Items.BackupTask[]|{BackupStatus,BackupProgressStatus,ProcessId}'
 ```
 
-+ ~~控制台备份恢复页**能看到可选时间点**~~ → **已可 API 化**：`DescribeLocalAvailableRecoveryTime` 回连续区间 = 方案 AB 列"有可恢复时间点"。区间存在即代表 WAL 链路可用；若只能按备份集恢复、拿不到区间，按下方"不通过"第 2/3 条处理。恢复演练不在本卡（见任务 50 / 坑 1）。
-+ ★ 本卡口径"**覆盖近 7 天**"在 D1 不可能达成：可恢复区间的左端 = **首个可用全量备份 + WAL 起点**（实测 `2026-09-28T15:11:49Z`，即实例建成后的第一次自动备份），要到 D7 才可能覆盖 7 天。订正后的判据：**D1 验"区间存在且右端在推进"，D7 起每周验"区间长度 ≥ 保留天数"**（见坑 6）。
++ 控制台备份恢复页**能看到可选时间点** = 方案 AB 列"有可恢复时间点"。可选时间点存在即代表 WAL 链路可用；若只能按备份集恢复、无时间点可选，按下方"不通过"第 2/3 条处理。恢复演练不在本卡（见任务 50 / 坑 1）。
 
 **不通过时修复**：
 - 无备份记录 → 窗口未到，`aliyun rds CreateBackup --DBInstanceId ${RDS_MNL_ID}` 手动验一次。
 - `EnableBackupLog=0` → 日志备份被关（**PITR 不可用，RPO 立刻从分钟级掉到 24h 级**）→ 重开并等一个 WAL 周期再验。
-- 只有备份集、拿不到可恢复区间（`DescribeLocalAvailableRecoveryTime` 报错/空，或控制台恢复页无时间点）→ WAL 上传未就绪或 `LogBackupRetentionPeriod` 短于数据保留 → 拉长 WAL 保留再等一个周期复核。
-- 手动 `CreateBackup` 长时间不完成 → 实例正在变配/迁移/HA 切换中（`DescribeDBInstanceAttribute` 看 `DBInstanceStatus`）→ 等实例回 Running 再触发，勿并发多个备份任务。实测 2C/8G 空库快照全量 **2 分 36 秒** 收敛，远超此量级即属异常。
+- 恢复页只有备份集、无可选时间点 → WAL 上传未就绪或 `LogBackupRetentionPeriod` 短于数据保留 → 拉长 WAL 保留再等一个周期复核。
+- 手动 `CreateBackup` 长时间不完成 → 实例正在变配/迁移/HA 切换中（`DescribeDBInstanceAttribute` 看 `DBInstanceStatus`）→ 等实例回 Running 再触发，勿并发多个备份任务。
 - `DescribeBackupPolicy` 报错/空 → 实例尚未进入 Running（任务 4 坑 4"Running ≠ 可配"同理）→ 等创建收敛后重试。
-- `DescribeBackups --PageSize 10` 回 `InvalidParameter: The specified parameter "PageSize" is not valid` → 该接口不接受 10，实测 `--PageSize 30` 可用（别把这个当成"没有备份"）。
 
-+ ~~【控制台】"恢复到新实例"入口可选时间点覆盖近 7 天 = 本卡达标~~ → **本卡达标判据订正为**：`DescribeBackupPolicy` 五项（保留 7 / `EnableBackupLog=1` / WAL 保留 7 / 全周 / 低峰窗口）+ `DescribeBackups` 有 `Success` 记录 + `DescribeLocalAvailableRecoveryTime` 能回连续区间，三者同时成立即 **D1 达标**；"区间长度 ≥ 7 天"是 **D7 起的周期复核项**，不是 D1 出口项（正式 PITR 演练仍在任务 50）。
++ 【控制台】"恢复到新实例"入口可选时间点覆盖近 7 天 = 本卡达标（正式 PITR 演练在任务 50）。
 
 **坑**：
 - 坑 1｜从没做过恢复演练：备份 ≠ 可恢复。**后果**：真出事才发现恢复要 4 小时/恢复实例连不上/数据不一致。**改进**：任务 50 做 PITR 恢复演练并回填实测 RPO/RTO，这是 M5 硬证据。
 - 坑 2｜演练选"覆盖原实例"。**后果**：演练变事故。**改进**：一律恢复到新实例，验完删除；写进 Runbook 红字。
-- 坑 3｜恢复耗时没有 SLA 承诺：**1.5–4 小时**是按"64GB 级"估的预算（快照 + WAL 回放），主库实测为 2C/8G（`pg.n4.2c.2m`，见任务 4/13），**该预算作废，须在 8GB 数据量上重测**；重测前保守按上限 4 小时申报。**后果**：SLA 的"RTO ≤5min"在 region 级故障下根本不成立（方案 R26 承认，属排除项②）。**改进**：演练实测值写进 M5；客户不接受 → 唯一解是第三 region 主库（超本次范围，需重新立项）。
-  - **2026-09-29 部分订正（注意别用错）**：本次实测到的 **2 分 36 秒是"备份"耗时**（`BackupStartTime 07:09:55Z → BackupEndTime 07:12:31Z`，快照全量、库内仅 `public` schema），**不是恢复耗时**，不能直接顶替本坑要的 RTO 实测值 —— "预算作废、按上限 4 小时申报"的结论**继续有效**。可用的间接信号：快照法备份耗时与数据量近乎无关（`BackupSize` 恒报云盘规格，见坑 4），且"恢复到新实例"同样走快照挂载 + WAL 回放，真实 RTO 大概率显著低于 1.5–4h；**但仍须任务 50 在恢复方向实测才算数**。另：`DescribeBackups` 回的是 `BackupEndTime`，**没有 `BackupFinishTime` 字段**，按原卡字段名取会拿到空值。
-- 坑 4｜`BackupSize` 回 `107374182400`（正好 100GiB = 云盘规格），**不是实际数据量**。三条备份记录该值全同，而库里除 `public` schema 外无业务表。**后果**：拿它估备份存储费、跨地域复制流量、恢复目标盘容量，会系统性高估备份体积、又低估 WAL 增长。**改进**：备份体积一律以 RDS 控制台的"备份使用量"或 BSS 账单为准；容量规划用 `pg_database_size`（走任务 13 已开的执行位），别用 `BackupSize`。
-- 坑 5｜**"跨地域备份支持"被当成"跨地域备份已生效"**。实测 `DescribeAvailableCrossRegion` 里确有 `ap-southeast-1`，但 `DescribeInstanceCrossBackupPolicy` 空返回说明**从未开启**；同时 RDS 自动备份**不落在客户自己的 OSS**（本卡"现实约束"已述）。**后果**：方案 R17/容灾口径里的"新加坡有备份副本"目前不成立——马尼拉 region 级故障时，新加坡备站拿不到可用于恢复的数据面副本，只剩代码/镜像层面能起来。**改进**：二选一并写进方案，别两头都不做：① 开启 `ModifyInstanceCrossBackupPolicy`（跨区存储+流量计费，需裁定）；② 走 DBS 或每周 `pg_dump` → `oss-newapi-mnl/rds-backup/` → 复用任务 8 已实测的 CRR 到 `oss-newapi-backup-sgp`（该路线的落点仍未定，见任务 13/15）。
-- 坑 6｜本卡原出口项"**可选时间点覆盖近 7 天**"在 D1 属**结构性不可能**：可恢复区间左端被"首个全量备份 + WAL 起点"钉死（实测 `2026-09-28T15:11:49Z`，即实例建成后第一次自动备份之后），无论怎么配策略，D1 最多只有十几小时。**后果**：执行者要么误判本卡不通过而反复改策略（改不动，这不是配置问题），要么为凑证据提前硬做恢复演练。**改进**：① D1 判据改为"区间存在 + `RecoveryEndTime` 随查询时刻推进"（证明 WAL 在持续上传），"区间长度 ≥ 保留天数"挂到 D7 后作为周期复核；② 轮询备份任务时，**已完成的临时备份任务会从 `DescribeBackupTasks` 默认列表里消失**，必须带 `--BackupJobId` 复查或回到 `DescribeBackups` 看 `BackupStatus`，否则"查不到"会被误读成失败（本次即先踩了空轮询）。
+- 坑 3｜恢复耗时没有 SLA 承诺：64GB 级 PITR 需按 **1.5–4 小时**预算（快照 + WAL 回放）。**后果**：SLA 的"RTO ≤5min"在 region 级故障下根本不成立（方案 R26 承认，属排除项②）。**改进**：演练实测值写进 M5；客户不接受 → 唯一解是第三 region 主库（超本次范围，需重新立项）。
 
-### Day 1 · 任务 7｜Tair 主备 4GB（单人，1 人时，S3）✅ 已完成，勿重做
+### Day 1 · 任务 7｜Tair 主备 4GB（单人，1 人时，S3）
 
-**前置/状态**：产品：**云数据库 Tair（兼容 Redis）**；配额需产品开通后复查（带 `--Dimensions.1.Key regionId`，状态 `Agree`）。**付费方式 = 包年包月（`ChargeType: PrePaid`，2026-09-28 修订；按量→包月可转换，但转换不可逆且已产生费用不退）**。规格：标准版（主从架构）4GB，多可用区 6a 主/6b 备，VPC `vpc-5tst1tgeessxn1azwasg2` + `vsw-mnl-data-a`，版本选页面可用的最高（5.0/6.0/7.0）。
+**前置/状态**：产品：**云数据库 Tair（兼容 Redis）**；配额需产品开通后复查（带 `--Dimensions.1.Key regionId`，状态 `Agree`）。规格：标准版（主从架构）4GB，多可用区 6a 主/6b 备，VPC `vpc-5tst1tgeessxn1azwasg2` + `vsw-mnl-data-a`，版本选页面可用的最高（5.0/6.0/7.0）。
 
 **操作步骤（CLI-first）**：
 
@@ -1368,21 +1121,17 @@ aliyun rds DescribeLocalAvailableRecoveryTime --DBInstanceId ${RDS_MNL_ID} \
 # 1. 查可售规格（空结果换 InstanceType/EngineVersion）
 aliyun r-kvstore DescribeAvailableResource --RegionId ap-southeast-6 --ZoneId ap-southeast-6a \
   --Engine Redis | jq '.SupportedEngines'
-# 2. 创建主备实例（规格码以上一步列表为准；4GB 主从版 = redis.master.stand.default，2026-09-28 实测；**付费方式 = 包年包月 1 年**）
+# 2. 创建主备实例（规格码以上一步列表为准，≈4GB 主从版）
 aliyun r-kvstore CreateInstance --RegionId ap-southeast-6 --ZoneId ap-southeast-6a \
   --SecondaryZoneId ap-southeast-6b --VPCId vpc-5tst1tgeessxn1azwasg2 \
   --VSwitchId <vsw-mnl-data-a ID> --NetworkType VPC --InstanceClass <4GB规格码> \
-  --EngineVersion <最高可售版本> --Password ${TAIR_PW} --InstanceName tair-mnl-newapi \
-  --ChargeType PrePaid --Period 12 --AutoRenew true --AutoRenewPeriod 1
-# 付费方式实测（2026-09-28）：r-kvstore DescribePrice --ChargeType PrePaid --Period 1 --Capacity 4096
-#   → 4GB 标准版包月 58.75 USD（ap-southeast-6）；包年以购买页/续费页实价为准
-# 注意：--Period 单位=月（合法值 1–9、12、24、36）；包年包月**创建时即需付清**，余额不足会直接拒单
+  --EngineVersion <最高可售版本> --Password ${TAIR_PW} --InstanceName tair-mnl-newapi
 # 3. 参数：maxmemory-policy 改 allkeys-lru，禁用危险命令
 aliyun r-kvstore ModifyInstanceParameter --InstanceId ${TAIR_MNL_ID} \
   --Parameters '{"#no_loose_maxmemory-policy":"allkeys-lru","#no_loose_disabled-commands":"FLUSHALL,FLUSHDB,KEYS"}'
 # 4. 白名单建组 mnl_app：Pod/节点网段
 aliyun r-kvstore ModifySecurityIps --InstanceId ${TAIR_MNL_ID} \
-  --SecurityIps "10.0.16.0/20,10.0.32.0/20" --ModifyMode Cover --SecurityIpGroupName mnl_app
+  --SecurityIps "10.0.16.0/20,10.0.32.0/20" --ModifyMode Cover --DBInstanceIPArrayName mnl_app
 ```
 
 期望输出：`InstanceId`（形如 `r-5ts...`）/ 各操作 `RequestId`。等实例进入 Normal 状态并复核多可用区：
@@ -1423,7 +1172,7 @@ redis-cli -h ${TAIR_MNL_HOST} -p 6379 -a "<user>:${TAIR_PW}" flushall      # 期
 - 坑 3｜4GB 主备版承载限流 + token 缓存（方案 R20 自评"建议升级集群版"）。**后果**：热点分片、限流精度下降。**改进**：上线后看 `info stats` 命中率与 `instantaneous_ops_per_sec` 决定升配；转集群版前确认跨 slot 命令（`MGET`/事务/`SCAN`）在集群模式的限制。
 - 提醒｜`GLOBAL_API_RATE_LIMIT` 默认 **360 次 / `GLOBAL_API_RATE_LIMIT_DURATION` 180s**（`common/init.go:124-125`）——WAF 的 CC 阈值要与它对齐且不更严，否则用户看到 WAF 拦截页而不是网关 429，客诉归因跑偏。
 
-### Day 1 · 任务 8｜OSS Bucket（单人，1 人时，S3）——✅ 已完成，勿重做
+### Day 1 · 任务 8｜OSS Bucket（单人，1 人时，S3）——已落地 ✅
 
 **前置/状态**：**✅ 已落地，勿重做**，本卡只给复核命令。产品：**对象存储 OSS**。已建成：源桶 `oss-newapi-mnl`（马尼拉，标准存储，**ZRS 同城冗余**，私有 ACL，版本控制开启，前缀 `rds-backup/`、`actiontrail/`、`app-assets/`）；CRR 目标桶 `oss-newapi-backup-sgp`（新加坡，ZRS，版本控制），**跨区域复制已实测成功**。复核前提：RAM 主体凭证可用（`$CFG` 指向的操作配置，与任务 8 落地报告同一套）。
 命名变更事实：原计划目标桶名 `oss-newapi-sgp` 在删桶后被其他账号短时抢占（桶名全局唯一，重建报 `BucketAlreadyExists`），改用 `oss-newapi-backup-sgp`——后续任何删桶/重建变更必须按"名字不可回收"对待。
@@ -1548,363 +1297,181 @@ clickhouse-client ... --query "SELECT count() FROM newapi_logs"  # 期望 ≥1�
 - 坑 3｜把计费/对账数据放进 CK：CK 通常不做备份，且分布式表异步写的最终一致会让对账出现缺口。**后果**：丢钱，比丢日志严重一个量级。**改进**：先分类"哪些是账、哪些是日志"，见上方硬规则。
 - 坑 4｜**把单 AZ 当成"没有风险"**：企业版单可用区意味着该 AZ 故障时日志库整体不可用，且**没有跨 AZ 自动接管**。**改进（不可省略）**：① 日志库明确排除在 SLA 证据链之外，SLO 看板不引用 CK 数据源；② 本卡「降级验证」必须实操通过并留证，作为切流放行前置条件之一；③ 日志只做查询/排障用途，保留 90 天 TTL，不做业务回算依赖。
 
-### Day 1 · 任务 15｜开启 RDS 公网地址并把白名单收死（单人，2 人时，S4）✅ 已执行，勿重做
+### Day 1 · 任务 15｜开启 RDS 公网地址并把白名单收死（单人，2 人时，S4）
 
 **前置/状态**：数据线门槛任务。这是全方案最容易做成"看似安全、实则裸奔"的一步：公网地址一开，白名单填 `127.0.0.1` 等于谁都连不上，填 `0.0.0.0/0` 等于谁都能连——两种都错且无告警。
-> **执行顺序必须是"暴露面单调递增"**（实测按此顺序零断连）：① 先申请公网地址（此时白名单里只有不可路由的 VPC 网段，公网串等于不存在）→ ② 再对**公网串**开 SSL（证书绑地址）→ ③ 才放入新加坡 4 个 NAT EIP → ④ 最后把 `default` 组收成 `127.0.0.1`。把 ④ 提前到 ① 之前会瞬间切断主站；把 ② 放到 ① 之前则证书绑到内网串、备站 `verify-full` 永远过不去（P0-4）。
-
-> **✅ 已执行并验证（2026-09-29 15:37–16:40，全量四步 + TLS 硬化）** — 证据目录 `deploy/logs/task15_20260929-153704/`（`netinfo*`、`allocate`、`ssl_before/ssl_modify/ssl_after.sanitized`、`ip_before/ip_mnl/ip_sg/ip_def/ip_final`、`ptl_ssl`、`mp_before/mp_apply/mp_after/mp_status`、`res_tls2`、`res_mnl_gap`、`final_{ssl,ip,params,net,attr}`）。**终态一次性复核（`2026-09-29T08:38:18Z`）已落 `final_*.json`**：`SSLEnabled=on` 且 `ConnectionString=` 公网串、`ACL=prefer`、`ssl_min_protocol_version=TLSv1.2`、四个白名单组逐字全等（含未动的 `hdm_security_ips`）、`Private`+`Public` 两条网络信息、实例 `Running/HighAvailability`。**注意：`ssl_poll.json`/`ssl_after.json` 原始响应含服务器 RSA 私钥，已用 `jq del(.ServerKey,.ServerCert)` 剥离并另存 `.sanitized.json`，公钥证书单独导出为 `server_cert.pem`（原始 API 回显勿再落盘，见坑 6）。**
->
-> | 出口项 | 实测值 | 判定 |
-> |---|---|---|
-> | 公网地址 | `AllocateInstancePublicConnection` 成功 → `pgm-5tstdhko64x2c01wpub.pgsql.ap-southeast-6.rds.aliyuncs.com` : `5432` → `43.118.96.65` | **通过**；`DescribeDBInstanceNetInfo` 回 `Private`+`Public` 两行 |
-> | 连接串后缀 | 内网 `pgm-5tstdhko64x2c01w.pgsql.ap-southeast-6.rds.aliyuncs.com`（`10.0.69.77`，VPC `vpc-5tst1tgeessxn1azwasg2`）；公网 = 实例 ID + `pub` 前缀 | 卡片原猜的 `.pg.rds.aliyuncs.com` **是错的**，实际 `.pgsql.<region>.rds.aliyuncs.com` |
-> | SSL 开关 | 回读 `SSLEnabled=on`、`CAType=aliyun`、`ConnectionString=`**公网串**、`SSLCreateTime=2026-09-29T07:57:31Z`、`SSLExpireTime=2027-09-29T07:57:31Z`、`LastModifyStatus=success` | 达标（路径 A） |
-> | 证书绑定 | `subject CN` 与 `X509v3 SAN DNS` **均等于公网串**；签发者 `ApsaraDB ap-southeast-6 region CA` | 备站 `verify-full` 的**主机名条件成立** |
-> | 白名单三层 | `default=127.0.0.1`、`mnl_vpc=10.0.16.0/20,10.0.32.0/20,10.0.48.0/20,10.0.64.0/20`、`sg_standby_eip=47.84.126.214/32,47.84.184.246/32,47.84.29.162/32,47.84.83.76/32`；隐藏组 `hdm_security_ips=100.104.188.192/26,100.104.53.0/26` **未动** | 达标；`/32` 未被规范化（卡片坑 5 的担忧实测不发生，但显式 `/32` 仍是写法纪律） |
-> | 新加坡出口 EIP（真实值） | SNAT 条目里**每条都列全部 4 个** `47.84.184.246 / 47.84.29.162 / 47.84.83.76 / 47.84.126.214`；同一节点两次实测分别命中 `47.84.29.162` 与 `47.84.184.246` | **四个必须全放**，只放其一随时断（卡片原写 `${SG_EIP_01}` 占位） |
-> | 强制 TLS（PG） | PG 上**无** `requires_ssl`/`rds_enable_ssl`/`ForceEncryption` 类入口；可用的是参数 `ssl_min_protocol_version`：`TLSv1` → **`TLSv1.2`**（模板 `ForceRestart=false`、`ForceModify=true`，`CheckingCode` 含 `TLSv1.2`），下发后约 **15 秒**回读即为 `TLSv1.2`，实例全程 `Running`（无闪断） | 达标（按用户裁定的"提到 TLSv1.2"） |
-> | V1 公网 TLS 握手 | 新加坡 worker `10.1.38.113` → `TCP=OPEN`、握手成功、`subject/SAN` 见上 | **通过** |
-> | V2 白名单正例 | 同节点 `TLSv1.2` 握手 `exit=0`（带 `-CAfile ApsaraDB-CA-Chain.pem -verify_return_error`）；PG 协议层 `SSLRequest` 应答 `0x53`（`S`=支持 TLS） | **通过**（协议层等价校验；`psql` 全链路见下方"未闭合项"） |
-> | V3 白名单反例 | 本机出口 `194.56.225.91` → `timeout 8` 退出码 **124**（无 RST、无响应） | **通过** |
-> | V4 低版本 TLS 必须被拒 | `-tls1_1` → 服务端回 `tlsv1 alert protocol version`（alert 70），客户端 `exit=1`；`-tls1_2` → `exit=0` | **通过**（判据形态与卡片原文不同，见坑 8） |
-> | 主站内网未受影响 | 马尼拉 worker `10.0.43.201` → 内网串 `5432` `PRIV_TCP=OPEN`、TLS 握手 `exit=0`；`default` 收成 `127.0.0.1` 之后再测，仍通 | **无自伤** |
-> | 内网串主机名校验 | `openssl x509 -noout -checkhost <内网串>` → **"does NOT match"**；`-checkhost <公网串>` → **"does match"**（证书 CN/SAN 只有公网串）。⚠ **不要用 `-auth_host`**：实测它对匹配与不匹配的主机名**都**返回 `exit=1`，取证无效 | ⚠ 路径 A 的代价已被实测量化，见坑 7 |
->
-> **未闭合项（不阻塞本卡，但要在别处销账）**：① `psql sslmode=verify-full` 端到端未跑（节点上无 `psql`、无业务账号口令，且口令不该落到节点）——已由"信任链 + 主机名 + SSLRequest"三步等价证据替代，真正的全链路留给任务 17/35 应用部署时复验；② 任务 15 的每周 `pg_dump` 落点仍未定（与任务 14 坑 5 的跨地域备份路线是**同一个未裁定口**）；③ 证书 2027-09-29 到期，续期动作在任务 38 安全核查里要有条目。
-
-**参数订正（照卡执行会翻车）**：卡片原文的 `ModifyDBInstanceSSL --Port 5432 --CaEnabled 0`（以及"报参数错就补 `--RequireUpdate yes`"）**三个参数在 RDS PG 上全部不存在**——`--cli-dry-run` 实证只接受 `--DBInstanceId/--ConnectionString/--SSLEnabled/--CAType`；`DescribeParameters` 的原卡写法 `| grep -Ei "ssl|force"` 也不对，PG 17 的真实回读路径是 `.RunningParameters.DBInstanceParameter[]`（270 条），里面**没有任何** `force_*`/`rds_enable_ssl` 开关。
 
 **操作步骤（CLI-first）**：
 
 **Step 1 — 申请公网地址**：
 
 ```bash
-# 前缀规则实测：5–40 字符、仅字母/数字/连字符；用 ${RDS_MNL_ID}pub 拼出来即可（别多加字符）
 aliyun rds AllocateInstancePublicConnection --RegionId ap-southeast-6 \
   --DBInstanceId ${RDS_MNL_ID} --ConnectionStringPrefix ${RDS_MNL_ID}pub --Port 5432
 aliyun rds DescribeDBInstanceNetInfo --DBInstanceId ${RDS_MNL_ID} \
-  | jq -r '.DBInstanceNetInfos.DBInstanceNetInfo[] | [.IPType,.ConnectionString,.Port,.IPAddress] | @tsv'
-# 实测两行：Private（VPC 内网串，带 IPAddress/VPCId）+ Public（43.118.96.65）
-# 记下 ${RDS_MNL_PUB}：国际站 PG 后缀是 .pgsql.<region>.rds.aliyuncs.com，不是卡片原猜的 .pg.rds.
-# ⚠ 实例 ID 手抄错一位就是 InvalidDBInstance.NotFound（本区实测踩过），写入脚本前先 DescribeDBInstances 取一次
+  | jq -r '.DBInstanceNetInfos.DBInstanceNetInfo[] | [.IPType,.ConnectionString,.Port] | @tsv'
+# 期望两行：Inner / Public；记下 ${RDS_MNL_PUB}（国际站 PG 高可用版后缀通常 .pg.rds.aliyuncs.com）
 ```
 
 **Step 2 — 先做 TLS 证书地址绑定决策，务必在开 SSL 之前定（P0-4）**：RDS 服务器证书 **CN/SAN 只绑定"开 SSL 时所选的那个连接地址"**，顺序不能反。`aliyun rds DescribeDBInstanceSSL --DBInstanceId ${RDS_MNL_ID} | jq '{ssl_enabled:.SSLEnabled,conn_str:.ConnectionString,ca:.CAType}'`。三条路径（按推荐度）：
 
 | 路径 | 做法 | 适用 | 代价 |
 | --- | --- | --- | --- |
-| **A（推荐）** | 开 SSL 时 `ConnectionString` 选**公网地址**；新加坡 `sslmode=verify-full` 直连公网 | 只有新加坡一个备 region | **实测代价（比原卡更硬）**：`DescribeDBInstanceSSL` 只回**一个** `ConnectionString`，证书 CN/SAN 也只绑那一个地址 ⇒ 选了公网串之后，**主站内网串做主机名校验必然失败**（实测 `-checkhost <内网串>` → "does NOT match"）。主站侧只能 `verify-ca`，或另议双地址绑定。证书绑地址后**换地址必须重签**。**2026-09-29 修订主路径**：改用**托管 PgBouncer**（F10 撤销，任务 41），池就在实例上、内/公网串都监听 6432 且**复用同一张证书** ⇒ 主站经池走内网串同样只能 `verify-ca`，备站经公网串（5432 或 6432）都能 `verify-full`；备站最终走甲（直连 5432）还是乙（经池 6432）**待裁定**（任务 30），B/C 仅备查 |
+| **A（推荐）** | 开 SSL 时 `ConnectionString` 选**公网地址**；新加坡 `sslmode=verify-full` 直连公网 | 只有新加坡一个备 region | 内网串应用需另配证书；证书绑地址后**换地址必须重签**。**v2.0 已定主路径**：自建 PgBouncer 在马尼拉集群内（F10），不影响备站公网直连 `verify-full`；B/C 仅备查 |
 | B | CEN（云企业网）打通两 VPC，新加坡用内网串 + verify-full | 网络团队接受跨区专线成本 | 新增 CEN 实例+跨区带宽费（impl_deploy 7.10 未计入），需财务确认，工期 +0.5 天 |
 | C | 新加坡侧 `sslmode=verify-ca`（只验签发链不验主机名） | 应急 | **必须书面记录残余风险并由架构负责人签字**，否则安全核查（任务 38）挂 |
 
-按路径 A 开 SSL（**参数以实测为准**）：
+按路径 A 开 SSL：
 
 ```bash
-# 只这四个参数。--Port / --CaEnabled / --RequireUpdate 在 PG 上不存在，写了直接报参数错（--cli-dry-run 可先证）
 aliyun rds ModifyDBInstanceSSL --DBInstanceId ${RDS_MNL_ID} \
-  --ConnectionString ${RDS_MNL_PUB} --SSLEnabled 1 --CAType aliyun
-aliyun rds DescribeDBInstanceSSL --DBInstanceId ${RDS_MNL_ID} \
-  | jq 'del(.ServerKey,.ServerCert)'   # ⚠ 必须先剥私钥再打印/落盘，见坑 6
-# 实测回读：SSLEnabled=on, ACL=prefer, ReplicationACL=prefer, ConnectionString=公网串, SSLExpireTime=+1 年
-# 生效是异步的：下发后回读可能仍是旧值，轮询到 SSLEnabled=on 为止（实测约 1–2 分钟）
+  --ConnectionString ${RDS_MNL_PUB} --Port 5432 --SSLEnabled 1 --CaEnabled 0
+# 换证书/换地址用同一命令重复调用（部分版本 CARequired 必填，报参数错就补 --CaEnabled 0 --RequireUpdate yes）
+aliyun rds DescribeDBInstanceSSL --DBInstanceId ${RDS_MNL_ID} | jq '.SSLEnabled'   # 期望 1
 ```
 
-**Step 3 — 白名单三层，只放新加坡 4 个 NAT EIP**（**顺序：先加新组、最后才动 `default`**；`ModifySecurityIps` 是**整组替换**语义，不是追加）：
+**Step 3 — 白名单三层，只放新加坡 4 个 NAT EIP**：
 
 ```bash
-# 3.0 真实 EIP 不许手填：从备站 NAT 网关的 SNAT 条目里取
-aliyun vpc DescribeSnatTableEntries --RegionId ap-southeast-1 --SnatTableId ${SG_SNAT_TABLE} \
-  | jq -r '[.SnatTableEntries.SnatTableEntry[].SNatIp] | unique | join(" ")'
-# 实测四条 SNAT 条目都列全 4 个 EIP ⇒ 出口是四者之一，必须全放：
-#   47.84.184.246 47.84.29.162 47.84.83.76 47.84.126.214
-
 # 3.1 独立命名组：新加坡备站公网出口（禁止复用 default）
 aliyun rds ModifySecurityIps --DBInstanceId ${RDS_MNL_ID} \
   --DBInstanceIPArrayName sg_standby_eip \
-  --SecurityIps "47.84.184.246/32,47.84.29.162/32,47.84.83.76/32,47.84.126.214/32" \
+  --SecurityIps "${SG_EIP_01}/32,${SG_EIP_02}/32,${SG_EIP_03}/32,${SG_EIP_04}/32" \
   --WhitelistNetworkType MIX
-# 3.2 主站内网组：ACK 节点 + Pod 网段（Terway eniip 下 Pod 直接取 vSwitch 网段地址，见坑 11）
-#     （修订：原 -ch.md 此条含计划外网段 10.0.80.0/20 且漏了 app-a，已按 §2.2 网段规划更正；
-#      实测这四段与 VPC 内 app-a/app-b/data-a/data-b 四个 vSwitch 网段**完全一一对应**）
-aliyun rds ModifySecurityIps --DBInstanceId ${RDS_MNL_ID} \
-  --DBInstanceIPArrayName mnl_vpc --SecurityIps "10.0.16.0/20,10.0.32.0/20,10.0.48.0/20,10.0.64.0/20"
-# 3.3 default 组显式设为不可命中（放到最后一步做；先确认 3.1/3.2 已回读生效）
+# 3.2 default 组显式设为不可命中（不是"看起来安全"的写法，而是确认无人复用）
 aliyun rds ModifySecurityIps --DBInstanceId ${RDS_MNL_ID} \
   --DBInstanceIPArrayName default --SecurityIps "127.0.0.1"
-# 3.4 回读全量核对（含没被点名的组），并确认隐藏组 hdm_security_ips 未被覆盖
-aliyun rds DescribeDBInstanceIPArrayList --DBInstanceId ${RDS_MNL_ID} \
-  | jq -r '.Items.DBInstanceIPArray[]|[.DBInstanceIPArrayName,.WhitelistNetworkType,.SecurityIPList]|@tsv'
+# 3.3 主站内网组：ACK Pod / 节点 / data 网段
+#     （修订：原 -ch.md 此条含计划外网段 10.0.80.0/20 且漏了 app-a，已按 §2.2 网段规划更正）
+aliyun rds ModifySecurityIps --DBInstanceId ${RDS_MNL_ID} \
+  --DBInstanceIPArrayName mnl_vpc --SecurityIps "10.0.16.0/20,10.0.32.0/20,10.0.48.0/20,10.0.64.0/20"
 ```
 
-**Step 4 — TLS 下限硬化（PG 侧唯一可用入口）**：原卡"找 `requires_ssl`/`rds_enable_ssl` 设 1"在 PG 17 上**不存在**（`DescribeParameters` 270 条里没有任何 `force_*`/`rds_enable_ssl`；`--ForceEncryption`、`--TlsVersion` 是 MySQL/SQLServer 参数；`--ACL verify-full` 需 `ClientCAEnabled=1` 即双向 mTLS，本方案不做）。可用的是 `ssl_min_protocol_version`，且**它是参数不是开关 ⇒ 只能抬高 TLS 下限，做不到"拒绝明文连接"**——`ACL` 回读恒为 `prefer`，明文连接是否放行由客户端 `sslmode` 决定（坑 8）。
+**Step 4 — 强制 TLS 只允许（PG 侧参数）**：`aliyun rds DescribeParameters --DBInstanceId ${RDS_MNL_ID} | grep -Ei "ssl|force"`；若存在 `requires_ssl`/`rds_enable_ssl` 类可改参数设为 1；不可改则记录为"仅靠客户端 sslmode + 白名单"两层控制。
+
+**验证方法**：
 
 ```bash
-# 先看模板：ForceRestart 决定会不会闪断（实测 ssl_min_protocol_version = ForceRestart false / ForceModify true）
-aliyun rds DescribeParameterTemplates --Engine pgsql --EngineVersion 17.0 --RegionId ap-southeast-6 \
-  | jq -r '.Parameters.TemplateRecord[]|select(.ParameterName|test("ssl"))|[.ParameterName,.ForceRestart,.ForceModify,.CheckingCode]|@tsv'
-# 注意：本 API 不校验版本与实例是否匹配（实测 --EngineVersion 18.0 同样返回 271 条），
-# 所以要用实例真实版本查，否则拿到的 ForceRestart/CheckingCode 未必适用（实例实测 PostgreSQL 17.0）
-aliyun rds DescribeDBInstances --RegionId ap-southeast-6 | jq -r '.Items.DBInstance[]|[.DBInstanceId,.EngineVersion,.DBInstanceClass]|@tsv'
-# ⚠ 实例 ID 手抄错位一位就整片报 InvalidDBInstance.NotFound（本区实测踩过），别把它误读成"版本不支持"
-
-# ForceRestart=false 才允许直接下发；若某参数回 true，必须先安排在变更窗口再动
-aliyun rds ModifyParameter --DBInstanceId ${RDS_MNL_ID} \
-  --Parameters '{"ssl_min_protocol_version":"TLSv1.2"}' --Forcerestart false
-# 回读（生效需等待，实测约 15 秒；下发成功不等于生效）
-aliyun rds DescribeParameters --DBInstanceId ${RDS_MNL_ID} \
-  | jq -r '.RunningParameters.DBInstanceParameter[]|select(.ParameterName|test("ssl"))|[.ParameterName,.ParameterValue]|@tsv'
-aliyun rds DescribeDBInstanceAttribute --DBInstanceId ${RDS_MNL_ID} | jq -r '.Items.DBInstanceAttribute[0].DBInstanceStatus'  # 期望 Running
-```
-
-**验证方法**（**无需 `psql`、无需把业务口令投到节点上**——白名单/TLS/主机名三件事在协议层就能取证；`psql verify-full` 端到端留到应用部署时复验）：
-
-```bash
-PUB=${RDS_MNL_PUB}; PRI=${RDS_MNL_PRI}   # 公网串 / 内网串
-
-# V0 备站节点真实出口 IP（必须命中 sg_standby_eip 四个之一）
-curl -s --max-time 10 https://ifconfig.me
-
-# V1 白名单正例：TCP 层能连上（bash 内建，节点上不用装 nc）
-timeout 8 bash -c "exec 3<>/dev/tcp/$PUB/5432" && echo TCP=OPEN
-
-# V2 证书 CN/SAN 绑定 + 信任链（等价 psql sslmode=verify-full 的两步校验）
-curl -sS -o chain.zip 'https://apsaradb-public.oss-ap-southeast-1.aliyuncs.com/ApsaraDB-CA-Chain.zip'
-python3 -m zipfile -e chain.zip .    # 得 ApsaraDB-CA-Chain.pem（实测 69 张证书，含本区 CA）
-openssl s_client -connect $PUB:5432 -starttls postgres -servername $PUB \
-  -CAfile ApsaraDB-CA-Chain.pem -verify_return_error </dev/null 2>&1 \
-  | grep -E '^subject=|^issuer=|DNS:|Verify return code'
-# 期望：subject CN 与 SAN DNS 都等于公网串；Verify return code: 0 (ok)
-# PG 协议层是否支持 TLS（S=支持，N=不支持）：
-exec 3<>/dev/tcp/$PUB/5432; printf '\x00\x00\x00\x08\x04\xd2\x16\x2f' >&3; head -c1 <&3 | xxd -p   # → 53
-
-# V3 白名单反例：非白名单出口必须被丢（timeout/refused，绝不能有响应）
-#   实测在 WSL（出口 194.56.225.91，不在任何组里）执行，timeout 退出码 124 ⇒ 通过
-timeout 8 bash -c "exec 3<>/dev/tcp/$PUB/5432"; echo "exit=$?"   # 期望 非0（124=超时）
-timeout 8 psql "host=$PUB port=5432 dbname=postgres user=newapi_sg sslmode=disable" -c "select 1"  # 有 psql 时用这条，同样必须失败
-
-# V4 TLS 下限（Step 4 生效判据；形态不是 pg_hba 报错，而是握手被服务端拒）
-openssl s_client -connect $PUB:5432 -starttls postgres -tls1_1 </dev/null   # 期望 exit!=0 + tlsv1 alert protocol version
-openssl s_client -connect $PUB:5432 -starttls postgres -tls1_2 -CAfile ApsaraDB-CA-Chain.pem -verify_return_error </dev/null  # 期望 exit=0
-
-# V5 自伤检查（必做）：动完 default 组后，主站节点到内网串必须仍通
-timeout 8 bash -c "exec 3<>/dev/tcp/$PRI/5432" && echo PRIV_TCP=OPEN
+# V1 公网 TLS 握手（在新加坡集群节点或同 region ECS 执行）
+openssl s_client -connect ${RDS_MNL_PUB}:5432 -starttls postgres -servername ${RDS_MNL_PUB} 2>/dev/null \
+  | openssl x509 -noout -subject -ext subjectAltName
+# 期望：CN 或 SAN 中包含 ${RDS_MNL_PUB}
+# V2 白名单正例：新加坡 NAT 出口能连
+psql "host=${RDS_MNL_PUB} port=5432 dbname=postgres user=newapi_sg sslmode=verify-full sslrootcert=./apsaradb-ca.pem" \
+  -c "select current_setting('server_version'), inet_server_addr(), now();"
+# V3 白名单反例：非白名单 IP 必须被丢
+timeout 8 psql "host=${RDS_MNL_PUB} port=5432 dbname=postgres user=newapi_sg sslmode=disable" -c "select 1"
+# 期望：timeout / connection refused，绝不能返回 1 行结果
+# V4 明文必须被拒（Step 4 生效时）
+psql "host=${RDS_MNL_PUB} port=5432 dbname=postgres user=newapi_sg sslmode=disable" -c "select 1"
+# 期望：FATAL: no pg_hba.conf entry for host ... no SSL
 ```
 
 **不通过时修复**：
-- `server certificate for "pgm-xxx.pgsql.<region>.rds.aliyuncs.com" does not match host name "pgm-xxxpub..."` → SSL 开在内网串上（P0-4 命中）→ 按路径 A `ModifyDBInstanceSSL --ConnectionString <公网串>` 重签再复核；无法改则临时 `verify-ca` 并走 C 的签字流程。**反向同理**：主站内网串报主机名不匹配是**路径 A 的既定结果**，不是故障（坑 7）。
-- `timeout` 且 TCP 层也不通 → NAT SNAT 条目未覆盖新 Pod 网段，或真实出口 EIP 不在登记的四条里 → 在新加坡节点 `curl -s https://ifconfig.me` **多打几次**（实测同一节点会轮换命中不同 EIP），把缺失的补进 `sg_standby_eip` 组再回读。
-- 报 `InvalidDBInstance.NotFound` → 十有八九是实例 ID 手抄错位（本区实测踩过一位之差），先 `DescribeDBInstances --RegionId` 取回真值；确认无误还报就检查是否改到了**只读实例**。
-- `ModifyParameter` 回读值长时间不变 → 该参数 `ForceRestart=true` 而下发时带了 `--Forcerestart false`（参数进了待生效态）→ 别硬重启，挪到变更窗口。
+- `server certificate for "pgm-xxx.pg.rds.aliyuncs.com" does not match host name "pgm-xxxpub..."` → SSL 开在内网串上（P0-4 命中）→ 按路径 A `ModifyDBInstanceSSL --ConnectionString <公网串>` 重签再复核；无法改则临时 `verify-ca` 并走 C 的签字流程。
+- `timeout` 且 `nc -vz` 也不通 → NAT SNAT 条目未覆盖新 Pod 网段或 EIP 不是登记那 4 个 → 在新加坡节点跑 `for i in 1 2 3 4 5; do curl -s https://ifconfig.me; echo; done`，把真实出口 IP 补进白名单组。
 - 连上但 `inet_server_addr()` 返回内网地址 → 实际走了 CEN/对等，是好事，但验收记录要写清"实际路径"，否则 M4 证据链口径不一致。
 - 白名单改了 10 分钟仍不生效 → 改的是只读实例白名单（不继承）→ 主实例 `DescribeDBInstances` 核对 `DBInstanceId`。
-- 主站突然连不上库 → 先看是不是把 `default` 之外的组整组替换掉了（`ModifySecurityIps` 是**整组覆盖**语义），`DescribeDBInstanceIPArrayList` 逐组回读定位。
 
 **坑**：
-- 坑 1｜"127.0.0.1 = 禁止一切"是错觉：填后主站应用连不上，D3–D4 排障方向全错，误以为 RDS 故障。改进：白名单按用途分命名组（`mnl_vpc`/`sg_standby_eip`），每组有明确 owner；验收贴命名组截图而不是 default 组。**本卡的实际处置**：用户裁定"收 `127.0.0.1`，但按安全顺序"——先确认 `mnl_vpc`/`sg_standby_eip` 已回读生效，**最后一步**才动 `default`，并在动完之后立刻从马尼拉节点打内网串做自伤检查（V5 实测 `PRIV_TCP=OPEN`）。
-- 坑 2｜NAT EIP 会被换：某天新加坡突然连不上主库 → 备 region 静默失去接管能力，真正切换时才发现（RTO 直接爆）。改进：§11.3 备 region→马尼拉 TCP 拨测绑定"连接失败率"告警；EIP 解绑/重绑列入变更审批。**实测补充**：同一台备站节点连续两次探测就分别命中了 `47.84.29.162` 和 `47.84.184.246`——SNAT 出口本来就轮换，所以"只放当前看到的那一个 IP"必然间歇性断连。
+- 坑 1｜"127.0.0.1 = 禁止一切"是错觉：填后主站应用连不上，D3–D4 排障方向全错，误以为 RDS 故障。改进：白名单按用途分命名组（`mnl_vpc`/`sg_standby_eip`），每组有明确 owner；验收贴命名组截图而不是 default 组。
+- 坑 2｜NAT EIP 会被换：某天新加坡突然连不上主库 → 备 region 静默失去接管能力，真正切换时才发现（RTO 直接爆）。改进：§11.3 备 region→马尼拉 TCP 拨测绑定"连接失败率"告警；EIP 解绑/重绑列入变更审批。
 - 坑 3｜公网地址串一旦释放不能再拿回：应用配置、RDS 证书、上游白名单全要重配。改进：**永不释放公网串**；不需要外网访问时清空白名单即可。
 - 坑 4｜公网串写进 Git 的 ConfigMap 明文：Git 历史不可撤销，安全核查直接判不合格。改进：DSN 只进 KMS 凭据管家。
-- 坑 5｜白名单没加 `/32`：担心被规范成整段而意外放行。改进：一律显式 `/32`，用 `DescribeDBInstanceIPArrayList` 复核 CIDR 掩码。**实测**：`/32` 原样保留、未被规范化，所以这条是写法纪律而非已发生的坑；但同一次回读里能看到隐藏组 `hdm_security_ips`（`100.104.188.192/26,100.104.53.0/26`，DAS/运维服务用），**不要把它当成"多余网段"清掉**，也不要往任何自建组里合它。
-- 坑 6｜**`DescribeDBInstanceSSL` 的响应里带服务器 RSA 私钥明文**（顶层键 `ServerKey`，实测首行就是 `-----BEGIN RSA PRIVATE KEY-----`，与 `ServerCert` 并列；同一次回读里还给了 `ServerCAUrl`）。任何人把原始 JSON 贴进日志、证据目录、工单或对话，就等于把私钥交出去了——而这条 API 是"验证 SSL 是否生效"的标准动作，踩中概率极高。**改进（硬性）**：取值一律走管道并先剥敏，`aliyun rds DescribeDBInstanceSSL ... | jq '{SSLEnabled,CAType,ConnectionString,SSLExpireTime,ACL}'`；需要验证书时用 `jq del(.ServerKey,.ServerCert)` 后的副本 + `ssl_after.sanitized.json`，公钥单独导出 `server_cert.pem`；落盘后对整个证据目录 `grep -rE 'BEGIN (RSA )?PRIVATE KEY'` 复核（本次执行后已扫过，CLEAN）。**本次执行即踩到并已清理**（原始文件已剥离，只留 sanitized 副本）。**并且二次命中**：终态复核时又把原始响应直接落盘了一次（发现后立即 `jq del` + 全目录 `grep` 复扫 CLEAN）——说明"记得剥敏"不能靠人脑，**改进**：把"取值即过滤"固化成脚本函数，任何 `DescribeDBInstanceSSL` 输出必须先过 `jq` 白名单字段再重定向到文件，禁止 `api file aliyun rds DescribeDBInstanceSSL` 这种原样落盘写法。
-- 坑 7｜"证书只绑一个连接地址"被当成可两边兼顾：`DescribeDBInstanceSSL` 只回**一个** `ConnectionString`，实测 `-checkhost <内网串>` 得 **"does NOT match"**（公网串 "does match"）⇒ 选了路径 A（公网串）之后，**主站内网侧不可能 `verify-full`**，只能 `verify-ca` 或在私网内降级。**2026-09-29 追加实测**：托管 PgBouncer 的 6432 **复用同一张证书**（内网 worker 对 6432 取到的 subject CN 仍是公网串），所以"经池"并不能绕开这个限制——任务 41 原坑 5"池→RDS 走内网地址 `verify-full`"（现为任务 41 坑 9）已按实测订正为 `verify-ca`。**取证方法本身也是坑**：`openssl s_client -auth_host` 对匹配与不匹配的主机名**都**返回 `exit=1`，用它得出的"校验失败"结论没有证明力，必须用 `openssl x509 -noout -checkhost <host>` 读它的 `does/does NOT match` 输出。**改进**：验收时把"哪个地址享受 verify-full"写进 DSN 模板注释，别让运维以为改个 `sslmode` 就能两边都严。
-- 坑 8｜把"强制 TLS 只允许"当成 PG 上存在的开关：`ForceEncryption`/`TlsVersion`/`--ACL verify-full` 都不是 PG 的能力（分别是 MySQL/SQLServer 参数、需 mTLS），`pg_hba.conf` 在 RDS 上不可自定义，`ACL` 回读恒 `prefer` ⇒ **服务端不拒绝明文连接**，V4 的原判据（`FATAL: no pg_hba.conf entry ... no SSL`）永远不会出现。**后果**：核查表按原判据跑会判"Step 4 失败"，然后有人去乱改参数。**改进**：判据改为"低于 `ssl_min_protocol_version` 的握手被服务端拒"（alert 70），并把"明文是否放行由客户端 `sslmode` 决定"写进风险登记——兜底靠白名单 + 口令 + KMS，与任务 13 坑 14 的裁定同一口径。
-- 坑 9｜用固定实例 ID 跑跨时长的节点验证：ACK 节点池随时在滚（实测新加坡 worker 07:52Z/07:56Z 被换），此前登记的 ID 下一轮 `RunCommand` 就 `InvalidInstance.NotFound`。**改进**：**在同一个脚本内先 `DescribeInstances` 取 Running 节点，再立刻 `RunCommand`**，不在脚本之间传 ID。
-- 坑 10｜`DescribeInvocationResults` 传空 `InvokeId` 会返回**别人的**调用记录（实测返回一条 ACK 内部清理任务且 `InvocationStatus=Success`）——若不加校验就是假通过。**改进**：轮询里比对回显 `InvokeId == 本次 InvokeId`，不等就丢弃重来；判效只看解码后的脚本输出，不看 `Success` 本身。
-- 坑 11｜Terway **eniip** 模式下 Pod 直接取 vSwitch 网段地址（不是 Service CIDR），所以白名单必须覆盖**节点池全部 vSwitch 网段**，只放"节点 IP"是不够的。实测 VPC 内四个业务 vSwitch = `app-a 10.0.16.0/20 / app-b 10.0.32.0/20 / data-a 10.0.48.0/20 / data-b 10.0.64.0/20`，与 `mnl_vpc` 组**一一对应**；`pub-a 10.0.0.0/24`、`pub-b 10.0.1.0/24` **未放**。→ 未来若把 Pod/节点扩到 pub 网段，连不上库且报错形态是"超时"，方向极易误判为 RDS 故障。新增网段必须同步改 `mnl_vpc` 组，这条写进 §11.3 变更审批。
-- 坑 12｜`ModifySecurityIps` 是**整组替换**语义：同名组传什么就是什么，没有"追加"。手抖少写一个网段就把主站关在门外，而 API 只回 `RequestId` 表示成功。**改进**：每次改完立刻 `DescribeDBInstanceIPArrayList` 全量回读（含未点名的组），并把回读贴进执行记录。
-- 坑 13｜用 `grep 'ApsaraDB ... region CA' ApsaraDB-CA-Chain.pem` 判断"官方信任库里有没有本区 CA"必然得"没有"——PEM 是 base64 块，不含明文 subject。实测因此一度得出"bundle 缺本区 CA: NO"，与同一次握手 `Verify return code: 0 (ok)` 自相矛盾。**改进**：拆块逐个验，`awk 'BEGIN{n=0}/BEGIN CERT/{n++;f=sprintf("/tmp/certs/%03d.pem",n)} n>0{print>f}'` 后 `openssl x509 -subject`；本区 CA 实测**在**（69 张里有 1 张 `ApsaraDB ap-southeast-6 region CA`）。
-- 坑 14｜参数相关 API 的三个字段/参数陷阱：① `DescribeParameterTemplates` 的响应路径是 `.Parameters.TemplateRecord[]`（不是 `.TemplateParameter`），`DescribeParameters` 是 `.RunningParameters.DBInstanceParameter[]`，照文档抄字段名会 jq 出空结果而被误读成"参数不存在"；② 模板 API **不校验** `--EngineVersion` 是否与实例匹配（实测填 `18.0` 一样返回 271 条），所以要显式用实例真实版本（`DescribeDBInstances` 回 `PostgreSQL 17.0`）查，否则 `ForceRestart` 判断可能张冠李戴；③ 同一条脚本里如果实例 ID 手抄错位一位，`DescribeParameters` 会报 `InvalidDBInstance.NotFound`，**很容易把这一个错因误判成"版本/参数不支持"**（本次实测踩过，同一脚本两个错因叠在一起）。
-- 坑 15｜观察记录（非本卡风险，留给任务 17/口令轮换线）：参数回读里 `password_encryption=md5` ⇒ PG 认证走 md5 而非 scram-sha-256。轮换口令后，**已建立的连接池不会自动用新口令**，PgBouncer/应用需按顺序重启；改 `password_encryption` 会影响所有既有口令的哈希形态，别在切流窗口动。
+- 坑 5｜白名单没加 `/32`：填 `47.x.x.x` 被规范成 `47.x.x.0/24` 意外放行整段。改进：一律显式 `/32`，用 `DescribeDBInstanceIPArrayList` 复核 CIDR 掩码。
 
-### Day 1 · 任务 41｜RDS 托管 PgBouncer（已启用，无需自建）+ 800 连接预算三不变量（单人，3 人时，S4）
+### Day 1 · 任务 41｜自建 PgBouncer + 800 连接预算三不变量（单人，3 人时，S4）
 
-**前置/状态**：任务 4/13 完成，HPA 目标 16 副本。**选型已修订（F10 撤销，2026-09-29 实测）：连接收敛用 RDS PostgreSQL 内置的托管 PgBouncer，不再有自建部署动作**——实例上 `PGBouncerEnabled="true"`、16 条 `pgbouncer.*` 运行参数已下发、内网串与公网串的 **5432/6432 四个端口实测均可达且 TLS 握手成功**。原 F10 的立论（"托管代理功能面不足以覆盖日志库/迁移旁路"）经实测不成立，见本卡坑 1。**因 `max_connections = 800` 实测上限（F11），"必须池化"这一结论不变，PgBouncer 仍是「切流硬性前置」：池未就绪不得切流。** 本卡同时是 G11 连接预算表的落盘动作。
-> **人时不变、用途变了**：部署环节（自建镜像/Deployment/Service/PDB/Secret）归零；3 人时改用在**托管形态下无法回避的三件事**——① 预算按托管池的真实参数重算（I-1 目前**不成立**，见步骤 2）；② `pool_mode=transaction` 是托管**默认值**而非我们的选择，兼容性验证从"以后再说"提前为 D2 出口硬判据（步骤 3）；③ 验证手段换轨（`SHOW POOLS` 在托管上不可用）。
->
-> **2026-09-29 四项裁定（用户书面确认，本卡按此执行）**：
-> | # | 裁定 | 落地形态 | 是否云写 |
-> | --- | --- | --- | --- |
-> | ① | **降应用侧**：`SQL_MAX_OPEN_CONNS` 由 150 → **100**，`pgbouncer.max_client_conn` **维持实测 2000 不动** | 任务 17 ConfigMap + 备站 env（见步骤 2 I-1） | 否（K8s 配置，任务 17/30 下发） |
-> | ② | 备站走 **乙 = 公网串 6432 进池**（放弃甲路 `5432` 直连） | 任务 30/17 备站 DSN 端口改 6432；`sg-sg-app` 出向必须补 `TCP 6432` | **是**（安全组写，见步骤 4 待办） |
-> | ③ | **`pool_mode` 维持 `transaction` 不动**（不做"临时切 session"的兜底） | 步骤 3 四项升级为**无退路的 D2 硬门槛**；未全过 ⇒ 不切流 | 否 |
-> | ④ | **已执行**：`pgbouncer.stats_users = newapi_ops`（恢复可观测性） | `ModifyParameter --Forcerestart false`，回读已生效、实例 `Running` 无重启 | **是**（已完成） |
->
-> ⚠ **裁定 ① 的算术后果必须看清楚**：`100` 只让 **ClickHouse 日志库分支**成立（`1840 ≤ 2000`）；**日志库仍是 PG 的分支（= 当下现状，CK 实例未创建）仍然不成立**（`3680 > 2000`）。也就是说 ① 把"I-1 不成立"从"必然爆"缩小成"CK 建好之前这段窗口会爆"，**窗口本身没有被 ① 关掉**，只能靠"CK 实例提前创建"或"窗口内临时把 conns 压到 ≤45"来关（见步骤 2 处置）。
-> **事实修订（实测，F11）**：线上购买 RDS PG 规格 `max_connections` 实测 **800 且用户不可改** → 服务端可用预算封顶 `800 × 0.8 = 640`。**所有"16 副本 × 数百连接"的直连方案在数学上全部作废**（16×1000 或 16×200 都超限），必须池化。**连接数预算必须从 ConfigMap + 池参数反向生成，不允许手填。**
-
-**自建 → 托管的差异口径（后续所有卡片按此读）**：
-
-| 维度 | 原自建方案（F10） | 托管实测现状 |
-| --- | --- | --- |
-| 部署物 | ACK 内 3 副本 Deployment + Service（5433→6432）+ PDB `minAvailable: 2` + 反亲和 + KMS Secret | **无**。RDS 实例自带 6432，内网串/公网串都监听；5432 不受影响 |
-| 池粒度 | `(user, database)` | 相同（`default_pool_size` 描述即 "per user/database pair"）⇒ 日志库天然独立分池 |
-| `max_client_conn` | 自拟 4000 | 实测 **2000**（模板默认 100，启用时平台注入 2000）；可改、`ForceRestart=false`、`CheckingCode=[0-100000]` |
-| `default_pool_size` | 40 + `reserve_pool_size 10` | 实测 **50**（模板默认 20）；**托管参数集里没有 `reserve_pool_size`/`reserve_pool_timeout`/`server_reset_query_always`**，应急时只能调 `default_pool_size` |
-| `pool_mode` | 计划先 `session`，三库矩阵过了再切 transaction | 实测 **`transaction`**（默认即 transaction）⇒ 原安全垫消失，见坑 2 |
-| 管理入口 | `admin_users` 可 `SHOW POOLS`/`SHOW STATS`/`RELOAD` | 初始实测 `stats_users=''` ⇒ admin 库登不进去，四个命令全部不可用（坑 3）。**2026-09-29 裁定 ④ 已改为 `stats_users=newapi_ops`**（`ForceModify=true`/`ForceRestart=false`，已回读生效）⇒ 只恢复 `SHOW` 类**只读**观测，`RELOAD`/`PAUSE` 仍需 `admin_users`，而托管参数集**不提供** `admin_users`。**admin 库能否登录仍未实测**（需 VPC 内执行位，见步骤 5） |
-| TLS | 应用→池可关；池→RDS 内网 `verify-full` | 6432 复用 5432 的**同一张证书**（CN=公网串）⇒ 内网串经池同样**不能** `verify-full`（任务 15 坑 7 的同一后果） |
-| 成本 | 3 副本 ECS + 维护 | **免费**（官方口径不额外计费） |
-| 副作用 | 无 | 启用时在 `postgres` 库安装 `pgbouncer_fdw` + `dblink`，官方口径**不可卸载**，需登记进库清单，见坑 6 |
-| 单点 | 我们自己兜（3 副本 + PDB） | 池与实例同生命周期；**5432 直连是独立逃生门**（前提是先降 conns，见 I-3） |
+**前置/状态**：任务 4/13 完成，HPA 目标 16 副本。**选型已定（F10）：自建 PgBouncer，RDS 托管数据库代理不启用**——transaction pooling 可控、收敛层单一，且托管代理的功能面不足以覆盖日志库/迁移旁路。**因 `max_connections = 800` 实测上限（F11），PgBouncer 从"保险项"升级为「切流硬性前置」：池未就绪不得切流。** 本卡同时是 G11 连接预算表的落盘动作。
+> **事实修订（实测，F10/F11）**：线上购买 RDS PG 规格 `max_connections` 实测 **800 且用户不可改** → 服务端可用预算封顶 `800 × 0.8 = 640`。**所有"16 副本 × 数百连接"的直连方案在数学上全部作废**（16×1000 或 16×200 都超限），必须池化。**连接数预算必须从 ConfigMap 反向生成，不允许手填。**
 
 **操作步骤（CLI-first）**：
 
-1. 复核托管池状态（只读，✅ 2026-09-29 已实测通过）：
-
-```bash
-# ① 启用判据：只有这个字段作数
-aliyun rds DescribeDBInstanceAttribute --DBInstanceId pgm-5tstdhko64x2c01w --RegionId ap-southeast-6 \
-  | jq '.Items.DBInstanceAttribute[0] | {PGBouncerEnabled,ProxyType,EngineVersion,CurrentKernelVersion,MaxConnections,Category}'
-#    期望 PGBouncerEnabled="true" / MaxConnections=800 / Category="HighAvailability"
-#    前提条件（备实例/新实例要开池时先查）：CurrentKernelVersion ≥ rds_postgres_*_20240830 且非 babelfish
-# ② 池参数真实值（预算的唯一来源，别照文档抄）
-aliyun rds DescribeParameters --DBInstanceId pgm-5tstdhko64x2c01w --RegionId ap-southeast-6 \
-  | jq -r '.RunningParameters.DBInstanceParameter[] | select(.ParameterName|startswith("pgbouncer")) | [.ParameterName,.ParameterValue]|@tsv'
-# ③ 池端口连通性（内网 worker 与公网侧各跑一次；必须用集群节点，不要用 pub-a 段运维机——任务 15 坑 11）
-timeout 5 bash -c '</dev/tcp/pgm-5tstdhko64x2c01w.pgsql.ap-southeast-6.rds.aliyuncs.com/6432' && echo VPC-6432=OPEN
-timeout 5 bash -c '</dev/tcp/pgm-5tstdhko64x2c01wpub.pgsql.ap-southeast-6.rds.aliyuncs.com/6432' && echo PUB-6432=OPEN
-```
-
-判读要点（都是本轮实测踩出来的）：
-- `DescribeDBProxy` / `DescribeDBProxyEndpoint` 属 **PolarProxy（MySQL 产品线）**，对 PG 恒返回 `DBProxyConnectStringItems=[]` / `Endpoint.NotFound`，**不能**用它判断 PgBouncer 是否开启（本卡一度据此误判"没开"）。
-- `DescribeDBInstanceNetInfo` 只列两条 **5432**，**6432 不在网络信息里** ⇒ 池端口在 API 层"看不见"，只能靠连通性实测证明它在监听。
-- 需要开/关池时（本实例已开，下面留作备实例与应急回退用）：`aliyun rds ModifyDBInstanceConfig --DBInstanceId <id> --ConfigName pgbouncer --ConfigValue true|false`，无需重启、不额外计费。
-
-2. 连接数预算三不变量（M1 收口判据，D7 HPA 16 副本时复验；env 取任务 17 ConfigMap **实际生效**值、池参数取步骤 1 回读值）：
-   > **事实修订（本轮读代码确认，直接影响预算）**：**`LOG_SQL_MAX_OPEN_CONNS` 这个环境变量在本仓库代码里不存在**（全仓 `*.go` 只有 `SQL_MAX_OPEN_CONNS`/`SQL_MAX_IDLE_CONNS`/`SQL_MAX_LIFETIME` 三个；`model/main.go:211-213` 主库、`model/main.go:258-260` 日志库**读的是同一组**）。⇒ 任务 17 ConfigMap 里写的 `LOG_SQL_MAX_OPEN_CONNS: "50"` 是**空转配置**，日志库（若为 PG）实际按 `SQL_MAX_OPEN_CONNS=100` 取整。预算必须按 **两库同为 100** 算，不能按 `100/50` 算。
-   - **I-1（客户端侧，对 6432）** 应用侧 `sum(副本数 × 每库 conns) ≤ pgbouncer.max_client_conn`。主库与日志库各占一条客户端连接，故必须**相加**后比对。**裁定 ①：`SQL_MAX_OPEN_CONNS=100`、`max_client_conn` 维持 2000；裁定 ②：备站经池 ⇒ 备站槽位计入本式。**
-     - **日志库 = ClickHouse 分支（F9 主线）**：`16 × 100 = 1600`，加备站 `24 × 10 = 240` ⇒ **`1840 ≤ 2000` ✅**（余量 160，仅 8% ⇒ HPA 若从 16 提到 17 就破，扩容前必须复算）。
-     - **日志库 = PG 分支（当下现状：CK 实例尚未创建）**：CK 未接管 ⇒ 两库各 100 ⇒ `16 × 200 = 3200`，加备站 `24 × 20 = 480` ⇒ **`3680 > 2000` ❌**（超 1680）。
-     ⇒ **I-1 只在 CK 分支成立**。`x ≤ 47` 才能同时压住两个分支（`16 × 2x + 24 × 20 ≤ 2000` ⇒ `x ≤ 47.5`；`x=48` 时 `1536+480=2016` 已爆），100 不行。**关闭这个窗口的三条路（按推荐排序）**：
-     **(a) 把 CK 实例创建提前**到应用首次启动（任务 29/D2）之前 ⇒ PG 分支根本不出现，本式停在 `1840 ✅`。这是**唯一不动 conns、不动池参数的做法**，且本来就是 F9 主线；代价是任务 29 从 D2 之后被提到 D1/D2 之间。
-     **(b) 窗口内临时 `SQL_MAX_OPEN_CONNS=45`** ⇒ `16 × 90 = 1440`，加备站 `24 × 20 = 480` ⇒ `1920 ≤ 2000 ✅`；CK 就绪后**立刻**升回 100（改一次 ConfigMap + 滚动重启，两次动作）。适合 CK 无法提前但必须先起应用的场合。
-     **(c) 回头提 `pgbouncer.max_client_conn`**（覆盖两分支需 `≥ 3680`，取 **4000** 留余量）——**已被裁定 ① 否决**，仅当 (a)(b) 都做不到时作为兜底重新提起。
-     > 备站数值口径：`SQL_MAX_OPEN_CONNS=10`/副本、`SQL_MAX_IDLE_CONNS=5`，**24 副本**是 D4 接管态（M4 抬 HPA 到 24）而非日常态；日常备站 2 副本 ⇒ 客户端槽位 `2×10=20`。预算表按**接管态 24 副本**留槽位，否则接管当天爆池。
-     > 附带口径（原卡漏项）：`SQL_MAX_IDLE_CONNS` 的**代码默认是 100**、`SQL_MAX_LIFETIME` 默认 **60s**，且同样被主库与日志库**共用** ⇒ 每副本最多挂着 100 条**客户端**连接、每 60 秒整体重建一次；池化后它们不占服务端连接，但**持续占用 `max_client_conn` 槽位**（关闭中的也算）。这两个 env 必须显式给值，`IDLE` 建议 ≤ `OPEN` 的一半（裁定 ① 后取 **50**：CK 分支稳态 idle 基线 `16×50=800`，仍 `≤ 2000`）。
-   - **I-2（服务端侧，对 RDS）** 真正受 `800 × 0.8 = 640` 约束的是**池的 server 连接 + 池外直连**。池按 `(user, database)` 分，**每个池各有 `default_pool_size=50`**，所以"进池"并不等于服务端 0 增量——**本轮实测纠正了原卡把乙写成 0 的错误**：
-     | 来源 | 走池? | `(user,db)` 池 | 预算 |
-     | --- | --- | --- | --- |
-     | 主站 `newapi` 业务库 | 是，内网串 6432 | `(newapi, newapi)` | 50 |
-     | 主站日志库（PG 分支，另一库⇒另一池；**F9 走 ClickHouse 则本行为 0**） | 是，内网串 6432 | `(newapi, <logdb>)` | 50 或 0 |
-     | master 迁移 / 运维直连（I-3 预留，不经池） | 否，内网串 5432 | — | 20 |
-     | 新加坡备站 → 马尼拉 RDS（**裁定 ② = 乙**，公网串 6432 进池） | 是 | `(newapi_sg, newapi)` ⇒ **独立池** | 50 |
-     | ~~甲：备站公网串 5432 直连 `24 × 10 = 240`~~ | 否 | — | 已作废（裁定 ② 选乙） |
-     | **合计（乙）** | — | — | **≈170**（PG 日志库）/ **≈120**（CK）`≤ 640` ✅ |
-     > **乙 的真实收益（改口径后）**：备站服务端占用从**甲的 240（随副本数线性、无上限保护）**变成**乙的 ≤50（`default_pool_size` 封顶，与副本数无关）**——D4 把备站抬到 24 副本时不再向 RDS 追加后端连接，这是乙优于甲的实质理由，而不是"0 增量"。
-     > **乙 的代价（必须一并登记）**：① 备站的并发被 `(newapi_sg,newapi)` 池的 **50 条 server 连接**卡住，接管态 24 副本共享 ⇒ 单副本平均 2 条，跨区 RTT（60–90ms）叠加池内排队会放大 P99，**必须在任务 49 预热 + 任务 36 接管演练里实测这条路径**，不能只验主站；② 公网串 6432 的白名单/安全组要同时放行（任务 15 已放 4 个 SNAT EIP `/32`，6432 与 5432 共用实例级白名单，实测四格 `OPEN`；但 `sg-sg-app` 出向只写了 5432 ⇒ **步骤 4 的写操作**）；③ `verify-full` 依然成立（6432 复用同一张证书，CN=公网串）。
-   - **I-3** master 迁移路径**直连 RDS 不经池**（内网串 **5432**），且直连余量单独预留（上表 20）——不变。回退开关在托管形态下更简单：**把 DSN 端口 6432 改成 5432 就是绕过池**，无需另一套服务。⚠ 但回退必须**同时**把 `SQL_MAX_OPEN_CONNS` 从裁定的 **100 降到** ≤40（CK 日志库 ⇒ `16×x ≤ 640`）或 ≤20（PG 日志库 ⇒ `16×2x ≤ 640`），否则"绕过池"这个动作本身就是撞 `FATAL: sorry, too many clients already`。备站同理：走甲（回退时）也要压到 `24×x` 之和计入 640。
-   三式同时成立 → 通过；否则只能三选一：升 RDS 规格（**升完必须重跑 `SHOW max_connections`**）/ 降应用 conns / 提池参数。
-   > **事实修订（读代码确认）**：`SQL_MAX_OPEN_CONNS` 的**代码默认值是 1000**（`model/main.go:212` 与 `:259`，主库与日志库**各读一次同一个变量**），不是方案估的 300；**预算计算必须用配置文件显式值而非代码默认**。按 16 副本算：不池化且日志库也是 PG 时 = **16 × (1000+1000) = 32000 ≫ 800**，现象反直觉——HPA 扩容后反而报 `FATAL: sorry, too many clients already`，**扩容变成加重故障的动作**，且**计费写入失败即资损**。
+1. 连接数预算三不变量（M1 收口判据，D7 HPA 16 副本时复验；数值按 800 上限重算，env 取任务 17 ConfigMap 实际值：主站 `SQL_MAX_OPEN_CONNS=150` / `LOG_SQL_MAX_OPEN_CONNS=50`，备站 `10`）：
+   - **I-1（客户端侧）** 应用侧 `sum(副本数 × 每库 conns) = 16 × (150 + 50) = 3200 ≤ 池 max_client_conn 4000`（主库与日志库各占一条池连接，故必须**相加**后比对）
+   - **I-2（服务端侧）** 池 server 侧 + 池外直连合计 `≤ 800 × 0.8 = 640`，本方案实际：
+     | 来源 | 走池? | 预算 |
+     | --- | --- | --- |
+     | 主站 `newapi` 业务库（池 server 侧：`default_pool_size 40` + `reserve_pool_size 10`，3 副本共享同一池上限口径取 50） | 是 | 50 |
+     | 主站 `newapi_log` 日志库（`default_pool_size 20`） | 是 | 20 |
+     | master 迁移 / 运维直连（I-3 预留，不经池） | 否 | 20 |
+     | 新加坡备站 → 马尼拉 RDS **公网直连**（池在马尼拉集群内，备站不经池）：`24 副本 × SQL_MAX_OPEN_CONNS 10` | 否 | **240（硬上限，由 env 锁死）** |
+     | **合计** | — | **≈330 ≤ 640** ✅ |
+   - **I-3** master 迁移路径**直连 RDS 不经池**，且直连余量单独预留（上表 20）
+   三式同时成立 → 通过；否则只能三选一：升 RDS 规格（**升完必须重跑 `SHOW max_connections`**）/ 降应用 conns / 加池。
+   > **事实修订（实测确认）**：`SQL_MAX_OPEN_CONNS` 的**代码默认值是 1000**（`model/main.go:212`，主库与日志库**各设一次**），不是方案估的 300；**预算计算必须用配置文件显式值而非代码默认**。按 16 副本算：不池化时 = **16 × (1000+1000) = 32000 ≫ 800**，现象反直觉——HPA 扩容后反而报 `FATAL: sorry, too many clients already`，**扩容变成加重故障的动作**，且**计费写入失败即资损**。
+   > **备站 conns 为什么锁 10**：备站不经池、直连公网 RDS，`24 × 150 = 3600` 会**单独击穿 640 预算**；接管期实测备站 DB 并发极低（写路径集中在马尼拉），10 已留 24× 余量。改这个值必须重跑本表。
 
 ```bash
 # 从 ConfigMap 反向生成预算（真实值来源，不手填）
-# ⚠ 只有这三个变量被代码读取；LOG_SQL_MAX_OPEN_CONNS 不存在，别把它当预算输入
-kubectl -n new-api get cm newapi-config -o jsonpath='{.data.SQL_MAX_OPEN_CONNS} {.data.SQL_MAX_IDLE_CONNS} {.data.SQL_MAX_LIFETIME}{"\n"}'   # 期望 100 50 60（裁定 ①）
-grep -rn "GetEnvOrDefault(\"SQL_MAX" model/main.go   # 期望恰好 6 处：主库 3 + 日志库 3，变量名相同
-kubectl --context sg -n new-api get deploy new-api-ph-standby -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="SQL_MAX_OPEN_CONNS")].value}{"\n"}'   # 期望 10（IDLE 期望 5）
+kubectl -n new-api get cm newapi-config -o jsonpath='{.data.SQL_MAX_OPEN_CONNS} {.data.LOG_SQL_MAX_OPEN_CONNS}{"\n"}'   # 期望 150 50
+kubectl --context sg -n new-api get deploy new-api-ph-standby -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="SQL_MAX_OPEN_CONNS")].value}{"\n"}'   # 期望 10
 psql "<migrate DSN>" -c "SHOW max_connections;"   # 期望 800（线上规格实测上限，用户不可改）
-# 池侧三个数一起回读，预算表左端必须有它们
-aliyun rds DescribeParameters --DBInstanceId pgm-5tstdhko64x2c01w --RegionId ap-southeast-6 \
-  | jq -r '.RunningParameters.DBInstanceParameter[] | select(.ParameterName|IN("pgbouncer.max_client_conn","pgbouncer.default_pool_size","pgbouncer.pool_mode")) | [.ParameterName,.ParameterValue]|@tsv'
 ```
 
-3. `transaction` 模式兼容性验证（**本卡新增的硬性动作**）：原自建方案靠"先 `session`、三库矩阵过了再切 transaction"兜底；**托管形态下这个安全垫不存在**——实例上跑的就是 `pgbouncer.pool_mode = transaction`，且 **裁定 ③ 明确维持 transaction 不动**（"临时切 session"这条退路已关闭）。以下四项是 D2 出口判据，未全过就切流属于**拿计费正确性赌博**。**本轮已把代码事实读进来**：四项里前两项在代码层已有明确依据，后两项仍必须实测。
-   - **prepared statements —— 代码层已消解，仍要实测确认**：`model/main.go:156-159` 对 PostgreSQL 走 `postgres.Config{DSN: dsn, PreferSimpleProtocol: true}`，注释写明"同时关闭 pgx 隐式与 GORM 显式预处理语句：命名 prepared statement 与事务池代理（PgBouncer/Neon/Supabase）不兼容，会触发 FATAL 08P01/42P05"；同时 `newGormConfig(false)`（`model/gorm_logger.go:25-30`）把 GORM 的 `PrepareStmt` 置为 `false`，而 `chooseDB` 的 PG 分支用的正是 `newGormConfig(false)` ⇒ **两条预处理语句路径都关掉了**。⇒ 原先"不通过只能二选一（应用侧关预处理 / 改 session）"这个前提**已经不成立**：应用侧早已选①，裁定 ③ 之后没有②。**判据**：经池跑余额写入 + 令牌校验热路径，网关日志与 `psql` 直连会话均无 `SQLSTATE 42P05`/`08P01`；**复验点**：`postgresMigrationDialector`（迁移路径）是否继承 `PreferSimpleProtocol`，以及 AutoMigrate 期间是否出现命名语句。
-   - **会话语句 —— 全仓实测：无 session 级红线**：`SET`/`SET LOCAL`、advisory lock、`LISTEN/NOTIFY`、跨语句事务是 transaction 池化的四条红线（方案 §7.4.5.4）。本轮 `grep -rn` 全仓 `*.go` 结果：
-     - `pg_advisory_lock`（**session 级，池化下会串会话**）：**0 处**；只有 `pg_advisory_xact_lock` **2 处**（`model/option_primary_key_migration.go:106`、`model/user.go:399`），且都在 `tx.Exec` 内 ⇒ 锁随事务释放、事务期间独占同一条 server 连接 ⇒ **transaction 模式下语义正确**，不是红线。
-     - `LISTEN`/`NOTIFY`：**0 处**。
-     - `SET LOCAL search_path`：只出现在**测试**代码（`model/token_migration_test.go:237`、`model/prefill_group_migration_test.go:232`），生产路径 **0 处**。
-     ⇒ 这条从"未知的赌博"降级为"回归验证项"：经池跑任务 43 三库矩阵时覆盖上述两条 advisory 锁路径即可；若将来新增 session 级 `pg_advisory_lock` 或 `SET`，**必须重新按红线评估**（因为裁定 ③ 关掉了退路）。
-   - **启动参数白名单**：实测 `pgbouncer.ignore_startup_parameters = extra_float_digits`（**仅此一项**）。驱动若还发 `options` 之类启动参数会被拒（`unrecognized configuration parameter` / 连接直接失败）。**判据**：首次经池连接即失败 ⇒ 把该参数名追加进 `ignore_startup_parameters`（可改、`ForceRestart=false`、`CheckingCode=.*`）。
-   - **口令轮换顺序**：`password_encryption=md5`（任务 15 坑 15）+ 池化后**服务端连接是复用的** ⇒ 轮换口令不会作用到已建立的 server 连接；托管侧**没有 `RELOAD`/`PAUSE` 入口**（参数集不提供 `admin_users`，裁定 ④ 只给了 `stats_users` ⇒ 只读），只能靠关/开池或等 server 连接自然回收（实测 `server_idle_timeout=600` ⇒ 最长 10 分钟）。**结论**：口令轮换必须排在维护窗或池关闭状态下做，**不得排在 D7 切流期**。
-   - **裁定 ③ 的直接后果（写进上线检查表）**：兼容性子集**未全过 ⇒ 不得切流**，且届时**没有"切 session"这个退路**，只能：① 找到并改掉不兼容语句（首选，因为应用侧已经是 simple protocol，风险面小）；② 把该流量绕开池走 5432 直连（受 I-3 约束，需同时降 conns）；③ 重新向 owner 提起 `pool_mode` 裁定（属推翻本次裁定，需书面记录）。
+2. 自建 PgBouncer 关键配置（完整清单参考 `impl_deploy.md §7.4.5.3`；ini 经 Secret 挂载，密码走 KMS/ExternalSecret）：
 
-4. 备站走 乙（`pub:6432` 进池）带来的**待执行写操作**（裁定 ②，本卡唯一剩下的云写）：
-
-```bash
-# sg-sg-app 出向补 6432（现有规则只放 5432；不放则备站经池必然连不上）
-aliyun ecs AuthorizeSecurityGroupEgress --RegionId ap-southeast-1 \
-  --SecurityGroupId <sg-sg-app> --IpProtocol tcp --PortRange 6432/6432 \
-  --DestCidrIp 0.0.0.0/0 --Policy Accept --Priority 1 --Description "newapi-pg-pool-mnl-rds-pub-6432"
-# 备站 DSN 改端口（任务 30/17 落地）：host=${RDS_MNL_PUB} port=6432 dbname=newapi user=newapi_sg sslmode=verify-full
-# 判据：从新加坡侧节点 `</dev/tcp/${RDS_MNL_PUB}/6432` = OPEN 且 TLS 握手 exit=0（本轮 09-29 已实测四格 OPEN）；
-#       备站 Pod → 6432 需等 Pod→RDS 链路本身实测（任务 13/15 遗留：节点 5432 已通，Pod 侧未实测）
+```ini
+[databases]
+newapi = host=<rds-internal> port=5432 dbname=newapi
+; 日志库同样经池收敛（I-2 中已按 default_pool_size=20 计入预算）
+newapi_log = host=<rds-internal> port=5432 dbname=newapi_log
+[pgbouncer]
+pool_mode = session            ; ⚠ 兼容性未验证前先用 session；三库矩阵通过后才允许 transaction
+listen_addr = 0.0.0.0
+listen_port = 6432
+max_client_conn = 4000         ; I-1：16×30=480 clients，余量充足
+default_pool_size = 40         ; I-2 主库 server 侧
+min_pool_size = 5
+reserve_pool_size = 10
+reserve_pool_timeout = 3
+query_wait_timeout = 120
+server_reset_query_always = 0
+ignore_startup_parameters = extra_float_digits,options
+admin_users = pgb_admin
 ```
-> ⚠ **`verify-full` 在乙路上成立**（6432 与 5432 同一张证书，CN=公网串），所以改端口**不牺牲**主机名校验；但备站的 `(newapi_sg,newapi)` 池只有 `default_pool_size=50` 条服务端连接，24 副本共享，必须在任务 36/49 的接管与预热里实测排队与 P99（见 I-2 的代价清单）。
 
-5. 可观测性恢复后的验证（裁定 ④ 已下发参数，**效果尚未实测**）：
-   - 参数侧已闭环：`DescribeParameters → pgbouncer.stats_users = newapi_ops`（Running 值已生效，`ConfigParameters` 空 = 无待生效项），实例 `DBInstanceStatus=Running`、无重启。
-   - **登录侧未验证**：PgBouncer 的 admin 库（`dbname=pgbouncer`）在托管形态下能否用 `newapi_ops` 登录、`SHOW POOLS`/`SHOW STATS` 是否回数据，**必须在 VPC 内的执行位实测**（内网串 6432）。执行位与任务 13/15 同口径＝集群内一次性 Job；**口令严禁走 `RunCommand` 明文投递**（`newapi_ops` 已因此轮换过一次，见任务 13 执行记录），必须从 KMS/Secret 注入。
-   - **在实测通过之前，不要把 `SHOW POOLS` 写进任何应急手册**（坑 3）。观测主线仍是 CMS `db.pgbouncer.*` + `pg_stat_activity`。
+配 3 副本 Deployment + Service（ClusterIP 5433→6432）+ PDB `minAvailable: 2` + 跨可用区反亲和 + KMS 注入 Secret；PgBouncer 不接公网。
 
-**验证方法**（`SHOW POOLS`/`SHOW STATS` 在托管上**实测可达之前**不可用，观测整体换轨）：
+**验证方法**：
 
 ```sql
--- ① 池是否真在收敛（唯一能在托管上取证的判据：客户端连接数 vs 服务端连接数）
---    执行位＝马尼拉集群内一次性 Job（任务 13/15 的口径），用**直连**会话观测，用**经池**会话施压
-SELECT count(*) FROM pg_stat_activity;                     -- 施压前基线
--- 经内网串 6432 并发开 20 条 psql 后复查：
-SELECT count(*) FROM pg_stat_activity;                     -- 增量必须 ≪ 20（受 default_pool_size=50 约束）
-SELECT state, count(*) FROM pg_stat_activity GROUP BY 1 ORDER BY 2 DESC;   -- idle 不应随副本数线性堆积
-SELECT count(*) FROM pg_stat_activity WHERE state <> 'idle';               -- 活跃服务端连接应贴着池上限走
-SHOW max_connections;                                      -- 期望 800（不可用户改，只能升规格后重测）
+-- PgBouncer admin 库
+SHOW POOLS;    -- cl_waiting 长期 0；sv_active < default_pool_size
+SHOW STATS;    -- max_wait_us 不持续增长
+-- RDS 侧
+SHOW max_connections;                                     -- 期望 800（不可用户改，只能升规格后重测）
+SELECT count(*) FROM pg_stat_activity;                    -- 必须 ≤ 800 × 0.8 = 640
+SELECT state, count(*) FROM pg_stat_activity GROUP BY 1;  -- idle 不应大量堆积
 ```
-+ 池自身指标走 **CMS/控制台监控 `db.pgbouncer.*`**（客户端连接数、服务端连接数、等待队列、命中率）——裁定 ④ 之前（`stats_users=''`）这是**唯一**可观测面；现在 `stats_users=newapi_ops` 已生效，但 admin 库能否登录**尚未实测**（步骤 5），**实测前仍以 CMS + `pg_stat_activity` 为准**。
-+ HPA 扩到 16 副本期间重复 ①，**`pg_stat_activity` 总量必须 ≤ 640**，且网关侧无 `too many clients already`、无 `SQLSTATE 42P05`。
-+ 证书/协议下限回归（本轮已实测，D2 复跑即可）：6432 的证书与 5432 同一张，`-checkhost` 对**内网串 does NOT match / 公网串 does match**；`-tls1_1` 在 6432 上被拒 `alert protocol version` ⇒ 池**继承** `ssl_min_protocol_version=TLSv1.2`。
+
++ HPA 扩到 16 副本期间重复上述观测，PG 连接数不撞上限。
 
 **不通过时修复**：
-- 报 `too many clients`（来自 **pgbouncer**，6432）→ 是 **I-1** 破了。**裁定 ① 后 `max_client_conn` 保持 2000**，所以第一反应是查**日志库是不是还挂在 PG 上**（CK 未接管 ⇒ 预算翻倍到 3680 ⇒ 必然爆，见 I-1 的 (a)(b) 处置），其次降 `SQL_MAX_OPEN_CONNS`/`SQL_MAX_IDLE_CONNS`；提 `max_client_conn` 属推翻裁定 ①，要书面记录。**升 RDS 规格救不了**（那封顶的是服务端连接）。
-- 报 `FATAL: sorry, too many clients already`（来自 **RDS**，5432）→ 有东西**绕过池**直连了：用 `pg_stat_activity` 的 `client_addr`/`application_name` 找出直连方（迁移 Job 属预期内的 I-3 预留 20，其余按异常处理）。
-- `query_wait_timeout`（实测 120s）超时报错 → 池饱和。**托管没有 `reserve_pool_size`/`reserve_pool_timeout`**，只能提 `default_pool_size`（`ForceRestart=false`）；或查慢查询长期占住 server 连接（`pg_stat_activity` 里 `xact_start` 很老的）。**真正根因常在应用侧 `SQL_MAX_OPEN_CONNS` 太大**。
-- DDL/AutoMigrate 失败或行为怪异 → 迁移走了池 → 强制 master 直连内网串 5432（I-3）。
-- `prepared statement already exists` / `SET` 不生效 / advisory lock 丢失 → 见**步骤 3 最后一条**：裁定 ③ 已关闭"切 `session`"这条退路，先定位是哪条语句（应用侧本就是 simple protocol，出现 42P05 说明有代码路径绕过了它），改语句 > 绕开池走 5432（受 I-3 约束）> 重新裁定 `pool_mode`。
-- 池本身故障（托管侧）→ 立即把 DSN 端口退回 5432 **并同时**降 conns 到 ≤40（I-3），开 RDS 工单。**不要**临时在集群里起一套自建 PgBouncer 救火——白名单、证书主机名校验、池参数三处都得重做，一定来不及。
+- `cl_waiting` 持续 >0 → `default_pool_size` 太小则调大；或慢查询长期占用服务端连接（查 `pg_stat_activity` 中 `xact_start` 很老的）。
+- `query_wait_timeout` 报错 → 池饱和先提 `reserve_pool_size`；**真正根因常在应用侧 `SQL_MAX_OPEN_CONNS` 太大**。
+- DDL/迁移失败或怪异 → 迁移走了池 → 强制 master 直连（I-3）。
+- `prepared statement already exists` / `SET` 不生效 → transaction 模式与会话语句冲突 → 改 `pool_mode=session` 或应用侧关 prepared statements。
 
 **坑**：
-- 坑 1｜**选型依据失效但文档没跟上**（本轮实测纠正）：原 F10 判定"托管代理功能面不足以覆盖日志库/迁移旁路"，据此排除了托管。实测托管 PgBouncer（RDS PG 内置，**不是** PolarProxy）① 不额外计费；② 内网串与公网串**都**监听 6432（自建时"备站必须直连"的前提因此不成立）；③ 按 `(user,database)` 分池 ⇒ 日志库天然有自己的池；④ 迁移旁路只要把 DSN 端口换回 5432。**改进**：F10 已撤销；今后任何"要不要自建"的讨论先跑 `DescribeDBInstanceAttribute` 看 `PGBouncerEnabled`，别拿旧结论当现状。
-- 坑 2（最隐蔽）｜**`transaction` 是托管的默认值，不是我们的选择**：自建方案靠"先 session、矩阵过了再切"兜底，现在实例上跑的就是 `pool_mode=transaction`，兜底消失。transaction 模式下 `SET`/`SET LOCAL`、prepared statements、advisory lock、`LISTEN/NOTIFY`、跨语句事务都会出错（方案 §7.4.5.4"兼容性红线"）。**后果**：计费/余额相关的偶发、不可复现错误——比宕机更可怕，因为它悄悄改数据。**改进**：步骤 3 四项作为 D2 出口硬判据；**裁定 ③（2026-09-29）明确维持 `pool_mode=transaction` 不动 ⇒ "未通过就先切 session"这条兜底已被主动关闭**，届时只能改语句或让该流量绕开池（I-3），并把这条硬判据写进上线检查表（§14）。本轮读代码给出的底气：应用侧 PG 分支已是 `PreferSimpleProtocol: true` + `PrepareStmt:false`（`model/main.go:156-159`、`model/gorm_logger.go:25-30`），且全仓**没有** session 级 `pg_advisory_lock`、`LISTEN/NOTIFY`、生产路径 `SET`（步骤 3 的实测清单）。
-- 坑 3｜`stats_users=''`（初始实测）⇒ **没有 PgBouncer admin 入口**：`SHOW POOLS`、`SHOW STATS`、`RELOAD`、`PAUSE` 全部不可用，原卡写的验证手段与热修手段**一并作废**（本卡已按 CMS `db.pgbouncer.*` + `pg_stat_activity` 反替换）。**改进（2026-09-29 裁定 ④ 已执行）**：`pgbouncer.stats_users` 已设为 `newapi_ops`（`ForceModify=true`、`ForceRestart=false`、`CheckingCode=.*`，实例无重启）⇒ 恢复的是 `SHOW` 类**只读**权限；托管参数集**不提供 `admin_users`**，所以 `RELOAD`/`PAUSE` 仍然拿不到，热修手段不得按有 admin 写。**登录可达性尚未实测**（要 VPC 内执行位，见步骤 5）：**实测通过之前不要把 `SHOW POOLS` 写进应急手册。**
-- 坑 3b｜**给 `stats_users` 选账号时的取舍**（本轮裁定 ④ 的实际选择依据）：实例上只有 `newapi`(DML)/`newapi_migrate`(DDL)/`newapi_sg`(备站 DML)/`newapi_ops`(Super，仅运维) 四个账号。前三个的口令**都在集群 Secret 里**（Pod 可读），把池观测权限给他们等于让工作负载能读全实例的连接/用户名/统计视图 ⇒ 选 **`newapi_ops`**（口令只存在运维侧 `~/.newapi_rds_ops_password`，不进任何 DSN）。**副作用**：观测口令与运维高权口令同一个，轮换它要连带重配本地与后续 Job 的注入，且轮换顺序仍受本卡步骤 3 第 4 条约束。
-- 坑 4｜用 `DescribeDBProxy`/`DescribeDBProxyEndpoint` 判断 PG 有没有开池 → 恒空（`DBProxyConnectStringItems=[]` / `Endpoint.NotFound`），因为那是 **PolarProxy（MySQL 产品线）** 的 API。实测据此一度得出"托管没开、仍需自建"的错误结论。**改进**：PG 池化的判据只有三件——`PGBouncerEnabled` + `pgbouncer.*` 运行参数 + 6432 连通性。
-- 坑 5｜**6432 不出现在 `DescribeDBInstanceNetInfo`**（只回两条 5432）⇒ 池端口在 API 层看不到，白名单是否覆盖、端口是否活着，都只能按连接串实测。**改进**：把"内/公网串 × 5432/6432 四格连通矩阵"作为每次网络变更后的固定回归项（本轮实测四格全 `OPEN`、握手 `exit=0`）。
-- 坑 6｜启用托管池会在 `postgres` 库安装 `pgbouncer_fdw` + `dblink`，官方口径**不可卸载**。**改进**：① 库/扩展清单与安全基线登记表要加这两项；② `dblink` 是实例内可出网的能力，纳入"内部账号权限面"复核（本方案业务不连 `postgres` 库，但白名单与账号收紧时别漏掉它）。
-- 坑 7｜`SQL_MAX_OPEN_CONNS` 用了代码默认值 1000 且主库/日志库各一次，`SQL_MAX_IDLE_CONNS` 默认又是 **100**：预算按 300 估 → 实际 16×(1000+1000)=32000，而经池时上限是 `pgbouncer.max_client_conn`（实测 **2000**）、绕过池直连时上限是 RDS `max_connections`（**800**）→ 直接 `too many clients already`，全站 5xx + **计费写入失败（资损）**。池化后 `IDLE` 那些是**客户端槽位**的长期占用者（自建时代只盯 `OPEN` 会漏算）。**改进**：DSN/env 必须显式给值——**裁定 ①（2026-09-29）：`SQL_MAX_OPEN_CONNS=100`**（主库/日志库共用这一个值，见坑 11）、`SQL_MAX_IDLE_CONNS=50`、备站 `10`/`IDLE 5`，预算表从 ConfigMap + 池参数反向生成。
-- 坑 8｜RDS `max_connections` 不可用户修改（方案 R38 说"三者对齐"，实际只能升规格）：以为调参数能救，白折腾。**改进**：预算不满足只有三条路（升规格/降 conns/提池参数），结论写回 G11 文档；**本轮已实测线上规格上限 800，200×16、300×16 一类"直连 + 只降 conns"的方案全部作废**。
-- 坑 9｜池的 TLS 与 `verify-full`：证书只能绑**一个**连接地址，本方案已选**公网串**（任务 15 路径 A，备站 `verify-full` 优先）。实测 6432 复用同一张证书，对**内网串**做主机名校验 `does NOT match` ⇒ **主站经池同样不可能 `verify-full`**。落地口径：应用→池（集群内网）`verify-ca` 或私网内关闭 TLS；池→RDS 内网串 `verify-ca`（信任链必须验，主机名不验）+ 白名单 `mnl_vpc` 兜底；备站经公网串（5432 或 6432 均可）保持 `verify-full`。若坚持内网也 `verify-full`，只有路径 B（CEN + 证书改绑内网串、备站重签）一条路，属架构级改动，需单独裁定。
-- 坑 10｜把"托管"误解成"没有单点、也不用演练回退"：池与实例同生命周期，池挂基本等于实例侧连接入口出问题，故障域仍在"全局"，只是**不再由我们部署维护**。原 F10 的"3 副本 + PDB + 跨 AZ 反亲和"这条**不要再写进上线检查表**；我们真正要练的是 **§13.4 的 DSN 端口回退（6432→5432 + 降 conns）**，且必须实测一次。
-- 坑 11｜**预算的输入项本身是假的**：方案（含任务 17 ConfigMap）一直按"主库 150 / 日志库 50"两个旋钮算，但 `LOG_SQL_MAX_OPEN_CONNS` **在代码里不存在**，主库与日志库读的是同一个 `SQL_MAX_OPEN_CONNS`（`model/main.go:211-213` 与 `:258-260`）。⇒ 日志库若为 PG，真实客户端预算是 `16×(100+100)=3200`（加备站 `24×20=480` ⇒ **3680**）；**而且没有"只降日志库"这条路**（降一个变量等于两个一起降）——这正是裁定 ① 取 100 之后 PG 分支仍不成立的原因（I-1 的 (a)(b) 处置）。**改进**：预算表只列代码真正读取的三个 env（`SQL_MAX_OPEN_CONNS`/`SQL_MAX_IDLE_CONNS`/`SQL_MAX_LIFETIME`），并且每次复算先 `grep -rn 'GetEnvOrDefault("SQL_MAX' model/main.go` 确认变量名与读取点；ConfigMap 里那行空转配置要么删掉、要么加注释（本卡已加）。
-- 坑 12｜**"日志库改 ClickHouse"会改变 PG 预算口径**：F9 之后 PG 侧只剩业务库一条池（CK 不吃 PG 连接），I-1/I-2 的数字都跟着变小；但日志库回落到 PG（CK 实例未建好前的现状！）就翻倍。**改进**：预算表按**分支**给两行（本卡 I-1 已如此），并在 CK 实例创建前后各复算一次。**当前事实：马尼拉 CK 企业版实例尚未创建（任务 9 实测 `TotalCount=0`），所以现在必须按 PG 分支兜底：裁定 ① 的 `conns=100` 下是 `16×200 + 24×20 = 3680 > 2000` ⇒ I-1 在 CK 就绪之前**不成立**（处置见 I-1 的 (a) 提前建 CK / (b) 窗口内临时 conns=45）。**
-
-**执行记录（2026-09-29 17:41，只读复核）**：`PGBouncerEnabled="true"`；16 条 `pgbouncer.*` 运行参数全部在实例上（关键值 `max_client_conn=2000`、`default_pool_size=50`、`min_pool_size=0`、`pool_mode=transaction`、`query_wait_timeout=120`、`server_idle_timeout=600`、`max_prepared_statements=200`、`ignore_startup_parameters=extra_float_digits`、`stats_users=''`（→ 见下一条已改）、`tcp_keepidle=45/keepintvl=10/keepcnt=10`、`log_*=1`），与模板默认值比对：`max_client_conn` 100→2000、`default_pool_size` 20→50，其余同默认，全部 `ForceModify=true`/`ForceRestart=false`（即可热改、不重启）。连通性四格矩阵：马尼拉 worker `10.0.43.201` → 内网串 `5432/6432` 均 `TCP=OPEN`+握手 `exit=0`；新加坡侧 → 公网串 `5432/6432` 均 `OPEN`，6432 上 `-tls1_1` 被拒、`SSLRequest` 回 `53`。PolarProxy API 空响应证据见坑 4。证据文件 `deploy/logs/task41_20260929-174109/`（`pgb_attr.json`、`proxy_desc.json`、`proxy_ep.json`、`mnl_p4_res.json`、`sg2_res.json`）+ `deploy/logs/task15_20260929-153704/final_params.json`。
-> ⚠ **本卡执行记录里的一处方法纠错**：模板默认值与 `ForceModify/ForceRestart` 必须用**实例真实版本**查——本实例实测 `Engine=PostgreSQL / EngineVersion=17.0`（`DescribeDBInstanceAttribute`），第一次查模板误填 `--EngineVersion 18.0` 也照样返回 271 条（该 API 不校验与实例是否匹配，即 §0 记录的"API 接受≠值正确"）。用 17.0 复跑后 `pgbouncer.*` 16 条的 flag 与范围全部一致，结论不变。
-
-**执行记录（2026-09-29 18:2x，裁定 ④ 的写操作，已完成）**：
-- 下发：`aliyun rds ModifyParameter --DBInstanceId pgm-5tstdhko64x2c01w --Parameters '{"pgbouncer.stats_users":"newapi_ops"}' --Forcerestart false --region ap-southeast-6` ⇒ `RequestId=01A0ECB8-09F0-3517-877F-1A8C114F2701`（先用 `--cli-dry-run` 验证过 `Parameters`/`Forcerestart` 确实进了 Query 体；`ModifyParameters` **不是合法 API**，正确名是 `ModifyParameter`）。
-- 回读（判效依据，非退出码）：`DescribeParameters → RunningParameters.pgbouncer.stats_users = newapi_ops`、`ConfigParameters.DBInstanceParameter = []`（无待生效项）；`DescribeDBInstanceAttribute → DBInstanceStatus=Running`、`PGBouncerEnabled=true` ⇒ **无重启、无闪断**。其余 15 条 `pgbouncer.*` 值未变。
-- 账号选择依据见坑 3b。**admin 库登录可达性仍未实测**（步骤 5），本次只完成"参数生效"这一半。
-- 证据文件 `deploy/logs/task41_ruling_20260929-1830/`（`modify_stats.json` 写入响应、`readback_parameters.json` 生效回读、`running_parameters.json` 16 条池参数、`describe_dbinstance_attribute.json` 实例规格/`PGBouncerEnabled`、`describe_accounts.json` 账号面、`tpl_template_engineversion_17.json` **用真实 17.0** 查的模板 flag）。落盘后已在**该目录内**扫过密钥（`BEGIN PRIVATE KEY`/`ServerKey`/`AccountPassword`/AK 前缀），仅命中 `password_encryption`、`passwordcheck` 与描述文案里的 "passwords." 三处参数名，**无凭据值**；该目录被 `.gitignore` 的 `logs` 规则排除，只作本地取证凭据。
-> **四项裁定已下（2026-09-29），本卡的未决口从"要不要做"变成"按裁定还差哪些动作"**：
-> ① `SQL_MAX_OPEN_CONNS=100`（不提 `max_client_conn`，保持 2000）⇒ **CK 分支 1840 ✅ / PG 日志分支 3680 ❌**。**当下 CK 实例未创建 ⇒ 窗口仍敞着**，剩余动作是二选一：**(a) 把任务 29 的 CK 实例创建提前**到应用首启之前（推荐，F9 主线）；**(b) 窗口内临时 `conns=45`**（`16×90+480=1920 ✅`），CK 就绪后升回 100。这一条是**任务 29/17 的排期裁定**，不是本卡的云写。
-> ② 备站走 **乙（`pub:6432` 进池）** ⇒ 剩余云写是 **`sg-sg-app` 出向 `TCP 6432`**（步骤 4 的命令），另需在任务 17/30 把备站 DSN 端口改 6432、备站 `IDLE` 补 5；`(newapi_sg,newapi)` 池的服务端上限是 50（不是 0），接管态 24 副本的排队/P99 要在任务 36/49 实测。
-> ③ `pool_mode` **维持 transaction** ⇒ "临时切 session"的退路已关闭，步骤 3 四项是**无退路的 D2 硬门槛**（代码事实已把风险面缩小：应用侧本就是 simple protocol，且无 session 级 advisory lock / LISTEN / 生产 `SET`）。
-> ④ `stats_users=newapi_ops` **已下发并回读生效**（无重启）；**剩余动作＝实测 admin 库能否登录**（VPC 内执行位 + Secret 注入，禁止明文 `RunCommand`），实测前不得把 `SHOW POOLS` 写进应急手册。
-> **自建部署动作已全部删除，本卡不再有任何"起服务/挂 Secret/建 PDB"步骤。**
+- 坑 1（最隐蔽）｜transaction 模式下会话级状态泄漏：`SET`/`SET LOCAL`、prepared statements、advisory lock、`LISTEN/NOTIFY`、跨语句事务都会出错（方案 §7.4.5.4"兼容性红线"）。**后果**：计费/余额相关的偶发、不可复现错误——比宕机更可怕，因为它悄悄改数据。**改进**：① 默认 `pool_mode=session`（牺牲收敛保正确）；② 只有跑完**经池的三数据库矩阵 + 余额对账压测**后才允许切 transaction；③ 写进上线检查表（§14）。
+- 坑 2｜PgBouncer 是新增全站单点（方案 R21）：池挂 = 所有副本连不上库 = 整站不可用，故障域从"节点级"放大到"全局"。**改进**：3 副本 + PDB + 反亲和；应用侧重连 + `RetryTimes`；预置"回退直连 DSN"应急开关并演练（§13.4）。
+- 坑 3｜`SQL_MAX_OPEN_CONNS` 用了代码默认值 1000 且主库/日志库各一次：预算按 300 估 → 实际 16×(1000+1000)=32000，而 RDS 上限只有 **800** → 直接 `too many clients already`，全站 5xx + **计费写入失败（资损）**。**改进**：DSN/env 必须显式给值（本方案主站 150/日志 50、备站 10），预算表从 ConfigMap 反向生成。
+- 坑 4｜RDS `max_connections` 不可用户修改（方案 R38 说"三者对齐"，实际只能升规格）：以为调参数能救，白折腾。**改进**：预算不满足只有三条路（升规格/降 conns/加池），结论写回 G11 文档；**本轮已实测线上规格上限 800，200×16、300×16 一类"直连 + 只降 conns"的方案全部作废**。
+- 坑 5｜池的 TLS 与 `verify-full` 冲突：**已定自建（F10），采用分层策略**——应用→池为集群内网，可 `verify-ca` 或在私网内关闭 TLS；池→RDS 走内网地址 `verify-full`（证书绑定**内网连接地址**）。新加坡备站→RDS 公网直连仍 `verify-full`（证书绑公网地址，见任务 15 路径 A）。
 
 ### Day 1 · 任务 29｜新加坡本地 Tair（日志库并入马尼拉 CK 企业版）（单人，2 人时，S5）
 
-**前置/状态**：前移自原 D4。新加坡 VPC `vpc-t4nimmwvruexbnene0a3r`。**付费方式 = 包年包月（`ChargeType: PrePaid`，2026-09-28 修订）**。Tair 配额复查用带 `--Dimensions.1.Key regionId --Dimensions.1.Value ap-southeast-1` 的配额命令（状态 `Agree`）。**日志库按任务 9 修订决策（F9）= 马尼拉云数据库 ClickHouse 企业版（单 AZ），本卡不再购买新加坡 CK**；新加坡侧只留本地 Tair。**禁止跨区用马尼拉 Tair**（缓存 RTT 放大，限流窗口失真）。
+**前置/状态**：前移自原 D4。新加坡 VPC `vpc-t4nimmwvruexbnene0a3r`。Tair 配额复查用带 `--Dimensions.1.Key regionId --Dimensions.1.Value ap-southeast-1` 的配额命令（状态 `Agree`）。**日志库按任务 9 修订决策（F9）= 马尼拉云数据库 ClickHouse 企业版（单 AZ），本卡不再购买新加坡 CK**；新加坡侧只留本地 Tair。**禁止跨区用马尼拉 Tair**（缓存 RTT 放大，限流窗口失真）。
 
 **操作步骤（CLI-first）**：
 
 ```bash
-# 1. 新加坡 Tair 主备 4GB（同任务 7 流程，换 region/VPC；**付费方式 = 包年包月 1 年**，2026-09-28 修订）
+# 1. 新加坡 Tair 主备 4GB（同任务 7 流程，换 region/VPC）
 aliyun r-kvstore CreateInstance --RegionId ap-southeast-1 --ZoneId ap-southeast-1a \
   --SecondaryZoneId ap-southeast-1b --VPCId vpc-t4nimmwvruexbnene0a3r \
   --VSwitchId <vsw-sg-data ID> --NetworkType VPC --InstanceClass <4GB规格码> \
-  --Password ${TAIR_SG_PW} --InstanceName tair-sg-newapi \
-  --ChargeType PrePaid --Period 12 --AutoRenew true --AutoRenewPeriod 1
+  --Password ${TAIR_SG_PW} --InstanceName tair-sg-newapi
 aliyun r-kvstore ModifyInstanceParameter --InstanceId ${TAIR_SG_ID} \
   --Parameters '{"#no_loose_maxmemory-policy":"allkeys-lru"}'
 # 2. 日志库不再在新加坡购买 CK（F9 修订）：马尼拉企业版单 AZ 实例在任务 9 落地要点基础上于本卡创建——
@@ -1960,7 +1527,7 @@ aliyun r-kvstore DescribeInstanceAttribute --InstanceId ${TAIR_SG_ID} \
 
 ### Day 1 · 任务 30｜备 region → 马尼拉 RDS 公网读写打通与 RTT 实测（单人，2 人时，S5）
 
-**前置/状态**：前移自原 D7，作为 Day2 备集群前置。任务 15（公网 + SSL + 白名单）与任务 13（`newapi_sg` 账号）已完成；新加坡侧备站占位 Deployment 已可 exec。连接串 `${RDS_MNL_PUB}`，TLS 全链 `sslmode=verify-full`（路径 A 时证书绑公网串）。**2026-09-29 修订（F10 撤销，见任务 41）：原结论"备站必须直连公网、不经池"不再成立**——托管池在**公网串上也监听 6432**，且证书与 5432 同一张（CN=公网串），备站走 `verify-full` 时两条路都可用。**本卡按 乙（`pub:6432` 经池）执行——2026-09-29 裁定 ②**；原写法"本卡按甲（`pub:5432` 直连）"作废。口径变化：备站的服务端占用从甲的 `24×10=240`（随副本数线性）**变成 `(newapi_sg,newapi)` 池的 `default_pool_size=50` 封顶**（与副本数无关），客户端槽位则计入任务 41 的 I-1（`24×10=240`，接管态口径）。**乙 带来的两个必做动作**：① `sg-sg-app` 出向补 `TCP 6432`（任务 41 步骤 4 的命令，属云写）；② 本卡 DSN 端口改 6432、备站 `SQL_MAX_IDLE_CONNS` 显式给 `5`。`verify-full` 在乙路上**依然成立**（6432 与 5432 同一张证书，CN=公网串）。⚠ 备站 24 副本共享 50 条 server 连接，跨区 RTT + 池内排队会放大 P99，必须在任务 36/49 的接管与预热里实测这条路，不能只验主站。
+**前置/状态**：前移自原 D7，作为 Day2 备集群前置。任务 15（公网 + SSL + 白名单）与任务 13（`newapi_sg` 账号）已完成；新加坡侧备站占位 Deployment 已可 exec。连接串 `${RDS_MNL_PUB}`，TLS 全链 `sslmode=verify-full`（路径 A 时证书绑公网串）。**v2.0 已定（F10）：备站直连 RDS 公网，不经过自建 PgBouncer**（池只在马尼拉集群内生效）；其服务端连接已按 800 上限计入任务 41 的 I-2 预算。
 
 **操作步骤（CLI-first，含 RTT/TPS 测量）**：
 
@@ -2006,7 +1573,7 @@ kubectl --context sg exec deploy/new-api-ph-standby -- sh -c \
   "psql \"\$SQL_DSN\" -Atc \"select note,ts from ops_drill_marker order by id desc limit 1\""   # 期望 from-mnl
 # V3 连接数在预算内
 psql "$DSN_MIGRATE" -c "select usename,state,count(*) from pg_stat_activity group by 1,2 order by 3 desc"
-# newapi_sg 总数 ≤ 10 × 备站实际副本数（客户端槽位，计入任务 41 I-1）；服务端侧看 (newapi_sg,newapi) 池 ≤ default_pool_size 50
+# newapi_sg 总数 ≤ 150 × 备站实际副本数，且 ≤ 预算 I-2
 # V4 链路抖动时的应用行为（拔线测试）：临时把白名单里一个 EIP 移除
 # → 观察是否有请求超时/5xx 上升，恢复后是否自愈
 ```
@@ -2026,13 +1593,13 @@ psql "$DSN_MIGRATE" -c "select usename,state,count(*) from pg_stat_activity grou
 ### Day 1 · 泳道 B 出口检查清单
 
 - [ ] RDS 实例 `Category=HighAvailability`、主备 6a/6b，`select version()` 实测版本已回填方案表（任务 4）。
-- [ ] 四账号权限边界实测通过（任务 13 坑 13；~~DMS 内~~主站不可用，实际在**同 VPC 临时跳板 ECS** 上以 `newapi_ops` 连接后 `SET ROLE` 逐账号探测）：`newapi_ops`=Super 且不进任何 DSN、`newapi` 建表被拒、`newapi_migrate` 可 DDL、`newapi_sg` 建表被拒 —— **这四项目 2026-09-29 已全部实测通过**（含 `pg_default_acl` 回读与 `_adp_probe` 端到端 DML 传播）。本出口仍待：`newapi_sg` 在**真实业务表**上的 DML 项、AutoMigrate 冒烟、白名单收窄后的贴组截图。⚠ 跳板机与临时安全组已回收，后续 SQL 改走 **`ack-newapi-mnl` 集群内一次性 Job**（13:3x 复核：集群与 4 台 worker 已在跑，节点 IP 落在白名单网段内，先测 Pod→`5432` 连通再排 AutoMigrate 冒烟）；库级 CONNECT 因坑 14 收不紧，**已于 2026-09-29 裁定接受现状**（白名单+口令+KMS 兜底），不再列为待办。
-- [ ] 备份策略（任务 14）：**策略五项与手动备份链路已于 2026-09-29 实测通过** —— `BackupRetentionPeriod=7`、`EnableBackupLog=1`、`LogBackupRetentionPeriod=7`、全周、窗口 `18:00Z-19:00Z`（= 马尼拉 02:00–03:00，与任务 50 的"凌晨 2–4 点"口径一致）；`CreateBackup` → `BackupId=502518000` `Success`，快照全量实测 **2 分 36 秒**；PITR 判据已 API 化，`DescribeLocalAvailableRecoveryTime` 回连续区间 `2026-09-28T15:11:49Z →`（右端随时刻推进）。**本出口仍未闭合的两点**：① "区间长度 ≥ 7 天"要到 D7 才可能成立，是周期复核项（任务 14 坑 6）；② **跨地域备份"支持但未开启"**（`DescribeAvailableCrossRegion` 含 `ap-southeast-1`，`DescribeInstanceCrossBackupPolicy` 空返回），三选一路线（RDS 托管侧 / DBS / `pg_dump`→OSS+CRR）**尚未裁定记录**，且该选择与任务 15 的 `pg_dump` 落点是同一个未决口（任务 14 坑 5）。
+- [ ] 三账号权限边界实测通过：`newapi` 建表被拒、`newapi_migrate` 可 DDL、`newapi_sg` 可 DML；AutoMigrate 冒烟已过；白名单命名组已配且贴组截图（任务 13）。
+- [ ] `DescribeBackupPolicy` 显示 `EnableBackupLog=1` 且 `BackupRetentionPeriod>=7`；备份恢复页可见可选时间点；跨地域备份结论已【控制台核实】并记录三选一路线（任务 14）。
 - [ ] Tair `config get maxmemory-policy` = `allkeys-lru`，危险命令已禁用，`mnl_app` 白名单生效；G8 Redis 降级放行已合入（任务 7）。
 - [ ] OSS 复核：ZRS + 私有 + 版本控制；三条生命周期规则 `backup-data-tiering`/`backup-audit-tiering`/`backup-cleanup` 在位；CRR 到 `oss-newapi-backup-sgp` 状态正常；内网 Endpoint 返回 403（任务 8）。
 - [ ] 日志库决策记录在案：马尼拉 CK 不可购（截图第 14 项）、选方案 A、账类数据不入 CK、主库不支持 CK（`model/main.go:145`）已写入设计文档（任务 9）。
-- [ ] 公网地址已申请且**永不释放**；证书 CN/SAN 含 `${RDS_MNL_PUB}`；白名单三层（`sg_standby_eip` 4×/32、default 不可命中、`mnl_vpc`）复核 CIDR 掩码；V1–V4 全通过（任务 15）。**2026-09-29 本项已实测闭合**：公网串 `pgm-5tstdhko64x2c01wpub.pgsql.ap-southeast-6.rds.aliyuncs.com`/`43.118.96.65`，证书 CN+SAN 绑该串（有效至 2027-09-29），三层白名单回读全等且 `hdm_security_ips` 未被覆盖，V1/V2/V3/V4（`TLSv1.2` 下限）+ V5 自伤检查全通过。**仍需盯的两点**：① `psql sslmode=verify-full` 端到端要等应用/PgBouncer 起来后复验（本次是协议层等价证据）；② 备站 SNAT EIP 轮换已实测（同节点先后命中两个不同 EIP），四个 `/32` 一个都不能少，§11.3 的"EIP 变更审批 + 失败率告警"必须落。
-- [ ] 三不变量 I-1/I-2/I-3 用 ConfigMap 真实值（非默认 1000/100）与**托管池实测参数**（`max_client_conn 2000`/`default_pool_size 50`）计算成立——**2026-09-29 四项裁定后复算**：I-1 在 **CK 日志库分支成立**（`16×100 + 24×10 = 1840 ≤ 2000`，余量仅 160）、在 **PG 日志库分支仍不成立**（`16×200 + 24×20 = 3680 > 2000`），而 **CK 实例尚未创建 ⇒ 当下按 PG 分支**；出口动作是"CK 实例提前到应用首启之前"或"窗口内临时 `SQL_MAX_OPEN_CONNS=45`"（任务 41 步骤 2 的 (a)/(b)），二选一必须在本项销账；I-2 按乙重算 ≈170（PG）/120（CK）`≤ 640` ✅；I-3 迁移走内网 5432 直连 + 应急开关"DSN 端口退回 5432 **且** conns 降到 ≤40（CK）/≤20（PG）"演练过（任务 41）。观测走 CMS `db.pgbouncer.*` + `pg_stat_activity`（`stats_users=newapi_ops` 已生效，但 admin 库登录**尚未实测** ⇒ `SHOW POOLS` 不得写进应急手册）；经池的 transaction 模式四项兼容性子集已跑（**裁定 ③：`pool_mode` 维持 transaction ⇒ 本项无退路，未全过不得切流**；任务 43 只跑子集，全量矩阵顺延 T+14）。
+- [ ] 公网地址已申请且**永不释放**；证书 CN/SAN 含 `${RDS_MNL_PUB}`；白名单三层（`sg_standby_eip` 4×/32、default 不可命中、`mnl_vpc`）复核 CIDR 掩码；V1–V4 全通过（任务 15）。
+- [ ] 三不变量 I-1/I-2/I-3 用 ConfigMap 真实值（非默认 1000）计算成立；`SHOW POOLS`/`pg_stat_activity` 达标；master 直连路径与回退直连应急开关演练过（任务 41）。
 - [ ] 新加坡 Tair `allkeys-lru` 生效、备站限流出现足量 429、`LOG_SQL_DSN` 指向本地日志库（任务 29）。
 - [ ] SG→MNL RTT ≤ 45ms、pgbench 单连接 TPS ≥ 20、TLS 握手成功率 100%、建连平均 ≤ 200ms；V1–V3 通过，V4 拔线自愈；实测值已回填接管 SLA 口径表（任务 30）。
 - [ ] 所有新增 Secret 均已入 KMS 凭据管家并经 ExternalSecret 注入，仓库/CI/ConfigMap 明文中无任何密码或完整 DSN。
@@ -2040,87 +1607,31 @@ psql "$DSN_MIGRATE" -c "select usename,state,count(*) from pg_stat_activity grou
 
 > 本泳道目标：两集群（马尼拉主 + 新加坡备）建成并配好自动伸缩，密钥链路（访问控制 RAM RRSA → 密钥管理服务（凭据管家）→ ExternalSecret）打通，Namespace/ConfigMap/Secret 落地，master AutoMigrate 幂等验证通过，迁移版本化基线建立，运维访问面收敛到私网 + 临时 kubeconfig。
 > 基线参数（v2 实测修订）：K8s 1.35，CNI=Terway（建簇后不可换）；马尼拉 VPC `vpc-5tst1tgeessxn1azwasg2`（节点池落 app-a `10.0.16.0/20` / app-b `10.0.32.0/20`），新加坡 VPC `vpc-t4nimmwvruexbnene0a3r`；镜像前缀 `${ACR_MNL_PREFIX}`（马尼拉 VPC 内）/ `${ACR_PUB_PREFIX}`（公网，新加坡跨区拉取用），见任务 16 基线表；Service CIDR `172.21.0.0/20`（不得与 VPC/云企业网/办公网重叠，不可改）。
-> **Day 2 第一阻塞风险**：节点池机型验证（任务 11 Step 1）必须开工第一件事执行——实测 `ecs.g8i` 全系未在马尼拉上架（2026-09-25），首选 `ecs.g9i.2xlarge`（8C32G），备选 `ecs.g8ine.2xlarge`。ECS vCPU 配额：**包年包月 `q_ecs_enterprise_prepay_c` 马尼拉 100 / 新加坡 100（2026-09-28 实测，付费方式修订后以此为核量口径）**；按量口径 `postpay_c` = 马尼拉 64（8 节点×8C）、新加坡 96（12 节点×8C），工单状态 `Agree`，仅作对照。
-> **Day 2 付费方式（2026-09-28 修订）**：ECS 节点池（任务 11/24）= **包年包月 1 年**（`instance_charge_type: PrePaid` + `period_unit: Month`/`period: 12` + `auto_renew: true`）；ACK 集群管理费**不支持包年包月**，用 **ACK 资源包**抵扣（任务 10）。**节点池付费类型决定后续扩容实例的计费方式 → HPA 扩容即预付、缩容不退款（任务 11 坑 7）。**
+> **Day 2 第一阻塞风险**：节点池机型验证（任务 11 Step 1）必须开工第一件事执行——实测 `ecs.g8i` 全系未在马尼拉上架（2026-09-25），首选 `ecs.g9i.2xlarge`（8C32G），备选 `ecs.g8ine.2xlarge`。ECS vCPU 配额已批（工单状态 `Agree`）：马尼拉 50→64（8 节点×8C）、新加坡 50→96（12 节点×8C）。
 
-### Day 2 · 任务 10｜ACK Pro 马尼拉集群（单人，2 人时，09:00–11:00）✅ 已完成，勿重做
+### Day 2 · 任务 10｜ACK Pro 马尼拉集群（单人，2 人时，09:00–11:00）
 
-**前置/状态**：马尼拉 VPC/vSwitch 已建成（网络窗，6 个 vSwitch ID 已实测固化）；机型验证（任务 11 Step 1）**先于本卡执行**（单人口径不并行，且建节点池前必须出结果）。专有版（Dedicated）已停售，只建 ACK 托管版 Pro（`ack.pro.small`）。
-
-> ⚠️ **SLA 口径更正（2026-09-29 实测 + SLA 原文）**：ACK SLA（版本生效日期 **2023-04-01**）§1.4/§1.5 把
-> 「**区域级集群 regional**」定义为*地域 AZ 数 **≥3***，「**可用区级集群 zonal**」定义为*AZ 数 **≤2*** ——
-> **这是地域属性，不是建簇时可选的形态**。马尼拉 `ap-southeast-6` 只有 **6a / 6b 两个 AZ**，
-> 故本集群在 SLA 定义上**就是 zonal**，控制面承诺 **99.50%**（月不可用上限 ≈3.6 h），
-> **无法通过任何创建选项提升到 99.95%**。
-> 另：ACK 控制面**不在** §8.2 的五项串联链（`0.9999^5 ≈ 0.99950`）之内，8.2 推导链**不受影响** ——
-> 原「选错形态会让 8.2 从根上错」的说法系**双重误判，已作废**。
-> 影响与对冲：控制面不可用**不影响已运行 Pod**（数据面继续服务），但**部署 / 扩缩容 / HPA 扩节点会停摆**；
-> 对冲 = 冻结期内不依赖临时扩缩容 + 常态已含 4+2 节点弹性余量。
-
-**账号级前置（实测新增）**：须先开通容器服务，否则 `CreateCluster` 报 `ErrorNotEnabled: please enable cskpro container service`：
-```bash
-aliyun cs OpenAckService --type propayasgo   # propayasgo=ACK 托管/专有/Serverless；edgepayasgo=边缘
-```
-**⛔ 2026-09-28 状态（历史，已解除）**：该调用曾被账号风控拦截（`RISK.RISK_CONTROL_REJECTION`），任务 10/11 暂停。**2026-09-29 已解除**——重跑返回 `ORDER.OPEND`（服务已开通态），任务 10 已完成，见下方 ✅ 块。
-
-**✅ 已落地（2026-09-29 11:57，任务 10 完成）** — 集群 `cd57e40ce9a634c1698c2f5c5e09bd93c`，`state=running`，创建耗时 **3 分 39 秒**
-
-| 项 | 实测值 |
-|---|---|
-| cluster_id | `cd57e40ce9a634c1698c2f5c5e09bd93c` |
-| 规格 / 版本 | `ack.pro.small` / `1.35.7-aliyun.1` |
-| 资源组 | `rg-aek4nyivmmsb6iy`（rg-ph-mnl）✅ |
-| CNI / ProxyMode | `terway-eniip` v1.17.7 / `ipvs` |
-| 私网端点 | `https://10.0.22.182:6443`（**公网端点未开**，`PublicSLB=false`） |
-| RRSA | `enabled=true`；`oidc_arn=acs:ram::5108890064395960:oidc-provider/ack-rrsa-cd57e40ce9a634c1698c2f5c5e09bd93c` |
-| 自动升级 / 维护窗口 | `stable` 通道已开 / 周二 `03:00–06:00`（Asia/Manila） |
-| vSwitch 基线 | app-a free=**4090** · app-b free=**4091**（Terway 每 Pod 占真实 IP） |
-
-终验 **28/28 PASS**；完整字段、RRSA 参数、依赖资源清单 → **`deploy/ack_ledger.md`**；原始证据 `deploy/logs/task10_20260929-115336/`。
-账号级前置 `OpenAckService --type propayasgo` 幂等重跑返回 **`ORDER.OPEND`**（服务已开通态）—— **2026-09-28 的账号风控已解除**。
-**已解除**：`kubectl get ns`（实测 6 个 namespace）、Terway CRD（`network.alibabacloud.com` 已注册）、kubeconfig 拉取均已可执行 —— **云助手可直连私网节点，不必等任务 46（堡垒机）**；集群 admin kubeconfig 取得方式见 `deploy/nodepool_ledger.md` §8.2。8 EIP 出口复验 / Tair 连通性待验证（节点池已就绪，任务 11 已闭合）。
+**前置/状态**：马尼拉 VPC/vSwitch 已建成（网络窗）；机型验证（任务 11 Step 1）**先于本卡执行**（单人口径不并行，且建节点池前必须出结果）。专有版（Dedicated）已停售，只建 ACK 托管版 Pro（`ack.pro.small`，**多可用区 regional 控制面**，否则 SLA 只有 99.50% 而非 99.95%，方案 8.2 推导链从根上错）。
 
 **操作步骤（CLI-first）**
-
-> **付费方式（2026-09-28 修订：全面包年包月口径）**
-> - **节点（ECS）= 包年包月** —— 在任务 11 / 任务 24 的节点池 `instance_charge_type:"PrePaid"` 落地（`period_unit:"Month", period:12` = 包 1 年，`auto_renew:true` 必开，否则到期释放 = 集群掉节点）。**节点池的付费类型决定后续扩容实例的计费方式**。
-> - **集群管理费无法包年包月** —— 官方口径：ACK 托管集群 Pro 版的**集群管理费用默认按量付费，不支持转为包年包月**（计费周期 1 小时，账单项 `ACK Pro 定价`，公共云约 0.09 USD/集群/小时，以购买页为准）。**等价预付费手段 = 购买 ACK 资源包**：小型 720 集群小时 / 大型 8,640 集群小时，按小时自动抵扣，额度用尽或过期后回落按量。故 body 里 `charge_type` 保持 `PostPaid`，并在 G0 采购清单加一条"ACK 资源包（马尼拉 + 新加坡两集群：常态 2 集群 × 720 h/月 → **小型包按 360 h/月/集群 消耗，1 年有效期约够 12 个月 ×2 集群的 30 天额度**，落地时按实际集群数取整）"。
-> - **关联云产品**（NAT / ALB / EIP / SLS）各自独立计费，不在本卡范围。
 
 1. 渲染建簇 body 并创建（关键项全部显式写死，杜绝控制台默认值坑）：
 
 ```bash
-# 0. 账号级前置（一次性；未开通时 CreateCluster 报 ErrorNotEnabled: please enable cskpro）
-aliyun cs OpenAckService --type propayasgo
-# 1. 渲染建簇 body（关键字全部显式写死）
 cat <<'EOF' > create-cluster-mnl.json
 {"name":"ack-newapi-mnl","cluster_spec":"ack.pro.small","region_id":"ap-southeast-6",
- "kubernetes_version":"1.35.7-aliyun.1",
- "resource_group_id":"rg-aek4nyivmmsb6iy","charge_type":"PostPaid",
+ "kubernetes_version":"1.35.0-aliyun.1",
  "vpcid":"vpc-5tst1tgeessxn1azwasg2","vswitch_ids":["${VSW_MNL_APP_A}","${VSW_MNL_APP_B}"],
- "pod_vswitch_ids":["${VSW_MNL_APP_A}","${VSW_MNL_APP_B}"],
  "service_cidr":"172.21.0.0/20","network":"terway-eniip",
  "snat_entry":false,"endpoint_public_access":false,"deletion_protection":true,
- "rrsa_config":{"enabled":true},"timezone":"Asia/Manila","proxy_mode":"ipvs",
- "charge_type":"PostPaid",
- "addons":[{"name":"terway-controlplane","config":"{\"ENITrunking\":\"false\"}"},
-           {"name":"terway-eniip"},{"name":"csi-plugin"},{"name":"csi-provisioner"},
+ "enabled_rrsa":true,"enable_audit":true,"timezone":"Asia/Manila","proxy_mode":"ipvs",
+ "addons":[{"name":"terway-eniip"},{"name":"csi-plugin"},{"name":"csi-provisioner"},
            {"name":"ack-pod-identity-webhook"},{"name":"alb-ingress-controller"},
            {"name":"managed-coredns"},{"name":"arms-prometheus"},{"name":"logtail-ds"}]}
 EOF
 envsubst < create-cluster-mnl.json > create-cluster-mnl.rendered.json
-aliyun cs CreateCluster --body "$(cat create-cluster-mnl.rendered.json)"
+aliyun cs CreateCluster --header "Content-Type=application/json" --body "$(cat create-cluster-mnl.rendered.json)"
 ```
-
-> **⚠️ 六处与文档原文的实测偏差（2026-09-28，DryRun/实调验证）**：
-> 1. **`kubernetes_version` 不存在**：`1.35.0-aliyun.1` 查无此版本。马尼拉可售为 **1.34.10 / 1.35.7 / 1.36.2**（`DescribeKubernetesVersionMetadata --Region ap-southeast-6 --ClusterType ManagedKubernetes`，注意参数是 `--Region` 不是 `--RegionId`）。
-> 2. **缺 `cluster_type`**：官方标注 **required**（`ManagedKubernetes`），漏写会落到已停售的专有版。
-> 3. **缺 `profile`**：托管集群需 `"Default"`。
-> 4. **缺 `pod_vswitch_ids`**：Terway 模式**必需**，漏写报 `MissingPodVswitchIds: PodVswitchIds is empty`。
-> 5. **`network` 字段不在官方示例中**：网络类型改由 addons 的 `terway-controlplane` + `terway-eniip` 指定；`enabled_rrsa` 已废弃 → `rrsa_config:{"enabled":true}`；`enable_audit` 需配 `audit_log_config.sls_project_name`，首建先不带。
-> 6. **账号级前置未写**：须先 `OpenAckService --type propayasgo` 开通容器服务。
->
-> **⛔ 当前阻塞（2026-09-28）→ ✅ 已解除（2026-09-29）**：`OpenAckService` 当时返回 `RISK.RISK_CONTROL_REJECTION`（"your order is suspended"）—— 账号风控拦截，与可用余额 **0.00 USD** 高度相关。**现已解除**：`OpenAckService` 幂等重跑返回 `ORDER.OPEND`，`CreateCluster` 正常返回 `cluster_id`，任务 10 已完成（集群 `cd57e40ce9a634c1698c2f5c5e09bd93c`）。
 
 期望输出：
 
@@ -2167,7 +1678,7 @@ aliyun vpc DescribeVSwitchAttributes --VSwitchId $VSW_MNL_APP_A | jq .AvailableI
 **不通过时修复**
 
 - 现象：`state=failed` → 诊断：`aliyun cs DescribeClusterEvents --ClusterId $ID_MNL` 看最后失败步骤（常见为 vSwitch IP 不足或 RAM 授权缺失）→ 修复：补齐服务授权角色后删除重建集群（Pro 托管版建失败一般无法原地续跑）。
-- 现象：`rrsa_config.enabled=false` → 诊断：body 漏写 `rrsa_config:{"enabled":true}`（旧字段 `enabled_rrsa` 已废弃，写了不生效）→ 修复：集群详情 →【控制台】安全与审计 → RRSA OIDC 开启，等 IdP `ack-rrsa-<cluster_id>` 自动创建完成。
+- 现象：`rrsa_config.enabled=false` → 诊断：body 漏写 `enabled_rrsa` → 修复：集群详情 →【控制台】安全与审计 → RRSA OIDC 开启，等 IdP `ack-rrsa-<cluster_id>` 自动创建完成。
 - 现象：kubectl 连不上 → 诊断：`endpoint_public_access:false` 下从集群 VPC 外执行属预期 → 修复：改在堡垒机（任务 46）上执行，勿为图快临时开公网端点放行 0.0.0.0/0。
 
 **坑**
@@ -2175,13 +1686,11 @@ aliyun vpc DescribeVSwitchAttributes --VSwitchId $VSW_MNL_APP_A | jq .AvailableI
 - 坑 1｜CNI 选错不可回退：选 Flannel 永远没有 Pod 级安全组，`sg-mnl-app` 只允许 ALB 访问 3000 的设计落不了地 → 现象：后期只能退化 NetworkPolicy → 后果：安全组设计作废 → 改进：创建页截图存档 + 评审签字（见上图占位）。
 - 坑 2｜Service CIDR 与对端重叠：接云企业网/VPN 时路由进不来或回程丢包，且不可修改只能重建 → 改进：现在就确认办公网/未来 CEN 不占 `172.21.0.0/20`。
 - 坑 3｜Pod vSwitch 地址容量：Terway 下每个 Pod IP 消耗真实 VPC 地址，交换机耗尽 → 新 Pod 永久 `ContainerCreating` 报 `no available ip addresses`，HPA 全线失效 → 改进：建簇后立即记录 `AvailableIpAddressCount` 基线，每里程碑复核。
-- 坑 4｜**误信「选 regional 就能拿 99.95%」**：ACK SLA（2023-04-01）§1.4/§1.5 判 regional/zonal 的依据是**地域 AZ 数**（≥3 / ≤2），**马尼拉只有 2 个 AZ → 永远 zonal、承诺 99.50%**，**没有可选的「regional 形态」**。→ 后果：以为能拿到 99.95% 而放松控制面可观测与应急处置。→ 改进：① 接受 **99.50%** 为控制面基线并**书面记录**（业务 SLO 99.95% 由三源外部拨测度量，**不含**控制面）；② 控制面停摆不影响已跑 Pod，但**部署/扩缩容/HPA 会停**，冻结期内不得依赖临时扩缩容；③ 落实自动升级通道 + 维护窗口（本卡步骤 5 已配 `stable` / 周二 03:00–06:00）。
-- 坑 5｜**漏写 `resource_group_id` → 集群静默落到 default 组，且 ACK 集群不支持资源组迁移**（`MoveResources` → `UnsupportedOperation.MoveResources`，`Service=cs|ack` × `ResourceType=cluster|Cluster` 四组合全拒），唯一解法是关删除保护后**删除重建**。→ 现象：**无任何报错**，`resource_group_id=rg-acfnssmgwnsb5oa`；→ 后果：违反铁律「默认组禁放 new-api 资源」；→ 改进：body 显式写 `resource_group_id` + **终验加资源组断言**（本次实测已踩中：`ca9dc…` 落 default → 删除 → `cd57e40c…` 带 RG 重建）。
-- 坑 6｜**删集群 ≠ 清干净；带对 RG 重建才会连带继承**：ACK 自动建的**内网 SLB**（名 `ManagedK8SSlbIntranet-<cluster_id>`，**是 SLB 不是 ALB**，`aliyun slb DescribeLoadBalancers` 才查得到）、**集群安全组**、**SLS 审计项目** 都是独立资源。带对 RG 重建时三者**自动继承集群 RG**（实测三项全落 `rg-ph-mnl` ✅）；而 `DeleteCluster` **不会**删除 SLS 项目 `k8s-log-<old-cid>`，会残留在 default，须手工 `aliyun sls DeleteProject --project <name> --region <region>`。
+- 坑 4｜控制面形态选成 zonal：SLA 只有 99.50% → 后果：SLA 推导链从根上错 → 改进：确认 regional 多可用区控制面。
 
-### Day 2 · 任务 11｜马尼拉 ECS 节点池：4×g9i.2xlarge 跨 2 可用区 + nofile 调优（单人，4 人时，09:00 验证机型 / 11:00–14:00 建池）✅ 已完成，勿重做
+### Day 2 · 任务 11｜马尼拉 ECS 节点池：4×g9i.2xlarge 跨 2 可用区 + nofile 调优（单人，4 人时，09:00 验证机型 / 11:00–14:00 建池）
 
-**前置/状态**：任务 10 集群 running。**开工第一件事（Day 2 第一阻塞风险）= 机型可用性验证**，v2 实测已确认 `g8i` 全系未在马尼拉上架（2026-09-25），本卡机型基线已改为 `ecs.g9i.2xlarge`（8C32G），备选 `g8ine.2xlarge`；建池前复核配额。**付费方式 = 包年包月（`instance_charge_type:"PrePaid"`，2026-09-28 修订）** → 配额口径随之从按量（`q_ecs_enterprise_postpay_c`）改为**包年包月（`q_ecs_enterprise_prepay_c`）**：马尼拉 100 / 新加坡 100（2026-09-28 API 实测，与 vCPU 需求 64/96 对齐）。
+**前置/状态**：任务 10 集群 running。**开工第一件事（Day 2 第一阻塞风险）= 机型可用性验证**，v2 实测已确认 `g8i` 全系未在马尼拉上架（2026-09-25），本卡机型基线已改为 `ecs.g9i.2xlarge`（8C32G），备选 `g8ine.2xlarge`；配额 50→64 已批复（状态 `Agree`），建池前仍需复核。
 
 **操作步骤（CLI-first）**
 
@@ -2189,7 +1698,7 @@ aliyun vpc DescribeVSwitchAttributes --VSwitchId $VSW_MNL_APP_A | jq .AvailableI
 
 ```bash
 aliyun ecs DescribeAvailableResource --RegionId ap-southeast-6 --DestinationResource InstanceType \
-  --InstanceChargeType PrePaid --IoOptimized optimized --NetworkCategory vpc --ResourceType instance \
+  --InstanceChargeType PostPaid --IoOptimized optimized --NetworkCategory vpc --ResourceType instance \
   | jq -r '.AvailableZones.AvailableZone[] | .ZoneId as $z | .AvailableResources.AvailableResource[] \
            | .SupportedResources.SupportedResource[] | select(.Status=="Available") | [$z,.Value] | @tsv' \
   | grep -E "g9i|g8ine|g9ae|u2i|c9i" | sort
@@ -2198,49 +1707,32 @@ aliyun ecs DescribeAvailableResource --RegionId ap-southeast-6 --DestinationReso
 aliyun quotas ListProductQuotas --ProductCode ecs-spec --QuotaCategory CommonQuota \
   --Dimensions.1.Key regionId --Dimensions.1.Value ap-southeast-6 \
   | jq -r '.Quotas[]|[.QuotaActionCode,(.TotalQuota|tostring)]|@tsv' | grep enterprise
-# 期望：q_ecs_enterprise_prepay_c=100（马尼拉包年包月 vCPU 上限，2026-09-28 实测；按量口径 q_ecs_enterprise_postpay_c=64 仅作对照）
-# 工单状态复核见 §0.6 命令块的 ListQuotaApplications
+# 期望：q_ecs_enterprise_postpay_c=64（马尼拉 vCPU）；工单状态复核见 §0.6 命令块的 ListQuotaApplications
 # 注意：配额 API 必须带 --Dimensions.1.Key regionId；Agree 状态只在 ListQuotaApplications 返回（非 Approved）；申请参数拼写为 --DesireValue
 ```
 
 从输出挑 ≥3 个可用机型写进 `instance_types`（顺序即优先级），**不要坚持改配置单找回 g8i**。
-> **包年包月务必用 `--InstanceChargeType PrePaid` 查库存** —— 包年包月与按量的可售池不共享，用 `PostPaid` 查出来的结果不能证明包年包月有货。
 
-2. 创建节点池（差异于新加坡：desired/min 4、max 8、site=ph-mnl、**包年包月 1 年**）：
+2. 创建节点池（差异于新加坡：desired/min 4、max 8、site=ph-mnl）：
 
 ```bash
 cat <<'EOF' > nodepool-mnl.json
-{"nodepool_info":{"name":"np-mnl-app","type":"ess","resource_group_id":"rg-aek4nyivmmsb6iy"},
+{"nodepool_info":{"name":"np-mnl-app"},
  "scaling_group":{"instance_types":["ecs.g9i.2xlarge","ecs.g8ine.2xlarge","ecs.g9ae.2xlarge"],
    "vswitch_ids":["${VSW_MNL_APP_A}","${VSW_MNL_APP_B}"],
    "system_disk_category":"cloud_essd","system_disk_size":100,
    "data_disks":[{"category":"cloud_essd","size":300}],
-   "desired_size":4,"min_size":4,"max_size":8,"instance_charge_type":"PrePaid",
-   "period_unit":"Month","period":12,"auto_renew":true,"auto_renew_period":1,
+   "desired_size":4,"min_size":4,"max_size":8,"instance_charge_type":"PostPaid",
    "internet_max_bandwidth_out":0,"multi_az_policy":"BALANCE",
-   "key_pair":"${ECS_KEYPAIR}",
-   "security_group_ids":["sg-5tsil3ca5dfkqefks1g9"],
+   "key_name":"${ECS_KEYPAIR}","login_password":"",
    "tags":[{"key":"site","value":"ph-mnl"},{"key":"env","value":"prod"},{"key":"track","value":"stable"}]},
- "kubernetes_config":{"runtime":"containerd","cpu_policy":"none","labels":[{"key":"site","value":"ph-mnl"},{"key":"track","value":"stable"}],
-   "user_data":"<base64(Step 3 脚本)>"}}
+ "kubernetes_config":{"runtime":"containerd","cpu_policy":"none","labels":[{"key":"track","value":"stable"}],
+   "user_data":"<base64(Step 3 脚本)>"},
+ "auto_scaling":{"enable":true,"health_check_type":"NODE","scale_unsupported":false}}
 EOF
 envsubst < nodepool-mnl.json > nodepool-mnl.rendered.json
 aliyun cs CreateClusterNodePool --ClusterId $ID_MNL --body "$(cat nodepool-mnl.rendered.json)"
 ```
-
-> ⚠️ 上面是**手动模式**（只给 `desired_size:4`，让 ESS 按 `MultiAZPolicy=BALANCE` 均分 6a/6b 各 2）。
-> **一步到位的写法必失败** —— 实测 `auto_scaling.enable=true` 与 `scaling_group.desired_size` **互斥**，
-> 同 body 提交报 `InvalidDesiredSizeOrCount.NotNull: desired_size/count setting or modification is not supported for autoscaling-enabled nodepool`。
-
-**2b. 打开节点池自动伸缩**（min 4 / max 8；不变量 `max 8 × 8 vCPU = 64` = 马尼拉 ECS vCPU 配额）：
-
-```bash
-aliyun cs ModifyClusterNodePool --ClusterId $ID_MNL --NodepoolId $NP_MNL --region ap-southeast-6 \
-  --body '{"auto_scaling":{"enable":true,"type":"cpu","min_instances":4,"max_instances":8}}'
-```
-
-> ⚠️ 开伸缩瞬间 ESS 会**先备 6 台再收敛到 min=4**（实测 4→6→8→4）；收敛后须复核跨区仍为 **2/2**，
-> 若被削成 `6a:3 / 6b:1` 需删除重建（见坑 10 / 坑 11）。
 
 3. **nofile=200000 用户数据脚本**（填入 `user_data`；ACK user data 在节点初始化脚本之后执行，能覆盖。三处都要设：systemd Manager、kubelet/containerd unit、Pod securityContext——节点 `ulimit -n` 对容器不生效，容器继承 containerd/kubelet）：
 
@@ -2262,9 +1754,7 @@ systemctl daemon-reload && systemctl restart containerd || true
 
 > `limits.conf` 不影响**已运行**的 containerd，脚本必须带 `systemctl restart`；缺 `#!/bin/bash` 或填错字段会导致整段不执行。
 
-4. **数据盘自动挂载（无需手工干预）**：body 里 `data_disks` 创建的数据盘，**ACK 会自动格式化「最后一块」数据盘**，并把 `/var/lib/containerd`、`/var/lib/kubelet` 一并挂到该盘（实测 4 台 × `/dev/vdb` 300G ESSD PL1，全部 `In_use`，**0 孤儿盘**）。**原文档「`data_disks` 只创建不挂载」的表述有误。**
-
-> 只有需要**额外**挂 `/var/log`、或指定**非末块**盘时，才需显式写 `disk_init`（TS SDK 实测 schema：`disk_name` / `local_disk` / `mkfs_type` / `mount_for_runtime` / `mount_target`）。【控制台】节点池创建页可看机型过滤列表（含 **Terway 支持 Pod 数**，顺手记下每机型 `SupportedPods`）。
+4. 数据盘挂给容器运行时：body 里 `data_disks` 只创建不挂载 → 在节点池配置勾选"数据盘挂载到 `/var/lib/containerd` 与 `/var/log`"（新版 ACK 支持），或自定义数据里 `systemctl stop containerd` → 格式化 → `mv` → 挂载。【控制台】节点池创建页可看机型过滤列表（含 **Terway 支持 Pod 数**，顺手记下每机型 `SupportedPods`）。
    `[图 D2-A-11｜拍摄对象：节点池创建页机型可购列表+数据盘挂载选项；打码：账号 UID、节点池 ID]`
 
 **验证方法**
@@ -2286,7 +1776,7 @@ kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.metadata
 - 4 节点同一可用区 → 节点池只挂一个交换机或 `multi_az_policy` 偏单区 → 补第二交换机、策略用 `BALANCE`。
 - Pod Pending + `Insufficient cpu` → 8C 实际可分配约 7.2C → 按 `allocatable` 重算 request，确保 topologySpread 允许跨节点。
 - 数据盘没挂上 → 节点池"初始化磁盘"未勾选；已有节点无法在线重分配 → 只能新建节点池替换，`kubectl cordon` + 迁移。
-- 配额复核不通过（`q_ecs_enterprise_prepay_c` 不足 64）→ 包年包月 vCPU 配额未覆盖 → 用 `--DesireValue` + `--QuotaActionCode q_ecs_enterprise_prepay_c` 提交**包年包月**配额申请，等 `Agree` 后再建池；**严禁用按量配额（`postpay_c`）判断包年包月可建量**。
+- 配额复核不通过（TotalQuota 仍 50）→ 工单未落地 → 用 `--DesireValue` 重新提交配额申请，等 `Agree` 后再建池。
 
 **坑**
 
@@ -2296,15 +1786,13 @@ kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.metadata
 - 坑 4｜单可用区建池：AZ 故障副本全灭，R15「单 AZ 故障仍有 2 副本」不成立 → 双 AZ + §7.3 拓扑打散。
 - 坑 5｜节点分配公网 IP：Terway 下 Pod/节点绕过 NAT 出网 → EIP 白名单形同虚设，上游偶发 403 查不到原因 → `internet_max_bandwidth_out:0`，出口 IP 核验每里程碑重跑。
 - 坑 6｜`SupportedPods` 上限：`(EniQuantity-1)×EniPrivateIpAddressQuantity` 限制每节点 Pod 数 → 报 `Insufficient attachable network interfaces`，16 副本 + DaemonSet 最易撞 → 记每机型 Pod 容量、池配 ≥2 机型、预留 DaemonSet 额度。
-- 坑 7｜**包年包月 + 自动伸缩 = 成本刚性**（2026-09-28 新增）：节点池 `instance_charge_type:"PrePaid"` 决定**后续扩容实例的计费方式也是包年包月** —— HPA 扩容出的节点按 `period`（12 个月）**一次性预付**，缩容释放**不退款**；`max_size 8` 意味着最坏情况要预付 8 台 × 1 年（实测参考价：`g9i.2xlarge` 包月 **217.17 USD/台/月**，4 台 1 个月实例费 868.68 USD，加系统盘 100G/60.8 + 数据盘 300G/182.4 合计 **1111.88 USD/月**）→ 改进：① 常态 `desired_size` 直接按生产基线（4）买入，**别再指望弹性省钱**；② 真需弹性时在池外**另加一个按量溢出节点池**（HPA 第二目标）承接峰值，包年包月池只跑基线；③ `min_size = desired_size`，避免反复伸缩触发预付。
-- 坑 7b｜**库存抖动导致扩不出机器**：包年包月比按量更吃库存（热门机型包年包月额度独立）→ 多机型候选 + 提前 1 周下单；`max_size` 顶满配额时任何扩容都直接 `QuotaExceeded`（马尼拉 8×8=64 对 `q_ecs_enterprise_prepay_c=100` 尚余 36 vCPU，新加坡 12×8=96 对 100 **仅余 4 vCPU**，几乎零余量）。
+- 坑 7｜按量付费遇库存抖动扩不出机器 → 多机型 + `min_size` 常备，配额留 ≥20% 余量（马尼拉 max 8 台已顶满 64 配额，无余量，扩容依赖 HPA 前核配额）。
 - 坑 8｜节点池"自动升级 OS 镜像"与手动 nofile 脚本冲突：升级后 ulimit 静默回 1024 → 升级窗口对齐变更冻结，加 node-exporter `process_max_fds` 巡检告警。
 - 坑 9｜`instance_types` 混不同内存比（g 8C32G 与 r 8C64G）→ request/limit 与 HPA 口径错乱 → 只混同规格族，HPA 用 CPU 利用率（基于 request）。
-- 坑 10｜**包年包月数据盘会让容器重启失败**（官方警告，2026-09-28 新增）：ACK 官方明确——把已存在的按量实例/数据盘转包年包月时，**数据盘处请勿勾选"转为包年包月磁盘"**，因为「包年包月云盘无法支持容器应用重启，可能影响业务运行」。改进：① 已上线节点只把**实例（系统盘）**转包年包月，数据盘留按量；② 本卡新建的包年包月节点池其 `data_disks` 随实例一起购买，**落地后必须实测一次容器重启**（`kubectl rollout restart deploy/<探针>` 或 `crictl` 重建 sandbox）确认数据盘仍可读写；③ 若实测异常，改为"系统盘扩到 400G 不挂数据盘"或把数据盘另购按量。
 
 ### Day 2 · 任务 24｜新加坡 ACK 集群 + 常态 2 节点节点池（单人，1 人时，14:00–15:00，前移）
 
-**前置/状态**：v2 将原 D4 的备站集群前移到本时段——集群创建 5–15 分钟是天然等待窗口，**单人口径下该窗口只用于让 agent 跑任务 42/46 的只读复核并收集输出，人工判断与写操作仍回到串行队列**。新加坡不部署任何数据库；VPC `vpc-t4nimmwvruexbnene0a3r`；**付费方式 = 包年包月**，配额口径用 `q_ecs_enterprise_prepay_c`（新加坡 100，2026-09-28 实测；需求 12×8=96 → **仅余 4 vCPU，几乎零余量**）；机型候选与马尼拉相同（新加坡目录更大，但仍需先跑 `DescribeAvailableResource --RegionId ap-southeast-1 --InstanceChargeType PrePaid` 复核）。
+**前置/状态**：v2 将原 D4 的备站集群前移到本时段——集群创建 5–15 分钟是天然等待窗口，**单人口径下该窗口只用于让 agent 跑任务 42/46 的只读复核并收集输出，人工判断与写操作仍回到串行队列**。新加坡不部署任何数据库；VPC `vpc-t4nimmwvruexbnene0a3r`；配额 50→96 已批（`Agree`）；机型候选与马尼拉相同（新加坡目录更大，但仍需先跑 `DescribeAvailableResource --RegionId ap-southeast-1` 复核）。
 
 **操作步骤（CLI-first）**
 
@@ -2313,9 +1801,6 @@ kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.metadata
 ```bash
 # create-cluster-sg.json 关键差异：region_id=ap-southeast-1、vpcid=vpc-t4nimmwvruexbnene0a3r、
 # vswitch_ids=[${VSW_SG_APP_A},${VSW_SG_APP_B}]、timezone=Asia/Singapore
-# ⚠️ 必须继承任务 10 的 6 处实测修正（cluster_type / profile / pod_vswitch_ids /
-#    版本号须用 DescribeKubernetesVersionMetadata 对 ap-southeast-1 单独查 / rrsa_config / OpenAckService），
-#    否则同样报 MissingPodVswitchIds 或 ErrorNotEnabled。首次建前先跑 OpenAckService --type propayasgo。
 aliyun cs CreateCluster --header "Content-Type=application/json" --body "$(envsubst < create-cluster-sg.json)"
 export ID_SG=c<sg_cluster_id>
 ```
@@ -2328,13 +1813,9 @@ export ID_SG=c<sg_cluster_id>
 ```bash
 # nodepool-sg.json：instance_types=[ecs.g9i.2xlarge,ecs.g8ine.2xlarge,ecs.g9ae.2xlarge]、
 # desired_size:2、min_size:2、max_size:12、multi_az_policy:BALANCE、internet_max_bandwidth_out:0、
-# instance_charge_type:PrePaid、period_unit:Month、period:12、auto_renew:true、auto_renew_period:1（2026-09-28 付费方式修订）、
 # tags site=sg/env=prod；user_data 与任务 11 Step 3 完全同一份脚本（禁止手工点两遍）
 envsubst < nodepool-sg.json > nodepool-sg.rendered.json
 aliyun cs CreateClusterNodePool --ClusterId $ID_SG --body "$(cat nodepool-sg.rendered.json)"
-# ★ 建池后【两件事必做】：
-#   ① bash deploy/nodepool_azbalance_fix.sh sg        # ESS 跨区均衡，否则全落一个区（坑 5）
-#   ② 核对控制面安全组有无 6443，没有就补（坑 6）
 ```
 
 3. 等待就绪并接好 context（**等待窗口内**由 agent 准备任务 46 的新加坡侧授权材料，人工 apply 仍在串行队列里执行）：
@@ -2373,13 +1854,10 @@ kubectl --context sg debug node/${NODE} -it --image=busybox -- sh -c \
 - 坑 2｜两集群 SA/KMS/RRSA 角色串用：OIDC Provider 是 region+cluster 维度 → 新加坡 Pod 拿不到马尼拉的 Secret → Pod env 核对 `OIDC_PROVIDER_ARN`（任务 17 V4）。
 - 坑 3｜把常态 2 副本 + 冷备池当"热备"：接管要等扩容 90–180s，RTO 掉到分钟级，M4 不过 → desired=2 常跑、`NODE_TYPE=slave` 且保持连接池 warm，GTM 备地址池只在压测通过后加入。
 - 坑 4｜节点标签/污点不统一 → 主备反亲和失效 → 两集群统一 `site`/`env`/`track`，`topologySpreadConstraints` 用 `DoNotSchedule`（软约束会让 4 副本挤一个 AZ）。
-- 坑 5｜**`multi_az_policy: BALANCE` ≠ 开启跨区均衡（2026-09-29 实测，两地同源）**。现象：建池 body 写了 `BALANCE`、`DescribeScalingGroups` 也回读 `MultiAZPolicy=BALANCE`，但 desired=2 建出来是 **1a:2 / 1b:0**。根因：ESS 有**独立的 `AzBalance` 开关**，**ACK 不设置它** → 实例创建阶段不做跨区均衡，顺着「能买到机型 / 有库存」的交换机把实例全塞一个区。佐证：把 `instance_types` 首位换成两区都在售的 `g9ae` **仍然全落 1a** → 与机型无关。修复：`aliyun ess ModifyScalingGroup --ScalingGroupId <asg> --AzBalance true --BalanceMode BalancedBestEffort [--AutoRebalance true]`（幂等脚本 `deploy/nodepool_azbalance_fix.sh mnl|sg`），生效后 ESS 会先在另一区补 1 台再削掉多余的那台，收敛 1:1。**⚠️ 该字段 `DescribeScalingGroups` 不回读，且经 ACK 侧改池后可能被覆盖 → 每次改完节点池都要重跑断言。** `BalanceMode` 取 `BalancedBestEffort`（可用性优先）而非 `BalancedOnly`（目标区没货则整个伸缩活动失败）—— 备站扩不出容比短暂失衡危险得多。
-- 坑 6｜**ACK 建集群漏放行控制面 6443 —— 两个地域都复现，是平台缺陷不是个案**。现象：集群 `security_group_id`（名 `alicloud-cs-auto-created-security-group-<集群ID>`）入向**只有 ICMP 一条**，**没有任何 6443** → 节点 bootstrap 用**内网域名**连 API Server 报 `curl (7) Connection timed out`，重试 120 次 × 2s、卡满 **10 分钟**才放弃 → 节点不注册 / Terway 起不来 / 节点永久 `NotReady`（完整故障链见 `deploy/nodepool_ledger.md` §7）。**易误判点**：错误码是 `curl (7)` **不是** `(6)` —— DNS 是通的、TCP 连不上；且 `ping` 能通（ICMP 恰在白名单里）。**SOP**：建完集群先查该 SG 有无 6443，没有就 `AuthorizeSecurityGroup` 放行 `TCP 6443 ← <VPC 段>`，**再**建节点池。**新加坡实测**：`sg-t4nevyfflaeo3tdvi510` 建出时同样只有 ICMP。
-- 坑 7｜**删节点池必须等 ESS 真正清零，否则必得 `delete_failed`**。现象：`--MinSize 0 --MaxSize 0 --DesiredCapacity 0` 之后立刻 `DeleteClusterNodepool` → ACK 任务报 **`ScalingGroup's instances not empty`**，池变 `delete_failed`（该状态下连 `RemoveNodePoolNodes` 也被拒，报 `InvalidNodePoolStatus.Forbidden`）。根因：容量归零是**异步**的，实例先进入 `Removing:Wait`，**实测约 6–7 分钟**才真正释放。修复：**轮询 `DescribeScalingGroups.TotalCapacity == 0`** 再删；若已 `delete_failed`，清零后**重发一次删除**即可恢复（无需重建集群）。
 
 ### Day 2 · 任务 42｜cluster-autoscaler 与两集群自动伸缩（单人，1 人时，15:00–16:00，前移）
 
-**前置/状态**：任务 11/24 两个节点池均 running。ACK 托管版用**节点池自动伸缩（Node Autoscaling）**，不自建 cluster-autoscaler Deployment——开关在节点池上，安装额外 Deployment 反而双跑冲突。核心不变量：**`max_size` × 机型 vCPU = ECS 配额**：马尼拉 8×8=64（对包年包月 `q_ecs_enterprise_prepay_c=100` 余 36），新加坡 12×8=96（对 100 **仅余 4 vCPU**；按量口径 64/96 工单 `Agree` 作对照）。**付费方式为包年包月 → 每次扩容出的节点都按 12 个月预付且缩容不退款**（任务 11 坑 7）：本卡压测打满 `max_size` 前必须先取得预算确认，压测结束后手动把 `desired_size` 回落到基线。
+**前置/状态**：任务 11/24 两个节点池均 running。ACK 托管版用**节点池自动伸缩（Node Autoscaling）**，不自建 cluster-autoscaler Deployment——开关在节点池上，安装额外 Deployment 反而双跑冲突。核心不变量：**`max_size` × 机型 vCPU = ECS 配额**：马尼拉 8×8=64（正好顶满已批配额），新加坡 12×8=96（配额已批 `Agree`）。
 
 **操作步骤（CLI-first）**
 
@@ -2389,18 +1867,13 @@ kubectl --context sg debug node/${NODE} -it --image=busybox -- sh -c \
 aliyun cs DescribeClusterNodePools --ClusterId $ID_MNL \
   | jq '.nodepools[]|{name:.nodepool_info.name,enable:.auto_scaling.enable,min:.auto_scaling.min_instances,max:.auto_scaling.max_instances}'
 # 期望：np-mnl-app enable=true min=4 max=8；对新加坡同跑，期望 np-sg-ph-standby enable=true min=2 max=12
-# ⚠️ 除 min/max 外还必须断言 ESS 的**跨区均衡开关**（该字段不回读，同任务 24 坑 5）：
-#    bash deploy/nodepool_azbalance_fix.sh mnl     # 再对 sg 跑一遍
-#    实测：马尼拉此前 `AzBalance` 也是关的 —— 它的 6a:2/6b:2 只是「运气好」，本次已补正。
 ```
 
 2. 若未开启（建池 body 遗漏）：
 
 ```bash
-aliyun cs ModifyClusterNodePool --ClusterId $ID_MNL --NodepoolId $NP_MNL --region ap-southeast-6 \
-  --body '{"auto_scaling":{"enable":true,"type":"cpu","min_instances":4,"max_instances":8}}'
-# ⚠️ 具名调用必须带 --region（否则报误导性的 InvalidAction.NotFound）；
-#    auto_scaling 无 health_check_type / scale_unsupported（臆造字段，已删除）
+aliyun cs ModifyClusterNodePool --ClusterId $ID_MNL --NodepoolId $NP_MNL \
+  --body '{"auto_scaling":{"enable":true,"health_check_type":"NODE","scale_unsupported":false}}'
 ```
 
 3. 与 HPA（后续任务）对齐容量口径：节点数按 **request** 规划并留 30% 余量，不按 limit。马尼拉 8C 节点可分配约 7.2C，2C request 下每节点约容 3 个 stable 副本。
@@ -2442,7 +1915,6 @@ kubectl get nodes -o custom-columns=NAME:.metadata.name,CREATING:.metadata.creat
 - 坑 1｜HPA max 16 看似 ≤ 池容量（8 台×~3 副本），但按 limit 4C 实际每节点只塞得下 1–2 个 → HPA 显示"副本已达标"而 Pod 全 Pending = 扩容失败假象 → 按 request 规划 + 「Pending>0 持续 3 分钟」做 P1 告警。
 - 坑 2｜`PDB minAvailable: 3` 硬挡缩容，autoscaler 驱逐重试刷屏 → 低峰允许 2（百分比口径）。
 - 坑 3｜自动伸缩的新节点不带手工调优：只有初始 4 台"是对的" → 一切节点调优必须进节点池 User Data。
-- 坑 4｜**`MultiAZPolicy=BALANCE` ≠ 已开跨区均衡**：ACK 不设 ESS 独立的 `AzBalance`，伸缩时会把新节点**全塞进有库存的那个可用区**（实测 1a:2 / 1b:0）→ 可用区级故障会一次打掉整个节点池。**改进**：每池建后 / **每次经 ACK 改池后**都跑 `deploy/nodepool_azbalance_fix.sh <mnl|sg>` 断言，并用「实例的可用区分布」间接验证（`AzBalance` 不可回读）。
 
 ### Day 2 · 任务 17｜RRSA + KMS + Secret 注入链路 + Namespace/ConfigMap/Secret（单人，3 人时，09:00–12:00，合并预置与正式两段）
 
@@ -2492,12 +1964,8 @@ data:
   NODE_TYPE: "slave"            # ⚠ 红线：绝不能留空（master Deployment 单独覆盖，见坑 1）
   MEMORY_CACHE_ENABLED: "false" # prod 硬约束：多副本本地缓存导致额度/配置不一致
   SYNC_FREQUENCY: "30"          # 代码默认 60（common/init.go:110），必须显式覆盖
-  SQL_MAX_OPEN_CONNS: "100"     # 裁定 ①（2026-09-29）：150→100。代码默认 1000（model/main.go:212 主库、:259 日志库读同一个变量）
-  SQL_MAX_IDLE_CONNS: "50"      # 代码默认 100。⚠ 池化后这些是**客户端**槽位占用者（对 6432），
-                                # 不显式给值会按 100 挂着，直接冲击 pgbouncer.max_client_conn（任务 41 I-1）
-  LOG_SQL_MAX_OPEN_CONNS: "50"  # ⚠ 空转配置：代码里不存在这个变量（任务 41 步骤 2 的事实修订）。
-                                # 日志库若仍为 PG，实际 conns = 上面的 SQL_MAX_OPEN_CONNS；保留此行只会误导预算
-  SQL_MAX_LIFETIME: "60"        # 代码默认 60s；池侧 server_idle_timeout 实测 600s，两者不必对齐但要知情
+  SQL_MAX_OPEN_CONNS: "150"     # 代码默认 1000（model/main.go:212）
+  LOG_SQL_MAX_OPEN_CONNS: "50"
   SESSION_MAX_AGE: "2592000"
 ---
 apiVersion: alibabacloud.com/v1alpha1
@@ -2517,13 +1985,6 @@ spec:
 ```
 
 Pod 侧：`envFrom: configMapRef new-api-config` + `secretKeyRef` 注入 `SQL_DSN` 等 + `serviceAccountName: new-api-app`。新加坡集群同构 apply，仅 `site`/DSN 不同，**`SESSION_SECRET` 指向同一 Secret Key 名**。
-
-> **DSN 端口口径（2026-09-29 随 F10 撤销一并改写，写进 KMS 前照此核对）**：
-> - 主站业务 `SQL_DSN`：`host=${RDS_MNL_PRI} port=6432 dbname=newapi user=newapi sslmode=verify-ca`——**6432 = 托管 PgBouncer 池，是主链路**；`verify-full` 在内网串上不可用（证书绑公网串，任务 15 坑 7／任务 41 坑 9），信任链仍必须验。
-> - 日志库 `LOG_SQL_DSN`：F9 主线指向马尼拉 CK（`clickhouse://…`，不涉及 6432）；CK 就绪前的临时 PG 值同样走 `port=6432`。
-> - 迁移/运维 `SQL_DSN_MIGRATE`：`host=${RDS_MNL_PRI} port=5432 …`——**必须绕开池**（任务 41 的 I-3；transaction 池化下多语句 DDL/AutoMigrate 不可靠）。
-> - 备站 `SQL_DSN`：**裁定 ②（2026-09-29）= 乙**：`host=${RDS_MNL_PUB} port=6432 dbname=newapi user=newapi_sg sslmode=verify-full`——`verify-full` 依然成立（6432 复用同一张证书，CN=公网串）。**前置云写**：`sg-sg-app` 出向必须补 `TCP 6432`（任务 41 步骤 4），否则备站经池连不上；备站服务端占用受 `(newapi_sg,newapi)` 池的 `default_pool_size=50` 封顶（不是 0），客户端槽位 `24×10=240` 计入 I-1。
-> - **应急回退开关** = 把主站 DSN 的 `6432` 改回 `5432`，**且**同时把 `SQL_MAX_OPEN_CONNS` 降到 ≤40（CK 日志库）/≤20（PG 日志库），否则等于直接撞 `too many clients already`。
 
 **验证方法**
 
@@ -2563,49 +2024,6 @@ git log -p --all | grep -Eci "LTAI[0-9A-Za-z]{16}|-----BEGIN (RSA|EC) PRIVATE KE
 ### Day 2 · 任务 46｜运维访问面：kubeconfig + RAM→RBAC + 私网端点 + 堡垒机（单人，1 人时，16:00–17:00，前移自原 D5）
 
 **前置/状态**：两集群均 `endpoint_public_access:false`（任务 10/24）。访问控制 RAM 侧**已落地**（本卡直接引用，无需再建）：人员用户 `admin`/`ops`（启用 MFA、无 AccessKey）、程序用户 `cicd-push`/`iac-terraform`（程序 AK）、`dev-zhangzijun`/`dev-xiangdong`（程序 AK、无控制台登录），用户组 `ops-prod_group` 已建。
-
-> **✅ 执行登记（2026-09-29）：方案 B（自建跳板 ECS）已落地并端到端验证通过**。执行器：`deploy/task46_jumphost.sh`（幂等，支持 `--verify-only` / `--cleanup` / `DRY_RUN`）；证据：`deploy/logs/task46_<ts>/`。本卡现为**任务 19 的前置**，通道已打通。
->
-> **方案变更留痕（A → B，原因：成本）**：原选 A（云堡垒机产品）。A 被否决的两条客观依据：① Bastionhost **无 `CreateInstance`/下单类 API**（`--help-all` 共 193 个 API，18 个 `Create*` 全是资源对象 Host/User/Policy/Database…），实例**必须人工控制台购买**；② 订阅制成本远高于一台小规格按量 ECS。**代价**：云堡垒机自带的会话录制/命令审计改由跳板机自建 `script` 录制（已在装机时落地为 `/var/log/ops-sessions`），属对 §8.5「会话录制」的**部分偏差**（能力等价性待运维确认）。
->
-> | 交付物 | 实测值（2026-09-29） |
-> | --- | --- |
-> | 运维访问面安全组 | `sg-mnl-alb-edge` = `sg-5tsaatp5w68w2st9r1pn`（入向 22/443 ← `OFFICE_CIDR`，**无 0.0.0.0/0**） |
-> | 跳板 ECS | `newapi-ops-mnl` = `i-5tsil3ca5dfkus9zpj7u`（`ecs.c9i.large` 2C4G / `aliyun_3_x64_20G_pro` / 40G ESSD / 5Mbps PayByTraffic）；公网 **8.212.176.207**、私网 **10.0.0.135**；资源组 `rg-aek4nyivmmsb6iy` |
-> | 实例角色（主机不落长期凭据） | RAM 角色 `new-api-ops-jumphost`（RoleId `301846110696372265`）+ 自定义策略 `new-api-ops-kubeconfig-read`（仅 cs 只读换 kubeconfig）+ InstanceProfile |
-> | 装机 | kubectl **v1.35.0**、aliyun CLI **3.5.1**（profile 模式 `EcsRamRole`）、`/usr/local/bin/newapi-kube`（按需换取 **60min** 临时 kubeconfig）、会话录制 → `/var/log/ops-sessions` |
-> | 集群 RBAC | ClusterRoleBinding `newapi-ops-jumphost-cluster-admin`（主体 `301846110696372265` → `cluster-admin`） |
-> | **端到端验证** | 实例角色取临时凭据（`assumed-role/new-api-ops-jumphost`）→ 换 kubeconfig → kubectl 命中**私网** API Server（v1.35.7-aliyun.1）→ `kubectl get ns` 成功；临时 kubeconfig 用完即删 |
->
-> **三条实测坑（已就地修正，勿回退）**：① 全新装机时 aliyun CLI **无默认 region**，不带 `--region` 报 `region can't be empty`；② 仅配 region 不够，必须 `aliyun configure set --mode EcsRamRole`，否则报 `profile default is not configure yet`；③ 跳板机自身份在集群内**无任何绑定**，**跨集群 RBAC 授权必须用管理员身份**（鸡生蛋问题）——脚本用本地管理员临时 kubeconfig 注入跳板机完成绑定。
->
-> **成本**：按量 `ecs.c9i.large` ≈ **USD 0.0855/h ≈ 62 USD/月**（不含公网流量；`ecs.g9i.large` 2C8G 为 0.1024/h ≈ 75 USD/月）。长期常驻建议转包年包月（通常省约 40%）。`bash deploy/task46_jumphost.sh --cleanup` 可一键删除 ECS 与安全组（保留 RAM 角色）。
->
-> **🔑 入口策略修订（2026-09-29，因办公/VPN 出口为动态 IP）**：原设计的「`sg-mnl-alb-edge` 入向 22/443 ← 固定办公出口 IP」在动态出口下**不可维护**（VPN 每次变更即把自己锁在门外）。已改为**「身份认证 + 零入向端口」**，两通道：
-> - **主通道 = ECS 会话管理（Session Manager，基于云助手）**：**零入向端口**、RAM 身份（+MFA）鉴权、VPC 内直达跳板机、**会话录制投递 OSS**。已实测：`SessionManagerConfig.SessionManagerEnabled=true`（跨地域生效）；`SessionManagerDelivery` → `oss://oss-newapi-mnl/ops-sessions/`（`EncryptionType=Inherit`）；`StartTerminalSession` 返回 `wss://ap-southeast-6-axt.aliyuncs.com/session?sessionId=…`，**全程未开任何入向端口**。人工入口：ECS 控制台 → 实例 → 远程连接 → 会话管理。
->   → **这一改动同时补齐了方案 B 相对云堡垒机缺失的「会话录制」能力**，原「部分偏差」已消除（录制投递 OSS，可回溯）。
-> - **辅通道 = 按需临时 SSH**（仅当需要原生 `ssh`/`scp`/端口转发）：`bash deploy/ops-access.sh --allow-ssh [--ttl-min 120]` 取本机当前出口 IP 放行 /32（规则描述带 `temp-ssh-exp=<epoch>` 过期标记），用完 `--deny-ssh` 回收，`--gc` 自动清理过期规则。已实测：放行 → 到期标记 → 回收 → 归零。
-> - **现状**：`sg-mnl-alb-edge`（`sg-5tsaatp5w68w2st9r1pn`）**入向规则数 = 0**（原 `183.23.96.198/32` 的 22/443 两条规则已撤销）。
-> - **上手文档（新手从这里开始）**：拿到跳板机后「怎么登节点、怎么进 Pod、怎么连 RDS、错了怎么修」，见附录 **「运维上手：登录节点与 Pod」** 与全文 `deploy/跳板机运维入门_登录机器与Pod_2026-09-29.md`（含实测证据）。
-> - **实测坑**：`--gc` 首版把 `PortRange`（已是 `22/22` 形态）又拼了一次 → `22/22/22/22` 撤销静默失败；已修（直接用 `$port`）并用"预置过期规则→GC 撤销→复核归零"验证通过。
->
-> **🔧 故障复盘（2026-09-29，`ssh root@8.212.176.207` 卡死）：两个叠加原因，均已修复并验证**
-> 1. **源 IP 探测错（根因）**：`ops-access.sh --allow-ssh` 用 `ifconfig.me` 取出口 IP → 得到 `194.56.225.91`；但本机/本环境存在**双出口**——SSH 与裸 TCP 实际从 **`183.23.96.198`** 出去（该 IP 由 ActionTrail 的 `sourceIpAddress` 权威记录）。放行错了 /32 → SYN 被安全组静默丢弃 → `ssh` 停在 `Connecting`，表现为卡死。
->    对照实验：仅放行 `194.56.225.91/32` → `TCP 22` 不通；改放行 `183.23.96.198/32` → 立即 `TCP 22 OPEN`。
->    修复：`--allow-ssh` 改为**以阿里云视角为准**（先打一条只读 API，再查 ActionTrail 最新事件的 `sourceIpAddress`），并**同时放行本机视角** IP（多出口环境两者都放），另提供 `--ip <addr>` 手动补充。
-> 2. **自建录制 hook 让登录"假死"**：`ENABLE_RECORDING=1` 时安装的 `/etc/profile.d/ops-record.sh` 内容是 `exec script -q -a -f <file> >/dev/null 2>&1` —— 它把登录 shell 整体替换且**丢弃 stdout**，登录后既无提示符也无回显，同样表现为"卡死"。
->    修复：**删除该 hook**（会话录制已由 ECS 会话管理投递 OSS，冗余且有害）；`task46_jumphost.sh` 不再安装，并在装机时**幂等清理历史残留**。
-> 3. **登录凭据修正**：实例 `PasswordAuthentication no`（仅密钥）；且 **`newapi-mnl` 密钥对的私钥不在本机**，原打印指引 `ssh -i newapi-mnl.pem` 在本环境执行不了。已把操作者公钥（`~/.ssh/id_ed25519.pub`，指纹 `SHA256:nGTzb29HXD/9lNiRVxaPHrdxVDjXMPMTtdT4oWUOw/c`）经云助手幂等注入跳板机 `/root/.ssh/authorized_keys` → 现在 `ssh root@8.212.176.207` 直接可用（无需 `-i`、无需密码）。
-> 4. **验证**：`TCP 22 OPEN`；`ssh root@8.212.176.207 'newapi-kube && kubectl get ns'` 成功；`JUMP_HOST=8.212.176.207 JUMP_KEY=~/.ssh/id_ed25519 SELFTEST=1 bash deploy/task19_alb_mnl.sh` → 执行通道 PASS。
->
-> **待人工确认 / 收口项**：
-> 1. ~~`OFFICE_CIDR` 固定性~~ → **已解决**：改为零入向 + 会话管理；仅当需要原生 SSH 时按需临时放行。~~动态 IP 锁门风险~~已消除（但请保留云助手应急通道 `EXEC_MODE=cloud-assistant ALLOW_CLOUD_ASSISTANT=1 JUMP_INSTANCE_ID=…` 作为 API 侧兜底）。
-> 2. ~~会话录制不等价~~ → **已补齐**：主通道（ECS 会话管理）自带录制并投递 OSS；自建 `script` 录制（`/var/log/ops-sessions`）作为**双保险**保留。仍可选的增强：把该目录接入 SLS 采集（`sls-newapi-mnl` 已存在）。
-> 3. 跳板机角色当前绑定 `cluster-admin`（与 §8.5 身份矩阵中 admin/ops = `system:masters` 的口径一致），后续可收敛为自定义 ClusterRole。
-> 4. 现网 AK `yanxuewei` 持有 `AdministratorAccess`（F6 列为「遗留 AK 待降权」），本卡完成后建议立即降权。
-> 5. 入口已改为身份认证承担 → 建议对 `admin`/`ops` 强制 MFA，并复核运维类 AK 的 `acs:SourceIp` 策略。
->
-> **⏸ 硬化项 3/4/5 决策留痕（2026-09-29，项目负责人）：暂时不动**。即：本卡维持现状交付（跳板机角色保持 `cluster-admin`；`yanxuewei` 遗留 AK 不降权；MFA/`acs:SourceIp` 维持现有配置）。上述三项**不作为本卡或任务 19 的阻塞项**，不再重复催办；如需重启请单独开事项。
 
 RAM 现状截图（真实配图）：
 
@@ -2825,7 +2243,7 @@ migrate -database "$DSN_PERF" -path ./migrations down 1 && migrate -database "$D
 
 ### Day 2 · 泳道 A 出口检查清单
 
-- [ ] 机型验证留痕：`DescribeAvailableResource --InstanceChargeType PrePaid` 输出确认 `g9i.2xlarge` 双 AZ **包年包月**可售（或已切换 `g8ine.2xlarge` 并回填方案与容量基线）；配额复核 `q_ecs_enterprise_prepay_c` 马尼拉=100、新加坡=100（按量口径 64/96 工单状态 `Agree` 作对照）。
+- [ ] 机型验证留痕：`DescribeAvailableResource` 输出确认 `g9i.2xlarge` 双 AZ 可售（或已切换 `g8ine.2xlarge` 并回填方案与容量基线）；配额复核马尼拉=64、新加坡=96（工单状态 `Agree`）。
 - [ ] 马尼拉 ACK Pro 1.35：running、Terway CRD 存在、RRSA enabled、regional 控制面；Pod vSwitch 可用 IP 基线已记录。
 - [ ] `np-mnl-app`：4 节点 Ready、6a/6b 各 ≥2、ulimit 三处=200000、数据盘独立挂 `/var/lib/containerd`、节点无公网 IP。
 - [ ] 新加拉 ACK + `np-sg-ph-standby`：2 节点 Ready、egress-probe 只出现已登记 4 个 SG EIP、与主站 SESSION_SECRET/镜像 tag/NODE_TYPE 一致。
@@ -2845,37 +2263,6 @@ migrate -database "$DSN_PERF" -path ./migrations down 1 && migrate -database "$D
 ### Day 2 · 任务 19｜马尼拉 ALB + AlbConfig + 健康检查（单人，2 人时，D2 上午 09:00–11:00）
 
 **前置/状态**：任务 18 马尼拉 ACK（1.35 + Terway）就绪；`vsw-mnl-pub-a`（10.0.0.0/24, 6a）/`vsw-mnl-pub-b`（10.0.1.0/24, 6b）已建且 `AvailableIpAddressCount` 基线已记录；`*.likha.com` 证书已签发并拿到 `${CERT_ID_ALB}`；SLS Project `sls-newapi-mnl` 可后置（见坑 5）。
-
-> **⛔ 执行登记（2026-09-29，CLI + API 实测）：未执行 —— 仅剩一项硬阻塞：G5（证书）**。任务 46 的运维通道**已交付**（自建跳板机端到端验证通过，见任务 46 卡片）。
-> 执行器已就绪：`deploy/task19_alb_mnl.sh`（幂等；默认 `EXEC_MODE=ssh` 经跳板机执行；支持 `CERT_ID_ALB=<id>` 全量、`--without-tls` 降级、`--cleanup`、`DRY_RUN=1`、`SELFTEST=1`）；
-> 渲染件：`deploy/aliyun/ph/albconfig.rendered.yaml`（真实 vSwitch ID 已回填，订正模板 IngressClass 的 namespace 误写）
-> 与 `deploy/aliyun/ph/placeholder-svc-ingress.yaml`（步骤 3/4 的占位 Service + 验证 Ingress，含健康检查 9 项注解）。
->
-> | 前置项 | 2026-09-29 实测 | 结论 |
-> | --- | --- | --- |
-> | ACK mnl 集群 | `cd57e40ce9a634c1698c2f5c5e09bd93c` running / 1.35.7-aliyun.1 / Terway / 4×worker 跨 6a·6b | ✅ 任务 10/11 已完成 |
-> | 公网 vSwitch | `vsw-mnl-pub-a`=vsw-5ts9tgdq1xz3picjgoqyu（6a, free=251）、`vsw-mnl-pub-b`=vsw-5ts1dygyh2x0daspwny2r（6b, free=252） | ✅ |
-> | **步骤 1：ALB Ingress Controller** | `aliyun cs ListClusterAddonInstances` → `alb-ingress-controller active v3.1.1` | ✅ **已完成，勿重装** |
-> | AlbConfig/ALB CRD 与存量 | CRD 6 个就绪；**无** AlbConfig / ALB 实例 / ServerGroup | ✅ 干净底座 |
-> | `sls-newapi-mnl` + `alb-access` | 项目存在，16 个 Logstore 含 `alb-access` | ✅ `accessLogConfig` 可用（坑 5 已消） |
-> | **`${CERT_ID_ALB}`（G5）** | `aliyun cas ListUserCertificateOrder` → **TotalCount=0**（账号内无任何证书） | ❌ **阻塞** |
-> | **G4（NS → 阿里云）** | `dig NS likha.com @8.8.8.8` → **ns21/ns22.domaincontrol.com（GoDaddy）**；`alidns DescribeDomains` TotalCount=0 | ❌ **阻塞**（证书 DCV 无法走云解析自动验证） |
-> | `AliyunServiceRoleForAlb` | `aliyun ram GetRole` → `EntityNotExist.Role` | ⚠️ 建 ALB 前需创建（`CREATE_SLR=1` 或首次创建自动补） |
-> | `new-api` namespace | **已存在**（2026-09-29T08:24:51Z 由 kubectl client-side apply 创建，含 `pod-identity.alibabacloud.com/injection=on`、`site=ph-mnl` 标签）——**非本次执行所建**，属任务 17 并行推进；本卡脚本会按幂等逻辑跳过 | ✅ 前置满足 |
-> | **kubectl 通道** | 任务 46 自建跳板机 `newapi-ops-mnl`（`i-5tsil3ca5dfkus9zpj7u` / 公网 8.212.176.207）已端到端验证：实例角色 → 60min 临时 kubeconfig → 私网 API Server → `kubectl get ns` 成功 | ✅ **已解除** |
->
-> **一条阻塞与处置**：
-> 1. **证书（硬阻塞）**：`CERT_ID_ALB` 不存在 → 443 监听、`tls_cipher_policy_1_2_strict_with_1_3`、证书链、SNI 反例四项验收（V2/V3/V4 及部分 V1）无法执行。且 G4 未闭环使 DCV 自动验证不可用（需在 GoDaddy 手工加 DCV TXT 或先迁 NS）。
-> 2. **执行通道（已于同日解除）**：集群 `endpoint_public_access=false`，API Server 仅私网 10.0.22.182:6443，本机在 VPC 外不可直连。→ 由**任务 46 自建跳板机**解决（`EXEC_MODE=ssh`，默认模式）。
->
-> **决策留痕（2026-09-29，项目负责人）：**
-> - **① 证书路径 = 先闭环 G4+G5 再执行**，一次性建全量 ALB（443+80）；**不采用**自签证书占位（不接受不受信中间态），**不采用** `--without-tls` 降级。闭环前任务 19 保持「未执行」。
->   解除阻塞动作：购买/签发付费通配符 `*.likha.com`（国际站无免费 DV）→ 完成 DCV（沿用当前 GoDaddy NS 则在该处加 DCV TXT 记录，或先完成 G4 迁 NS 到阿里云云解析）→ 取得 `CertIdentifier` 后以 `CERT_ID_ALB=<id>` 回跑执行器。
-> - **② 执行通道 = 先完成任务 46，再回跑本卡**（已执行）。**不采用**临时开 API Server 公网端点 + IP 白名单（否决 §13.5 中该应急分支作为常规路径）；**不采用**云助手作为默认通道。
->   落实方式：任务 46 方案 B（自建跳板 ECS，原方案 A 云堡垒机因成本否决）已交付；执行器默认 `EXEC_MODE=ssh`（需 `JUMP_HOST`/`JUMP_KEY`）+ `EXEC_MODE=cloud-assistant`（仅应急，须显式 `ALLOW_CLOUD_ASSISTANT=1` **且** `JUMP_INSTANCE_ID` 指向跳板机，不接受 prod ACK 节点承载 kubectl）。默认模式缺跳板机参数即 **退出码 4** 并打印本条决策，避免误用非合规通道。
->   回跑方式：① 有原生 SSH 时（先 `bash deploy/ops-access.sh --allow-ssh` 放行，再用毕回收）`JUMP_HOST=8.212.176.207 JUMP_KEY=<newapi-mnl.pem> CERT_ID_ALB=<id> bash deploy/task19_alb_mnl.sh`；② 无 SSH（动态出口）时走应急通道 `EXEC_MODE=cloud-assistant ALLOW_CLOUD_ASSISTANT=1 JUMP_INSTANCE_ID=i-5tsil3ca5dfkus9zpj7u CERT_ID_ALB=<id> bash deploy/task19_alb_mnl.sh`。
->
-> **两处对本文档的有意偏差（M2 证据链需留痕）**：① 占位 Ingress 用 `ph-verify.internal.likha.com` 而非 `api.likha.com` —— 后者由任务 23 唯一持有，若本卡先占同 host+同 path 会与 stable Ingress **路由冲突**；② 因任务 18 未部署，占位 Service 必然 0 endpoints，**V5「非正常后端为空」在 0 后端下是假通过**，真正的健康检查验收挪到任务 23。
 
 **操作步骤（CLI-first）**：
 
@@ -3114,11 +2501,8 @@ spec:
         ports: [{containerPort: 3000}]
         env:
         - {name: NODE_TYPE, value: "slave"}     # 红线：备地域固定 slave
-        - {name: SQL_MAX_OPEN_CONNS, value: "10"}   # 裁定 ②（2026-09-29）：备站走公网串 6432 **经托管池**（任务 41 乙路）；
-        - {name: SQL_MAX_IDLE_CONNS, value: "5"}    # 显式给值（代码默认 100）：池化后 idle 是 max_client_conn 槽位的长期占用者
-                                                    # 客户端槽位：接管态 24 副本 × 10 = 240 计入任务 41 I-1（上限 2000）
-                                                    # 服务端侧：受 (newapi_sg,newapi) 池 default_pool_size=50 封顶，与副本数无关
-                                                    # ⚠ 前置云写：sg-sg-app 出向补 TCP 6432（任务 41 步骤 4），否则备站连不上
+        - {name: SQL_MAX_OPEN_CONNS, value: "10"}   # 红线：备站直连马尼拉 RDS 公网、不经自建 PgBouncer，
+                                                    # 24 副本 × 10 = 240 已计入任务 41 I-2（800 上限预算，F11）
         envFrom: [{configMapRef: {name: new-api-config}}]
         readinessProbe: {httpGet: {path: /api/status, port: 3000}, initialDelaySeconds: 10, periodSeconds: 5, timeoutSeconds: 3, failureThreshold: 3}
         livenessProbe:  {httpGet: {path: /api/status, port: 3000}, periodSeconds: 15, timeoutSeconds: 5, failureThreshold: 5, initialDelaySeconds: 40}
@@ -3314,7 +2698,7 @@ done
 
 ### Day 2 · 任务 45｜staging / perf 环境 + 三数据库矩阵（单人，3 人时，D2 下午 15:00–18:00，前移；**单人口径：Day2 仅跑最小三库冒烟，全量矩阵顺延 T+14**）
 
-**前置/状态**：任务 23 完成（复用 prod 镜像 SHA）；主站 RDS PostgreSQL 可建库（`${PG_ADMIN_DSN_PLACEHOLDER}`）；**ClickHouse 已按 F9 拍板（马尼拉企业版单 AZ），本卡不再含 CK 决策**；单人口径下本卡只跑「SQLite/MySQL/PG 最小冒烟 + **经托管池 6432** 的余额对账」，**全量矩阵顺延 T+14**。⚠ **口径变化（F10 撤销，2026-09-29）**：托管池当前实测就是 `pool_mode=transaction`，**不存在"矩阵通过前禁止切 transaction"这个保护**——顺序反过来了：**矩阵（含任务 41 步骤 3 的四项兼容性子集）未通过前不得切流**，或先把 `pgbouncer.pool_mode` 临时改回 `session` 再切流（见任务 41 坑 2）。
+**前置/状态**：任务 23 完成（复用 prod 镜像 SHA）；主站 RDS PostgreSQL 可建库（`${PG_ADMIN_DSN_PLACEHOLDER}`）；**ClickHouse 已按 F9 拍板（马尼拉企业版单 AZ），本卡不再含 CK 决策**；单人口径下本卡只跑「SQLite/MySQL/PG 最小冒烟 + 经 PgBouncer 的余额对账」，**全量矩阵顺延 T+14**（矩阵未通过前 PgBouncer 禁止切 transaction，见任务 41 坑 1）。
 
 **操作步骤（CLI-first）**：
 
@@ -3394,8 +2778,6 @@ kubectl -n new-api-staging get deploy -o jsonpath='{..image}' | tr ' ' '\n' | so
 
 **前置/状态**：Day 1 泳道 A 已产出 VPC/vSwitch/NAT/EIP 与 ACK 集群；ALB `alb-newapi-mnl` 已建（任务 19）。本卡把 §8.1 规则表逐条落成真实安全组（马尼拉 3 个 + 新加坡 2 个），**每条规则必须带"用途"Description**（导出为 §12 证据）。注意 ACK 会自动建同集群 `sg-` 前缀安全组，动手前先确认要改的是哪一个。
 
-> **⚠️ 类型必须是「普通安全组」（2026-09-29 实测确认）**：企业级安全组**不支持组组授权**（不能把安全组 ID 作为授权对象，也不能被别的规则引用），而本卡 §8.1 全部 5 条组引用规则都依赖它 —— 选企业级将直接导致设计落不了地。命令侧 `CreateSecurityGroup` 默认即普通安全组；**不要**在 ECS 购买页用默认模板建（自带的 RDP 3389 / SSH 22 全放行都违反最小授权）。建好后的 `sg-*` 必须显式挂到节点池 `scaling_group.security_group_ids` 或集群 `security_group_id`，集群级 `is_enterprise_security_group` 保持 `false`。
-
 **操作步骤（CLI-first）**：
 
 1. 确认节点实际绑定的 SG（防"改了另一个安全组"）：
@@ -3413,19 +2795,7 @@ sg-mnl-app-xxxx               # 本卡要固化的业务 SG
 
 把三个业务 SG ID 固化为环境变量并写入 IaC：`SG_MNL_ALB` / `SG_MNL_APP` / `SG_MNL_DB`（新加坡 `SG_SG_ALB` / `SG_SG_APP`）。
 
-> **✅ 已提前落地（2026-09-29，早于本卡排期 D5）**：5 个业务安全组 + **17 条可确定规则**已实建并复核，ID 见 **`deploy/sg_ledger.md`**，脚本 **`deploy/task22_sg_bootstrap.sh`**（幂等；`--verify` 随时核对现状，`--dry-run` 空跑）。
->
-> | 变量 | 名称 | SG ID | Region |
-> | --- | --- | --- | --- |
-> | `SG_MNL_ALB` | `sg-mnl-alb` | `sg-5tsj1epvcjjv6jkg3zks` | ap-southeast-6 |
-> | `SG_MNL_APP` | `sg-mnl-app` | `sg-5tsil3ca5dfkqefks1g9` | ap-southeast-6 |
-> | `SG_MNL_DB` | `sg-mnl-db` | `sg-5tsawhljdqzwo2t0n4ut` | ap-southeast-6 |
-> | `SG_SG_ALB` | `sg-sg-alb` | `sg-t4nbgfbh2cidnve88avf` | ap-southeast-1 |
-> | `SG_SG_APP` | `sg-sg-app` | `sg-t4n0qnhy8mxq9g733r67` | ap-southeast-1 |
->
-> **为什么提前建**：ACK 节点池**必须显式**指定 `scaling_group.security_group_ids`，否则 ACK 自建 `sg-` 前缀托管组（坑 2）；ID 先定死可杜绝"改了另一个安全组"的排查陷阱。本卡剩余实动作 = **步骤 1 的绑定确认 + V1–V4 出口复验 + 补 3 条延后规则**（`${DCDN_L2_IPS}` 因 DCDN 未开通【不适用】；GTM 探测段待任务 21；`sg-sg-app out 5432 → ${RDS_MNL_PUB}` 待任务 15 开 RDS 公网）。
-
-2. 按下表逐条建规则（**入向用 `AuthorizeSecurityGroup`、出向用 `AuthorizeSecurityGroupEgress`**；组引用只在**同 VPC** 内可用）：
+2. 按下表逐条 `AuthorizeSecurityGroup`（**用组引用而不是 IP 段**，可维护性最高）：
 
 | SG | 方向 | 协议/端口 | 源/目的 | 用途 |
 | --- | --- | --- | --- | --- |
@@ -3434,33 +2804,17 @@ sg-mnl-app-xxxx               # 本卡要固化的业务 SG
 | `sg-mnl-alb` | in | TCP 443 | `${DCDN_L2_IPS}` | **仅当启用全站加速 DCDN**；用 `DescribeDcdnL2Ips` 取，禁手工抄 |
 | `sg-mnl-app` | in | TCP 3000 | `sg-mnl-alb`（组引用） | 只有负载均衡 ALB 能打业务端口 |
 | `sg-mnl-app` | in | TCP 10250 | —— | kubelet 由 ACK 内部管理，**不要**对公网开 |
-| `sg-mnl-app` | out | TCP 5432 **与 6432** | `sg-mnl-db` 或 RDS 网段 | 主库。**6432 是托管 PgBouncer 池端口 = 主链路**（任务 41，F10 撤销后应用经池连库）；5432 保留给 master 迁移/运维直连（I-3）与"端口退回 5432"的应急回退 |
+| `sg-mnl-app` | out | TCP 5432 | `sg-mnl-db` 或 RDS 网段 | 主库 |
 | `sg-mnl-app` | out | TCP 6379 | Tair 内网 | 缓存 |
 | `sg-mnl-app` | out | TCP 443 | `0.0.0.0/0` | 上游模型 API（IP 不可枚举，靠 NAT 网关 + 8 个固定 EIP 收敛） |
-| `sg-mnl-db` | in | TCP 5432 **与 6432** | `sg-mnl-app` | 内网访问 RDS。**只放 5432 会让主站连不上池**（池端口不体现在 `DescribeDBInstanceNetInfo`，极易漏，见任务 41 坑 5） |
-| `sg-sg-app` | out | TCP 5432 与 **TCP 6432** | `${RDS_MNL_PUB}` 公网 IP 段 | 备 region 读主库（目的地址精确放行）。**2026-09-29 裁定 ②：备站走乙＝经托管池 6432 ⇒ 6432 这条不是"可选"而是必须**（`5432` 可保留作应急回退路径）；漏掉 6432 = 备站连不上池。下发命令见任务 41 步骤 4 |
+| `sg-mnl-db` | in | TCP 5432 | `sg-mnl-app` | 内网访问 RDS |
+| `sg-sg-app` | out | TCP 5432 | `${RDS_MNL_PUB}` 公网 IP 段 | 备 region 读主库（目的地址精确放行） |
 
 ```bash
-# 入向：只有入向用 AuthorizeSecurityGroup
 aliyun ecs AuthorizeSecurityGroup --RegionId ap-southeast-6 --SecurityGroupId ${SG_MNL_APP} \
-  --Permissions.1.IpProtocol tcp --Permissions.1.PortRange 3000/3000 \
-  --Permissions.1.SourceGroupId ${SG_MNL_ALB} --Permissions.1.NicType intranet \
-  --Permissions.1.Policy accept --Permissions.1.Priority 1 --Permissions.1.Description "from-alb-only"
-
-# 出向：必须换 Egress API（AuthorizeSecurityGroup 只加**入向**规则，用它建出向会静默失败）
-aliyun ecs AuthorizeSecurityGroupEgress --RegionId ap-southeast-6 --SecurityGroupId ${SG_MNL_APP} \
-  --Permissions.1.IpProtocol tcp --Permissions.1.PortRange 5432/5432 \
-  --Permissions.1.DestCidrIp 10.0.64.0/20 --Permissions.1.NicType intranet \
-  --Permissions.1.Policy accept --Permissions.1.Priority 1 --Permissions.1.Description "to-rds-pg-primary"
+  --IpProtocol tcp --PortRange 3000/3000 --SourceGroupId ${SG_MNL_ALB} \
+  --Policy accept --Priority 1 --Description "from-alb-only"
 # 期望输出：{"RequestId": "..."}，无 Code 字段即成功
-
-# 同一条还要再来一次 6432（托管池端口 = 主链路；见任务 41）
-aliyun ecs AuthorizeSecurityGroupEgress --RegionId ap-southeast-6 --SecurityGroupId ${SG_MNL_APP} \
-  --Permissions.1.IpProtocol tcp --Permissions.1.PortRange 6432/6432 \
-  --Permissions.1.DestCidrIp 10.0.64.0/20 --Permissions.1.NicType intranet \
-  --Permissions.1.Policy accept --Permissions.1.Priority 1 --Permissions.1.Description "to-rds-pg-pool"
-# ⚠ 现状取证（2026-09-29，任务 41）：马尼拉 worker → 内网串 6432 实测 `TCP=OPEN`，说明**当前出向并未收紧到只放 5432**
-#   （普通安全组默认放通出向）。一旦本表被落实为白名单式出向，漏掉 6432 = 主站连不上池 = 全站 5xx，别只加 5432 就收工。
 ```
 
 3. 反例自查：任何入向 `0.0.0.0/0` 且端口非 80/443 的规则都要删（`RevokeSecurityGroup` 同参数撤销）：
@@ -3497,8 +2851,6 @@ kubectl --context mnl -n new-api run scan --image=busybox --rm -i --restart=Neve
 - **坑 2｜安全组改了不生效。** 现象：改完仍如旧。后果：误判"阿里云延迟"，其实改的是 ACK 自动建的另一个 `sg-` 安全组。改进：先 `kubectl get node -o jsonpath` 查实际绑定 SG 再改；ID 固化进 IaC。
 - **坑 3｜出向 `0.0.0.0/0:443` 被安全评审判不合格。** 后果：无法整改只能挂例外记录。改进：文档**主动写明理由**（上游模型厂商 IP 不可枚举）+ 缓解措施（NAT 网关 8 个固定 EIP + 操作审计 ActionTrail + 出向流量 SLS 审计）。
 - **坑 4｜新加坡→马尼拉 RDS 按"目的 IP 段"放行，但 RDS 公网 IP 会变。** 后果：接管日跨区 SQL 全断。改进：跨 region 无 SG 引用可用，只能①脚本定期解析同步 + 变更告警，或②走云企业网内网；列入月度巡检。
-- **坑 5｜出向规则用错 API 会「静默全失败」（2026-09-29 实跑踩到）。** 现象：用 `AuthorizeSecurityGroup` 加出向规则，返回 `RequestId` 齐全看着成功，但规则**一条都没落**。后果：上线后 Pod 连不上 RDS / Tair / 上游，排查方向全错（会先去查网络 ACL、路由、DSN）。改进：**入向 `AuthorizeSecurityGroup`、出向 `AuthorizeSecurityGroupEgress`**，两者不是同一个 API；参数统一 `--Permissions.1.*`（flat 的 `--SourceGroupId/--PortRange/...` 已标 `Deprecated`）；判成功**不能只看 `"Code"` 字段**——CLI 失败输出是 `ERROR: SDK.ServerError` + 文本行 `ErrorCode:`（非 JSON）。另注：`Permissions.N.*` 路径下重复规则**不会**返回 `InvalidPermission.Duplicate`，而是静默去重，想区分「新增 / 已存在」必须**前置比对**（脚本已用 `RULE_SET` 预读）。
-- **坑 6｜安全组查询失败被当成「不存在」→ 重复建组（2026-09-29 实跑踩到）。** 现象：脚本里 `2>/dev/null` 吞掉查询异常，`ensure_sg` 判定"没找到"就新建，VPC 里出现**两个同名 SG**（实跑多建了一个 `sg-mnl-app`，已撤销引用并删除）。后果：规则加在 A 组、实例挂 B 组，现象是"规则明明配了却不生效"，极难定位。改进：查询失败**必须中断报错，绝不猜**；名称过滤用精确 JMESPath `SecurityGroups.SecurityGroup[?SecurityGroupName=='x'].SecurityGroupId | [0]`，并对查询加重试。
 
 ### Day 3 · 任务 47｜ALB 安全组源收敛 + SNI 域名校验（单人，1 人时，11:00–12:00）
 
@@ -3931,7 +3283,7 @@ aliyun bssopenapi QueryInstanceBill --BillingCycle $(date +%Y-%m) --PageSize 50 
   | jq -r '.Data.Items.Item[] | select(.ProductCode=="nat" or .ProductCode=="alb") | [.ProductCode,.InstanceID,.PretaxAmount] | @tsv'
 ```
 
-3. 成本量化表（月度 USD；单价一律取购买页/QueryBill 实价，不许估算占位过夜）：**付费方式（2026-09-28 修订）= ECS/Tair 包年包月，故单价必须取包年包月价而非按量价**。实测锚点（ap-southeast-6）：`ecs.g9i.2xlarge` 包月 **217.17 USD/台/月** + 系统盘 100G ESSD PL1 **15.20** + 数据盘 300G ESSD PL1 **45.60** → 4 台 1 个月合计 **1111.88 USD**（按量同配置约 1.57808 USD/小时×4 台 ⇒ 月约 1136 USD，**包月省 ≈18%**）；Tair 4GB 标准版（`redis.master.stand.default`）包月 **58.75 USD/台/月**；**RDS PostgreSQL `pg.x4.2xlarge.2c`（16C64G）高可用 + 100G ESSD PL1 包年包月 = 标价 15134.47 USD/年 → 实付 10594.13 USD/年**（折扣 4540.34 ≈30%，月均 **882.84**；月单价 1261.21；按量对照 2.63232 USD/h ⇒ 月约 1921.59，**包年包月省 ≈54%**）；ACK Pro 集群管理费**只能按量**（约 0.09 USD/集群/小时）→ 用 **ACK 资源包**抵扣，成本表按资源包实付摊销。清单：ECS 马尼拉 `g9i.2xlarge`×4–8（包年包月配额 64/100）、ECS 新加坡 ×2–12（包年包月配额 96/100，**接管时 6× 弹性极高**——但包年包月**扩容即按 12 个月预付、缩容不退款**，弹性成本须按 12 个月上限而非月费率估算）、RDS PostgreSQL 16C64G 高可用×1、Tair 4GB 主备×2、ClickHouse（马尼拉企业版单 AZ，F9；**不再计新加坡 CK 与跨区专线费**）、**跨区公网 SG→MNL RDS 出方向 GB（常被忽略：接管后所有 SQL 走公网）**、NAT 网关+共享带宽×2、ALB LCU×2、WAF 企业版+请求数×2、全站加速 DCDN 流量 GB、SLS 写入+存储、OSS（标准+低频+归档+跨区域复制）、GTM 旗舰版/云解析 DNS 付费版、Grafana（新加坡）、通配符证书 ×2/年、**ACK 资源包（2 集群）**。每行标注弹性敏感度（高/中/低）。
+3. 成本量化表（月度 USD；单价一律取购买页/QueryBill 实价，不许估算占位过夜）：ECS 马尼拉 `g9i.2xlarge`×4–8（已批 64 vCPU）、ECS 新加坡 ×2–12（已批 96 vCPU，**接管时 6× 弹性极高**）、RDS PostgreSQL 16C64G 高可用×1、Tair 4GB 主备×2、ClickHouse（马尼拉企业版单 AZ，F9；**不再计新加坡 CK 与跨区专线费**）、**跨区公网 SG→MNL RDS 出方向 GB（常被忽略：接管后所有 SQL 走公网）**、NAT 网关+共享带宽×2、ALB LCU×2、WAF 企业版+请求数×2、全站加速 DCDN 流量 GB、SLS 写入+存储、OSS（标准+低频+归档+跨区域复制）、GTM 旗舰版/云解析 DNS 付费版、Grafana（新加坡）、通配符证书 ×2/年。每行标注弹性敏感度（高/中/低）。
 4. 成本看板（任务 39）：标签 `project=new-api site=ph-mnl|sg env=prod cost-center=<按财务>` 全量打，预算告警 80%，月度复核。
 
 **验证方法**：
@@ -4190,21 +3542,16 @@ hey -z 120s -q <rate> -c <conc> -m POST -H "Content-Type: application/json" \
 
 在 perf 环境按 100/250/500/800/1200 并发 SSE 逐档记录 CPU p50、内存、FD、p95 首字延迟、5xx；取"p95 仍满足 SLO 且 5xx<0.1%"的最大并发 = **C**。峰值 1,500 并发 ⇒ 需 `ceil(1500 / C)` 副本 ≤ 16，否则升规格/优化或申请 max 24（配额联动 §3.4）。
 
-2. **容量预算三不变量必须先验**（超限则 HPA 越大越危险；数值按 F11 的 800 上限 + 任务 41 的托管池实测参数重算）：
-   - I-1（客户端侧，对 6432）：`实例数 × 每副本 conns ≤ pgbouncer.max_client_conn`（conns 只有一个旋钮 `SQL_MAX_OPEN_CONNS`，主库与日志库共用；`LOG_SQL_MAX_OPEN_CONNS` 代码不读）。**裁定 ①（100）+ 裁定 ②（备站经池）后**：`16×100 + 24×10 = 1840 ≤ 2000 ✅`（**仅 CK 日志库分支**，余量 160）；日志库仍为 PG 时 `16×200 + 24×20 = 3680 ❌` ⇒ **本卡在 CK 实例创建之前必须按 PG 分支复算并申报**（临时 `conns=45` 或提前建 CK，见任务 41 步骤 2）；
-   - I-2（服务端侧，对 RDS）：`各 (user,db) 池的 default_pool_size 之和 + master 直连预留 ≤ 800 × 0.8 = 640`。托管池按 `(user,db)` 封顶 50 ⇒ 主站业务 50 + 日志库 50（CK 则 0）+ **备站 `(newapi_sg,newapi)` 池 50（裁定 乙）** + 运维 20 ≈ **170（PG）/ 120（CK）** ✅。**乙 的真实收益**：备站不再随副本数线性吃服务端连接（原甲路是 `24×10=240` 硬占），代价是并发被 50 条封顶 ⇒ 接管/P99 必须实测（任务 36/49）。**≥8 副本必须池化**这条不变，但池已由 RDS 托管提供（F10 撤销），**无需自建**；
-   - I-3：节点池可调度容量 ≥ HPA max × 副本 request（与 Day 1 任务 41 的"I-3 迁移直连旁路"是**两个不同编号**，勿混淆——此处指节点容量）。
+2. **容量预算三不变量必须先验**（超限则 HPA 越大越危险；数值按 F11 的 800 上限重算）：
+   - I-1：`SQL_MAX_OPEN_CONNS × 实例数 ≤ 池 max_client_conn`，**且池 server 侧 + 新加坡直连 + master 直连预留 ≤ 800 × 0.8 = 640（F11）**；
+   - I-2：**≥8 实例必须自建 PgBouncer**（F10；transaction 模式需三库矩阵通过后才切换）。800 上限下"16 副本 × 数百连接"的直连方案数学必炸，PgBouncer 是切流前置而非可选项；
+   - I-3：节点池可调度容量 ≥ HPA max × 副本 request。
 
 ```bash
-kubectl --context mnl -n new-api exec deploy/new-api-stable -- printenv SQL_MAX_OPEN_CONNS SQL_MAX_IDLE_CONNS
-aliyun rds DescribeParameters --DBInstanceId pgm-5tstdhko64x2c01w --RegionId ap-southeast-6 \
-  | jq -r '.RunningParameters.DBInstanceParameter[] | select(.ParameterName|IN("pgbouncer.max_client_conn","pgbouncer.default_pool_size","pgbouncer.pool_mode")) | [.ParameterName,.ParameterValue]|@tsv'
-psql "host=${RDS_HOST} port=5432 user=${DBA_USER} dbname=newapi" -c "SHOW max_connections;"
-psql "host=${RDS_HOST} port=5432 user=${DBA_USER} dbname=newapi" -c "SELECT count(*) FROM pg_stat_activity;"
-# 期望：SQL_MAX_OPEN_CONNS=100（裁定 ①）→ 主站 16×100=1600 clients，加备站 24×10=240 ⇒ 1840，必须 ≤ pgbouncer.max_client_conn(2000)；
-#       ⚠ 日志库仍为 PG 时是 16×200+480=3680 ⇒ 未过，本项在 CK 就绪前不得判绿
-#       server 侧 ≈170（PG）/120（CK，含备站经池的 50）≤ 800×0.8=640 ⇒ 托管池为切流前置（任务 41 已确认启用）
-#       ⚠ SHOW POOLS 目前仍不可作判据（stats_users=newapi_ops 已生效，但 admin 库登录未实测，任务 41 步骤 5），改看 pg_stat_activity + CMS db.pgbouncer.* 指标
+kubectl --context mnl -n new-api exec deploy/new-api-stable -- printenv SQL_MAX_OPEN_CONNS
+psql "host=${RDS_HOST} user=${DBA_USER} dbname=newapi" -c "SHOW max_connections;"
+# 期望：SQL_MAX_OPEN_CONNS=150（+日志 50）→ 16×200=3200 clients ≤ 池 max_client_conn 4000；
+#       server 侧合计 ≈330（含备站直连硬上限 240）≤ 800×0.8=640 ⇒ 自建 PgBouncer 为切流前置（Day 1 任务 41 已部署则在此复核 SHOW POOLS）
 ```
 
 3. HPA 落地（G8 后加自定义指标 `new_api_active_sse_connections`；**过渡期用内存利用率 60–70% of request**，SSE 是 IO 密集，只靠 CPU 明显滞后）：
@@ -4469,14 +3816,14 @@ SQL
 
 **坑**：
 - 坑 1｜把"恢复到新实例"点成"覆盖原实例"。后果：**生产数据直接丢失**。改进：演练窗口 + **远程第二方核准留痕**（单人口径，见 §0.2）；Runbook 截图打红叉（上图）；主库删除保护常开。
-- 坑 2｜恢复实例照抄主库规格。后果：一次演练几十美元，且大实例常排队无库存导致超时失败。改进：最小规格。**注（2026-09-29）**：主库实测为 `pg.n4.2c.2m` 2C/8G（见任务 4/13），已不是早期假设的 16C64G，本坑的"贵"权重下降，但"排队无库存导致超时"仍然成立，仍用最小规格。
+- 坑 2｜恢复实例照抄主库规格（16C64G）。后果：一次演练几十美元，且大实例常排队无库存导致超时失败。改进：最小规格。
 - 坑 3｜没测"OSS 不可写"分支。后果：权限被改坏后 PITR 静默退化为每日全量，RPO 从分钟级变 24 小时。改进：WAL 归档延迟告警。
-- 坑 4｜恢复耗时未计入 region 级故障场景。**1.5–4 小时这个预算是按"64GB 级实例"估的，主库实测为 2C/8G（`pg.n4.2c.2m`），该预算作废**，须在 8GB 数据量上重测后再写进 M5；未实测前按上限 4 小时保守申报。后果：SLA 的 RTO 在 region 故障下不成立（属排除项②）。改进：实测值写进 M5 证据与客户对齐；不接受则需第三 region 主库（超范围重新立项）。
+- 坑 4｜恢复耗时未计入 region 级故障场景。64GB 级实例 PITR 实测常在 **1.5–4 小时**。后果：SLA 的 RTO 在 region 故障下不成立（属排除项②）。改进：实测值写进 M5 证据与客户对齐；不接受则需第三 region 主库（超范围重新立项）。
 - 收尾：`aliyun rds DeleteDBInstance --DBInstanceId ${NEW_DRILL_INSTANCE_ID}`（先关删除保护），导出备份任务耗时曲线截图存档。
 
 ### Day 3 · 任务 37｜主库故障切换演练：RDS HA + 应用重连 + 额度对账（单人，2 人时，20:00–22:00 演练窗口）
 
-**前置/状态**：任务 43/44 完成（**托管池已启用**，实测 `pgbouncer.query_wait_timeout=120` 大于漂移时间）；Redis fail-open 已在 §7.4 验证；冻结发布（§11.2）并通知窗口；**演练前临时降低 GTM 敏感度或摘掉备池**（备池本不该在 D7 前加入）。
+**前置/状态**：任务 43/44 完成（PgBouncer 已上线，`query_wait_timeout=120` 大于漂移时间）；Redis fail-open 已在 §7.4 验证；冻结发布（§11.2）并通知窗口；**演练前临时降低 GTM 敏感度或摘掉备池**（备池本不该在 D7 前加入）。
 
 **操作步骤（CLI-first）**：
 
@@ -4521,7 +3868,7 @@ psql "host=${RDS_HOST} user=${DBA_USER} dbname=newapi" -c "SELECT ..."  # 对账
 ```
 [ ] 任务 26：SLS 两站 Project/Logstore 就绪，GetLogs 有真实 Pod 日志；Grafana（新加坡）跨区数据源出图；三重拨测独立产出结果
 [ ] 任务 32：SLO/错误预算看板（21.6 分钟/月）可用；可控 P1 在 ≤3 分钟电话触达 2 值班 + 负责人；上游 5xx 单独曲线不计入自身 SLA
-[ ] 任务 43：单实例容量 C 实测落表；HPA 4→16 阶梯扩容无 Pending、缩容不低于 4；I-1/I-2/I-3 三不变量通过（**托管池已启用**；裁定 ① 后 I-1 = `16×100 + 24×10 = 1840 ≤ 2000`，**仅在 CK 日志库分支成立** ⇒ 本项在 CK 实例就绪前按 PG 分支 3680 判"未过"，处置见任务 41 步骤 2 的 (a)/(b)）
+[ ] 任务 43：单实例容量 C 实测落表；HPA 4→16 阶梯扩容无 Pending、缩容不低于 4；I-1/I-2/I-3 三不变量通过（16 实例 PgBouncer 就位）
 [ ] 任务 44：备站 min=2→24 全 Ready ≤6 分钟（>10 分钟须重谈 RTO）；24×C ≥ 1.5×主站峰值；warmup→切流顺序固化进 Runbook
 [ ] 任务 27：x-canary 头强制路由 + 1000 采样占比 ≈5% + 权重归 0 秒级生效三项全过；canary 独立告警（5xx>3 兜底）已建
 [ ] 任务 31：5→20→50→100 每档 GUARD1 全绿（对账差异=0）；回滚 ≤30s 无残余错误；stable 已滚同 SHA、canary 保留为回滚目标
@@ -4537,8 +3884,6 @@ psql "host=${RDS_HOST} user=${DBA_USER} dbname=newapi" -c "SELECT ..."  # 对账
 ### Day 4 · 任务 33｜容量与压测验收（并发 SSE 1500 / 管理面 800 QPS，场景 S1–S10）（单人 + agent 观测，4 人时，08:30–12:30）
 
 **前置/状态**：Day 3 出口（M3）已过：ALB/WAF/GTM 生效、安全可观测收口、单实例容量基线 C 已实测（1500 并发 ÷ C ≤ 16 或已提配额）；perf 命名空间 `new-api-perf` 与独立库 `newapi_perf` 就绪（Day 2）；G8 `/metrics` 已合并，观测指标可抓。
-
-> **DB 侧口径（2026-09-29 起以实测规格为准）**：主库为 **`pg.n4.2c.2m` = 2C/8G，`max_connections=800`（F11，用户不可改）**。因此 1500 并发 SSE 是**网关副本**的考核项，不是 DB 的；DB 侧能被压到的前提是连接已经 PgBouncer 收敛（≤640 预算）。压测判读规则：**若 S2/S4 期间 RDS 侧 CPU 打满或出现慢查询堆积，而网关副本 CPU/FD 仍有明显余量，则结论是"容量瓶颈在 DB 规格"**，此时加副本只会放大 DB 压力；处置只能是升配或改 SQL/索引，并**需要重新做成本决策**（原 16C64G 假设已作废，见任务 4/13）。perf 库 `newapi_perf` 与生产同实例同规格，故本卡测出的 DB 天花板可直接外推到主站。
 
 **操作步骤（CLI-first）**：
 
@@ -4579,9 +3924,9 @@ kubectl --context perf -n new-api-perf get pods -l app=mock-upstream
 | 场景 | 内容 | 关键断言 |
 | --- | --- | --- |
 | S1 常态 | 500 并发 SSE，30% 命中缓存 | P95 首字 ≤ 800ms；5xx ≤0.05% |
-| S2 峰值 | **1500 并发 SSE** | HPA 扩到位，无 Pending；FD/内存不触顶；**同步记 RDS(2C8G) CPU 与 `pg_stat_activity` 等待**，撞 DB 即按上方口径判读 |
+| S2 峰值 | **1500 并发 SSE** | HPA 扩到位，无 Pending；FD/内存不触顶 |
 | S3 突发 | 0 → 1500 并发 30 秒内 | 冷启动窗口错误率 ≤1%，30s 内回稳 |
-| S4 管理面 | 800 QPS 登录/列渠道/看板 | 无 DB 慢查询堆积；登录限流不误伤。**800 QPS 是管理面目标，2C/8G 下若先撞 DB，属预期风险而非意外** |
+| S4 管理面 | 800 QPS 登录/列渠道/看板 | 无 DB 慢查询堆积；登录限流不误伤 |
 | S5 上游劣化 | 上游 50% 请求 5xx / 延迟 5s | 自身不被拖死；错误归类为 `upstream_error`；熔断生效 |
 | S6 Redis 故障 | kill Tair 连接 | **降级放行而非 fail-closed**（G8）；额度不出错 |
 | S7 日志库故障 | 断开 `LOG_SQL_DSN` | 业务不阻塞；降级计数上升 |
@@ -4964,7 +4309,7 @@ kubectl --context perf -n new-api-perf exec deploy/new-api -- sh -c \
 | --- | --- | --- |
 | **G0（Day 0 前）** | T-5/T-3 十三项前置全部完成（**4 天口径下全部提前到 Day 0 之前**，任一项"已提工单待回"= 未过，D1 不得启动） | 实名批复截图、配额工单批复号、`dig` NS 生效输出、证书签发详情（含 Sans/到期）、11 类产品开通列表、**G8 合并 commit + CI 绿**、连接数预算表、SLA 口径签字页、staging 方案确认 |
 | **M1（Day 1 出口：网络 + 数据底座）** | VPC/10 vSwitch 网段照 §2.2 落地且地址基线记录；RDS 高可用两 AZ、Tair、日志库决策全部就绪 | `.deploy/evidence/d1/vswitch-ip-baseline.txt`（`DescribeVSwitchAttributes` 的 `AvailableIpAddressCount`）；`d1/rds-ha-status.png`【控制台】两 AZ 主备状态；`d1/tair-policy.txt`（`allkeys-lru` 输出）；`d1/ck-instance.txt`（马尼拉 CK 企业版单 AZ `clickhouse DescribeDBInstances --RegionId ap-southeast-6` 输出，F9）；`d1/conn-budget.csv`（按 **800 上限**重算的连接预算表 + 自建 PgBouncer `SHOW POOLS` 输出，F10/F11）；`d1/eip-roster.csv`（8 EIP 登记）；`d1/sg-bindings.txt`（SG 绑定 `sg-mnl-app`，非 127.0.0.1） |
-| **M2（Day 2 出口：集群 + 应用底座 + 入口）** | 双集群跨 AZ 可调度、镜像流水线通、stable 与备站跑通、主站 token 在备站可用 | `d2/nodes-zones.txt`（两集群 `kubectl get nodes` 跨 AZ）；`d2/node-fd-limit.txt`（`ulimit -n`**≥200000**，实测软/硬限 262144）；`d2/migration-idempotent.txt`（master 二次启动 DDL=0）；`d2/stable-sg-running.txt`；`d2/cross-region-token.json`（主站 token 在备站可用） |
+| **M2（Day 2 出口：集群 + 应用底座 + 入口）** | 双集群跨 AZ 可调度、镜像流水线通、stable 与备站跑通、主站 token 在备站可用 | `d2/nodes-zones.txt`（两集群 `kubectl get nodes` 跨 AZ）；`d2/node-fd-limit.txt`（`ulimit -n`=200000）；`d2/migration-idempotent.txt`（master 二次启动 DDL=0）；`d2/stable-sg-running.txt`；`d2/cross-region-token.json`（主站 token 在备站可用） |
 | **M3（Day 3 出口：安全可观测 + 演练）** | ALB/WAF/GTM 对外生效、安全收口、三重拨测、灰度与故障演练全过 | `d3/alb-waf-gtm.txt`（生效验证）；`d3/sg-negative-test.txt`（SG 反例自查输出为空、伪造 Host 非 200）；`d3/triple-probe.md`（GTM/云监控站点监控/blackbox 独立产出）；`d3/canary-weights.txt`（5/20/50/100 权重实测 + 归零 ≤30s）；`d3/security-audit-15.md`（15 项含豁免单）；`d3/rds-failover-60s.json`（主备切换 5xx 窗口 ≤60s 且自愈、额度对账 0 差异）；`d3/config-sync.txt`（30s 跨副本 + 60s 跨 region 收敛） |
 | **M4（Day 4 上午～午后：容量与接管）** | 压测硬门槛过 + 接管演练判据全过（**本日任务 33/36/49/39 即其证据来源**） | `d4/capacity-C.csv`（单实例容量 C 表；1500 并发 ÷ C ≤ 16）；`d4/s1-s10-report.md`（含曲线截图）；`d4/hpa-scaling.txt`（主站 4–16 与备站 2–24 实测）；`d4/warmup-tw.txt`（备站 24 副本预热耗时 Tw/Twarm 实测）；`d4/takeover-0-120s-dbqps-p99.{json,png}`；`d4/takeover-report.md`（接管/回切 ≤90s、会话保持、对账 0 差异） |
 | **M5（Day 4 晚：上线 + 移交）** | 正式发布完成 + 移交生效 | `d4/go-live-checklist-signed.md`（上线检查表 100% 勾选归档）；`d4/sla-caliber-signed.md`（SLA 五条口径 + 4 排除项书面签字）；`d4/release-snapshot-{30,60,120}.json`；`d4/handoff-9kit.md`（移交九件套 + 抽考记录 + 2 周影子值班计划）；72h 冻结窗监控延续记录（Day 5–Day 7） |
@@ -5012,7 +4357,7 @@ kubectl --context perf -n new-api-perf exec deploy/new-api -- sh -c \
    - **Agent 批量执行**：所有 `aliyun`/`kubectl`/`psql` 复核类命令由 Agent 成批跑并留输出，人只做判断、审批与不可逆动作（§0.2 折减系数 0.3–0.4）；
    - **双人复核远程化**：切流、发布、密钥轮换、WAF/证书变更四类红线动作，**必须由远程第二方经 IM/工单核准并留痕**；核准联系不到 = **不动手**，当日该项顺延并报障；
    - **顺延 backlog 已明示**：任务 52 全量、任务 45 全量矩阵、任务 39 全量拨测、任务 35 完整移交（T+3）、Grafana 全量看板——不占 4 天线。
-   **不可顺延项**：四项演练、G8 代码补项、托管 PgBouncer（RDS 内置，已启用）+ 800 连接预算（F10 撤销/F11）、白名单收口、`SESSION_SECRET` 一致性。
+   **不可顺延项**：四项演练、G8 代码补项、自建 PgBouncer + 800 连接预算（F10/F11）、白名单收口、`SESSION_SECRET` 一致性。
    **单人口径的残余风险（签字方须明示接受）**：① 生病/请假 = 工期硬中断，无替换人；② 知识单点——连接预算、CK 企业版、GTM 接管口径集中在同一人，任务 35 完整移交顺延 T+3 期间运维侧无 backup；③ **演练第二方不可达 = 演练不开始**（接管/回滚演练需至少一名观察人独立确认判据，单人不得自评通过）。
 4. **未压缩项声明**：72h 发布冻结窗、2 周影子值班、SLA 五条口径与 4 排除项、G8 代码门禁、PITR/对账标准**均不在压缩范围内**，维持 v2.1 原值；压缩只发生在日历跨度与并行度上。
 ## 回滚与应急预案
@@ -5120,10 +4465,8 @@ kubectl -n new-api annotate ingress new-api-canary alb.ingress.kubernetes.io/can
 kubectl -n new-api patch hpa hpa-new-api-stable --type=merge -p '{"spec":{"minReplicas":12}}'
 # 或临时绕 HPA（记录并 30 分钟内恢复）
 kubectl -n new-api scale deploy/new-api-stable 12
-# 节点不够 → 调高节点池自动伸缩上限（开伸缩后【禁止】再改 scaling_group.desired_size）
-aliyun cs ModifyClusterNodePool --ClusterId ${ACK_MNL_ID} --NodepoolId ${NP_MNL} --region ap-southeast-6 \
-  --body '{"auto_scaling":{"enable":true,"type":"cpu","min_instances":4,"max_instances":8}}'
-# ⚠️ 开伸缩后禁止改 desired_size；临时扩容请提 max_instances，并同步抬 HPA maxReplicas
+# 节点不够 → 调高节点池的期望节点数（desired_size）
+aliyun cs ModifyClusterNodePool --ClusterId ${ACK_MNL_ID} --NodepoolId ${NP_MNL} --body '{"scaling_group":{"desired_size":8}}'
 ```
 
 **坑**：手工 `scale` 与 HPA/GitOps 三方打架（GitOps 会把它 sync 回去）。改进：预案里**一律用 HPA `minReplicas`**，不改 Deployment。
@@ -5172,16 +4515,14 @@ aliyun quotas ListProductQuotas --ProductCode ecs-spec \
 aliyun quotas ListProductQuotas --ProductCode ecs-spec \
   --Dimensions.1.Key regionId --Dimensions.1.Value ap-southeast-1 --MaxResults 100
 # 期望输出：目标配额行的 TotalQuota 为批复后的值
-#   （包年包月口径 q_ecs_enterprise_prepay_c = 100 / 100，2026-09-28 实测）
-#   （按量口径对照 q_ecs_enterprise_postpay_c = 64 / 96，仅作对照；两者分别计量）
+#   （马尼拉 q_ecs_enterprise_postpay_c = 64 / 新加坡 = 96）
 
 # 提交配额申请：参数是 --DesireValue（无 d），没有 --Version，
 # 地域用 --Dimensions.1.Key regionId（不是 --DomainRegions）
-# 付费方式为包年包月 → 申请的配额码必须是 prepay（postpay 批了也不够用）
 aliyun quotas CreateQuotaApplication \
   --ProductCode ecs-spec \
-  --QuotaActionCode q_ecs_enterprise_prepay_c \
-  --DesireValue 100 \
+  --QuotaActionCode q_ecs_enterprise_postpay_c \
+  --DesireValue 64 \
   --Reason "takeover capacity >= 1.5x peak: pods x vCPU 可核算容量式" \
   --Dimensions.1.Key regionId --Dimensions.1.Value ap-southeast-6 \
   --NoticeType 3 --QuotaCategory CommonQuota
@@ -5192,9 +4533,8 @@ aliyun quotas ListQuotaApplications --ProductCode ecs-spec \
 
 # ---- 机型可用性验证（建节点池前强制动作，2026-09-25 实测） ----
 # g8i 全系未在马尼拉上架，必须验证 g9i.2xlarge 可用后才能定机型
-# 付费方式 = 包年包月 → 查询也必须用 PrePaid（包年包月与按量可售池不共享）
 aliyun ecs DescribeAvailableResource --RegionId ap-southeast-6 \
-  --DestinationResource InstanceType --InstanceChargeType PrePaid \
+  --DestinationResource InstanceType --InstanceChargeType PostPaid \
   --IoOptimized optimized --NetworkCategory vpc \
   --endpoint ecs.ap-southeast-6.aliyuncs.com \
  | jq -r '.AvailableZones.AvailableZone[]|.AvailableResources.AvailableResource[]|.SupportedResources.SupportedResource[]|select(.Status=="Available")|.Value' \
@@ -5227,7 +4567,7 @@ aliyun rds DescribeDBInstanceSSL --DBInstanceId ${RDS_MNL_ID} | jq '{SSLEnabled,
 aliyun cs DescribeClusterDetail --ClusterId ${ACK_MNL_ID} \
   | jq '{state,current_version,cluster_spec,profile,parameters:(.parameters|map(select(.key|test("RRSA|EndpointPublicAccess|SnatEntry"))))}'
 aliyun cs ListClusterNodePools --ClusterId ${ACK_MNL_ID} \
-  | jq -r '.nodepools[]|[.nodepool_info.nodepool_id,.auto_scaling.enable,.auto_scaling.min_instances,.auto_scaling.max_instances]|@tsv'
+  | jq -r '.nodepools[]|[.nodepool_info.nodepool_id,.auto_scaling.enable,.scaling_group.min_instances,.scaling_group.max_instances]|@tsv'
 
 # ---- ALB / 证书 / WAF ----
 aliyun alb GetListenerAttribute --ListenerId ${LID} | jq '{IdleTimeout,RequestTimeout,SecurityPolicyId}'
@@ -5237,10 +4577,7 @@ aliyun dcdn DescribeDcdnL2Ips | jq -r '.[]'      # 仅启用 DCDN 时需要
 # ---- 连接数与数据库健康 ----
 psql "$DSN_MIGRATE" -c "select datname,count(*) from pg_stat_activity group by 1"
 psql "$DSN_MIGRATE" -c "select state,count(*) from pg_stat_activity group by 1 order by 2 desc"
-psql "$DSN_MIGRATE" -c "SHOW max_connections;"    # 800，预算封顶 640（F11）
-# ⚠ 托管 PgBouncer 的 admin 入口：裁定 ④ 已设 stats_users=newapi_ops（只恢复 SHOW 类只读），
-#    但 admin 库能否登录**尚未实测**（任务 41 步骤 5）⇒ 实测前仍按"SHOW POOLS/SHOW STATS 不可用"处置；
-#    池侧观测看 CMS 监控指标 db.pgbouncer.*，收敛性用"客户端连接数 ≫ pg_stat_activity 增量"反证（任务 41）
+SHOW POOLS   # pgbouncer admin
 
 # ---- K8s 日常 ----
 kubectl -n new-api get deploy,hpa,pdb,ingress -o wide
@@ -5254,7 +4591,7 @@ kubectl -n new-api get events --sort-by=.lastTimestamp | tail -20
 ☐ 三重拨测全绿且无抖动（过去 24h）
 ☐ 错误预算本月剩余 > 15 分钟
 ☐ RDS: CPU<60%、连接数<70% 预算、无 >1s 慢查询堆积、复制/备份无失败
-☐ PgBouncer(托管): CMS db.pgbouncer.* 无等待堆积、pg_stat_activity ≤ 640、无 42P05（SHOW POOLS 不可用）
+☐ PgBouncer: cl_waiting=0、sv_active 稳定
 ☐ ACK: 节点全 Ready、无 Pending、可分配内存 > 30%
 ☐ stable 副本数 = min 且 PDB ALLOWED DISRUPTIONS ≥1
 ☐ GTM: 主访问池健康、TTL 60、备用访问池按最终决策（常驻 0 权重 / 不加入）
@@ -5276,40 +4613,13 @@ kubectl -n new-api get events --sort-by=.lastTimestamp | tail -20
 | 代码事实（本仓库实测） | `common/init.go:50-55`（SESSION_SECRET 默认值 Fatal）、`common/init.go:88-89`（`NODE_TYPE != "slave"` 判 master）、`common/init.go:110`（SYNC_FREQUENCY 默认 60）、`common/init.go:123-125`（限流默认 360/180s）、`model/main.go:145`（主库不支持 CK）、`model/main.go:212/259`（`SQL_MAX_OPEN_CONNS` 默认 **1000**）、`router/api-router.go:26`（唯一 `GET /api/status`） | 全仓 grep 确认 `/healthz`、`/readyz`、`/metrics` **未注册** |
 | 云产品能力 | 阿里云国际站帮助中心中文文档（alibabacloud.com/help）+ **API/CLI 实测**，核对时间 **2026-09-25 / 09-26** | 21 项差异（§1）；产品可用性列表会变，动手前一律 `【控制台核实】` |
 
-### 运维上手：登录节点与 Pod（新人必读）
-
-> **全文**：`deploy/跳板机运维入门_登录机器与Pod_2026-09-29.md`（含实测证据、排错表、红线）。
-> 新人拿到跳板机权限后先读本节，遇到具体报错再翻全文。本节事实均于 **2026-09-29** 真机实测。
-
-**四条常用路径**
-
-| 目标 | 做法 | 前提 / 注意 |
-| --- | --- | --- |
-| 拿集群操作权限 | 跳板机上执行 `newapi-kube` | 经实例 RAM 角色换 **60 分钟临时 kubeconfig**；过期报 401 就重跑（脚本必须显式带 `--region ap-southeast-6`，否则 `region can't be empty`） |
-| **进 Pod** | `kubectl -n <ns> exec -it <pod> -- sh` | 业务镜像通常只有 `sh`；多容器加 `-c <container>`；脚本里别用 `-t` |
-| **进节点（宿主 root）** | `kubectl debug node/<node> -it --image=busybox:1.36 --profile=sysadmin` → 进去后 `chroot /host` | 无需密钥、无需改安全组；**特权 Pod 用完必须删** `node-debugger-*` |
-| 进任意 ECS（应急） | ECS 控制台 → 实例 → 远程连接 → **会话管理** | 即任务 46 主通道，零入向端口 + 会话录制投递 OSS；集群自身不可用时用这条 |
-
-节点名是 `region.内网IP` 形态（如 `ap-southeast-6.10.0.22.194` = 内网 10.0.22.194 / AZ 6a），4 台节点私网为 `10.0.22.194/195`、`10.0.43.200/201`。
-
-**两条硬约束（属设计，别改）**
-
-- **节点不允许 ssh**：`sg-mnl-app` 入向仅 `10250 ← 10.0.0.0/16`（kubelet，供 apiserver 的 logs/exec/metrics）与 `3000 ← sg-mnl-alb`，**没有 22** —— 即 §8.1「禁止横向」。要宿主 shell 用 `kubectl debug node`，**不要**为了登机器给节点加 22 入向。
-  实测旁证：跳板机 → 节点 `10.0.22.194:22` = 超时；且跳板机上没有 `newapi-mnl` 私钥。
-- **RDS 不能直连**：`sg-mnl-db` 白名单只有 `sg-mnl-app`（`from-app-only`）+ 4 个新加坡 NAT EIP（`from-sg-nat-eip`，备区接管预留）；跳板机在 `sg-mnl-alb-edge`，**不在白名单**。连库要从 Pod 里连：
-  `kubectl -n new-api run pgcli --rm -it --restart=Never --image=postgres:17-alpine -- psql -h <RDS 内网地址> -U <user> -d <db>`（`--rm` 用完即删；凭据从 KMS 取）。
-
-**跨区**：跳板机在马尼拉 VPC，私网**到不了**新加坡 `ap-southeast-1` 集群 API Server（未建 VPC 对等 / CEN），备区需单独入口。
-
-**⚠️ 本条为新增发现，建议并入任务 22 安全组收口**：`alicloud-cs-auto-created-security-group-cd57e40ce9a634c1698c2f5c5e09bd93c`（`sg-5tsaatp5w68vyqszezja`）内有一条 **`-1/-1 ← 0.0.0.0/0` 全放行**规则，而 `DescribeSecurityGroupReferences` 显示该组**未被任何实例 / 弹性网卡引用**（孤儿安全组）→ 确认后删除，避免安全核查扣分。（对照：`sg-mnl-app` 的 V4 反例自查可通过——无 `0.0.0.0/0` 入向，也无 80/443 以外的公网入向。）
-
 ### 术语与缩写
 
 | 术语 | 含义 |
 | --- | --- |
 | G0 / G1–G13 | 上线前置门禁（Gate）；G0 = 全部前置通过，D1 才允许启动 |
 | M1–M5 | 里程碑（§12.1） |
-| 三不变量 I-1/I-2/I-3 | 连接数预算：应用侧客户端总量 vs **托管池 `pgbouncer.max_client_conn`**（I-1）、池 server 侧 + 池外直连 vs RDS `max_connections×0.8`（I-2）、迁移/运维直连旁路预留（I-3）。池为 **RDS 内置托管 PgBouncer**（F10 已撤销，`impl_deploy.md` 7.4.5.1 的自建口径仅留档） |
+| 三不变量 I-1/I-2/I-3 | 连接数预算：应用侧总量、PgBouncer 池、RDS `max_connections` 三者关系（`impl_deploy.md` 7.4.5.1） |
 | expand-contract | 迁移三段式：加→回填→删（§9.5） |
 | 双密钥轮换 | `SESSION_SECRET` + `SESSION_SECRET_OLD` 过渡（§9.6） |
 | 1.5× 接管容量 | 单站点全量接管能力 ≥ 被接管站点峰值 × 1.5（`impl_deploy.md` 8.5） |

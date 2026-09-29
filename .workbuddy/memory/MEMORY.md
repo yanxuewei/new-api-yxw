@@ -1,61 +1,65 @@
 # new-api 菲律宾部署 · 项目长期约定（索引版）
 
-> 详版口径与全部坑 → `.workbuddy/memory/REFERENCE.md`；过程流水 → `YYYY-MM-DD.md`。
+> **权威文档（2026-09-28 用户指定，一切操作以此二者为准）**
+> ① `deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md`（4648 行 · 4 天/单人/CLI-first · 含 F1–F11 最新修订 · 56 张任务卡 + 回滚预案 + 附录速查）
+> ② `deploy/菲律宾部署方案-v2.3-修订版.xlsx`（7 表：说明与总览 / 账号与域名申请19项 / 资源清单-马尼拉39项 / 资源清单-新加坡20项 / 网络与安全规划 / 落地计划56任务+15时段+G1–G13门禁 / 里程碑与验收M1–M5+SLA+风险+裁剪）
+> 二者冲突时 **以 ① 的 F9/F10/F11 与 §0.5 为准**（① 修订于 2026-09-27/28，晚于 ② 的 2026-09-24 编制）。
+> 详版口径与全部坑 → `REFERENCE.md`；过程流水 → `YYYY-MM-DD.md`。
 > 权限权威 `deploy/用户设置指南.md`；切换方案 `deploy/DCDN回源层切换_方案.md`。
 
+## 两文档口径冲突（②落伍处，一律按 ① 执行）
+| 项 | ② xlsx v2.3 | ① 指南 v2.0（采信） |
+|---|---|---|
+| 排期 | 2 人 × 5 天 × 3 段 = 120 人时 | 1 人 × 4 天 × 2 窗（A 日间 08:30–14:00 / B 午后 14:00–22:00）；顺延 backlog：任务 52/45 全量/39 全量/35 完整移交/Grafana 全量 → T+14 |
+| 日志库 | 马尼拉 CK **社区版** + **新加坡 CK** | **F9**：仅马尼拉 CK **企业版单 AZ**；不建新加坡 CK；日志不入 SLA 证据链 + 写失败必须降级（未演练不得切流） |
+| 镜像源 | 双地域 ACR（mln + sg 各一） | **单地域马尼拉 ACR**；SG 节点跨区走**公网端点**拉（已接受权衡，RTO 须含拉取耗时） |
+| 连接收敛 | RDS 代理独享型 或 PgBouncer | **F10 自建 PgBouncer 3 副本**；**F11** 实测 `max_connections=800` 不可改 → 预算封顶 **640**；主站 `SQL_MAX_OPEN_CONNS=150`（日志库 50）、SG 备站 `10` 直连公网不经池 |
+| 节点机型 | `g8i.2xlarge` | **F1 `ecs.g9i.2xlarge`**（g8i 马尼拉全系未上架），备 `g8ine.2xlarge`；Day 2 首动作 `DescribeAvailableResource` 复验 |
+| ALB 超时 | requestTimeout 180s | **600s（上限）**；SSE 靠网关 15–20s ping 保活 |
+| ACK | 1.31+ | **1.35**（1.31/1.33 已 EOL） |
+| 备案证据目录 | `.deploy/evidence/` | `deploy/evidence/`（`.deploy/` 已改名 `deploy/`） |
+
 ## 执行环境（2026-09-28 起 · 优先级最高）
-**本项目所有命令默认在 WSL Ubuntu 里跑**，不用宿主 Git Bash / PowerShell（fanyan 指定）。
-- 调用：`wsl -d Ubuntu -u root -- bash -c "..."`；**带引号/多行脚本先 Write 成文件再 `bash /mnt/e/.../x.sh`**（直传会被 wsl.exe 拆坏）。cwd 自动继承并转换。
-- ⚠️ **`/mnt/e` 下的文本是 CRLF** → WSL 里 `grep`/`awk`/命令替换读进来残留 `\r`，比对/拼接**必然假失败**（实测 `go.mod` 的 `go 1.25.1` 读成 `1.25.1\r`）。**一律接 `tr -d '\r'`**。
-- ⚠️ **`bash -c` 不读 `/etc/profile.d/`**，且 `go env -w` 是 per-user（写 `$HOME/.config/go/env`）→ root 与 fanyan 各需一份。
-- ✅ **Go 已开箱可用（2026-09-28 验收）**：`go1.25.1`（与 `go.mod` 完全一致）+ `GOPROXY=https://goproxy.cn,direct`；`bash -c` 下也能直接用（靠 `/usr/local/bin/go` 符号链接）。实测 `go get gin@latest` 拉全部依赖 **3.0s**（`proxy.golang.org` 则完全不通）。脚本 `E:\WSL\setup-wsl-dev-env.sh`（幂等）。
-- ⚠️ **WSL 内暂无 `node`/`npm`/`bun`/`kubectl`/`helm`**（原生版未装）；关掉 Windows PATH 注入后，**Windows 侧那套 node/npm/bun 也不再「假可用」** → 需要时须装 Linux 版（`web/` 前端用 bun）。`aliyun` CLI / `ossutil` 同样只在 macOS 侧。
-- ✅ **PATH 污染已清（2026-09-28）**：`/etc/wsl.conf` 已加 `[interop] appendWindowsPath = false`（备份 `/etc/wsl.conf.bak-20260928-105604`）；PATH 中 `/mnt/` 条目 **42 → 0**，`cmd.exe` 不再可调，`/mnt/c` 挂载仍保留。3 个容器 `restart: always`，WSL 重启后自动恢复。
-- 路径：宿主 `E:\git_code\new-api-yxw` = WSL `/mnt/e/git_code/new-api-yxw`。
-- **WSL 已就绪**：git 2.34 · python3.10 + pip26 · docker 29.8（含 compose v5.5）· curl/wget/rsync/unzip。已跑容器 `new-api`(:3000 healthy) · `postgres:15` · `redis`。
-- ⚠️ **Go 已装在 `/usr/local/go`，但 `/usr/local/go/bin` 不在 PATH** → `go` 命令找不到；`GOPROXY` 也未设。
-- ⚠️ **WSL 里 `proxy.golang.org` 彻底不通**（curl 返回 000）→ 构建**必须** `GOPROXY=https://goproxy.cn,direct`（与 macOS 侧 §Docker构建 同一个坑）。其余 github / npm / 阿里云镜像 / ACR 公网域名均 200。
-- ⚠️ **PATH 被 Windows 严重污染**（`/etc/wsl.conf` 无 `[interop]` 段 → `appendWindowsPath` 默认 true，灌入 50+ 条 `/mnt/c|d|e/...`）：在 WSL 里 `npm` 会解析到 **Windows 版**、`node` 反而找不到。根治 = `/etc/wsl.conf` 加 `[interop] appendWindowsPath=false`（**需 `wsl --shutdown`，会重启上述容器**）。
-- 缺：`make` `jq` `helm` `kubectl` `bun`。
-- 磁盘：`/tmp`(ext4) 2.9 GB/s vs `/mnt/e` 421 MB/s；小文件差距更大（历史实测 78×）→ **编译/装依赖别放 `/mnt/e`**。宿主 28 核 / WSL 15 GiB。
-- ✅ **阿里云工具链已在 WSL 就绪（2026-09-28）**：`aliyun` CLI **3.5.1** + `ossutil` **2.2.1**，均在 `/usr/local/bin/`。
-  - 凭证：`~/.aliyun/config.json` + `~/.ossutilconfig`（权限 600），**root 与 fanyan 各一份**；`site=international`、默认 region `ap-southeast-6`。
-  - ⚠️ **凭证别依赖 `.bashrc` 的 export**：Ubuntu `.bashrc` 第 6 行 `case $- in` 守卫会让**非交互 shell 提前 return** → 实测 `bash -c` / `bash -lc` 读到的 `ALIBABA_CLOUD_ACCESS_KEY_ID` 长度都是 **0**，只有 `bash -lic`（强制交互）才拿得到。**故一律走 CLI 配置文件**（与 shell 解耦）。
-  - 实测通过：`sts get-caller-identity` → `acs:ram::5108890064395960:user/yanxuewei` · `resourcemanager list-resource-groups`（含 `rg-ph-mnl` = `rg-aek4nyivmmsb6iy`）· `bssopenapi query-account-balance` · `ossutil ls`（3 桶）。
-  - **CLI 3.x 用 kebab-case**：`aliyun sts get-caller-identity`、`aliyun resourcemanager list-resource-groups`。`safety-policy` 默认 `enabled=false`（不阻塞脚本）。
-  - 脚本：`E:\WSL\setup-aliyun-toolchain.sh`（装）· `E:\WSL\configure-aliyun-creds.sh {china|international}`（配，密钥不经命令行、不打印）。
+**本项目所有命令默认在 WSL Ubuntu 里跑**，不用宿主 Git Bash / PowerShell。
+- 调用 `wsl -d Ubuntu -u root -- bash -c "..."`；**带引号/多行脚本先 Write 成文件再 `bash /mnt/e/.../x.sh`**（直传被 wsl.exe 拆坏）。
+- ⚠️ **`/mnt/e` 文本是 CRLF** → `grep`/`awk`/命令替换读入残留 `\r` → 比对**必然假失败**（实测 `go.mod` 读成 `1.25.1\r`）→ **一律接 `tr -d '\r'`**；脚本写进 `/mnt/e` 后先 `sed -i 's/\r$//'`。
+- ⚠️ **`bash -c` 不读 `/etc/profile.d/`**，`go env -w` 是 per-user → root 与 fanyan 各需一份。
+- ⚠️ **`$?` 在 `bash -c "...; echo $?"` 里被吞成 0** → 判退出码用 `&& echo A || echo B`。`bash /mnt/e/x.sh`（不带 `-c`）会被 Git Bash 路径转换 → 必须 `bash -c "bash /mnt/e/..."`。
+- ✅ Go 1.25.1（= `go.mod`）+ `GOPROXY=https://goproxy.cn,direct`，`bash -c` 下可用（`/usr/local/bin/go` 符号链接）。脚本 `E:\WSL\setup-wsl-dev-env.sh`（幂等）。
+- ✅ **PATH 污染已清**：`/etc/wsl.conf` 加 `[interop] appendWindowsPath=false`（备份 `.bak-20260928-105604`）；`/mnt/` 条目 42→0，`cmd.exe` 不可调，`/mnt/c` 仍挂载；3 容器 `restart: always` 自动恢复。
+- ⚠️ WSL 内**无 node/npm/bun/kubectl/helm**（`web/` 前端用 bun，需时装 Linux 版）。
+- 路径：宿主 `E:\git_code\new-api-yxw` = WSL `/mnt/e/git_code/new-api-yxw`。**编译/装依赖别放 `/mnt/e`**（`/tmp` ext4 2.9 GB/s vs `/mnt/e` 421 MB/s，小文件差 78×）。
+- 已就绪：git 2.34 · python3.10 · docker 29.8（compose v5.5）· curl/wget/rsync/unzip/make/jq/zip/tree。容器 `new-api`(:3000) · `postgres:15` · `redis`。
 
 ## 账号 / 端点
-账号 `5108890064395960`；主 region `ap-southeast-6`（马尼拉，仅 6a/6b），备 `ap-southeast-1`（新加坡）。
-`aliyun` CLI `~/.workbuddy/binaries/aliyun-cli/aliyun`（非交互 `zsh -i -c`）；OSS 用 `ossutil` v2。
-**RAM / resourcemanager / bssopenapi 必须 `--region ap-southeast-1`**；VPC/ECS/CR/SLS 必带 `--region`（只传 `--endpoint` 无效）。
+账号 `5108890064395960`（国际站）；主 region `ap-southeast-6`（马尼拉，仅 6a/6b），备 `ap-southeast-1`（新加坡）。域名 `api.likha.com` / `ops.likha.com`，通配证书 `*.likha.com`。
+`aliyun` CLI **3.5.1** + `ossutil` **2.2.1** 已装 WSL `/usr/local/bin`；macOS 侧在 `~/.workbuddy/binaries/aliyun-cli/aliyun`（非交互 `zsh -i -c`）。
+- 凭证走**配置文件**（`~/.aliyun/config.json` + `~/.ossutilconfig`，600，root+fanyan 各一份，`site=international`）——**别依赖 `.bashrc` export**：Ubuntu `.bashrc` 非交互守卫提前 return → `bash -c`/`-lc` 读到 AK 长度 0，只有 `-lic` 才拿到。
+- **RAM / resourcemanager / bssopenapi 必须 `--region ap-southeast-1`**；VPC/ECS/CR/SLS 必带 `--region`（只传 `--endpoint` 无效）。
+- CLI 3.x 用 **kebab-case**（`aliyun sts get-caller-identity`）；`safety-policy` 默认 `enabled=false`。
+- 脚本：`E:\WSL\setup-aliyun-toolchain.sh` · `configure-aliyun-creds.sh {china|international}`。
 
 ## 高频坑
-- 变量后紧跟中文/全角标点被 bash 3.2 吞 → 一律 `${VAR}`；`set -u` 下 `local x y` 未赋值即 unbound。
-- 函数日志必须 `>&2`（否则 `ID=$(f)` 把日志吞进变量）；macOS grep 用 `-E 'A|B'`（不认 `\|`）。
-- 禁用变量名（macOS 只读内建）：`GROUPS`(=20) · `UID` · `EUID` · `PPID` · `RANDOM` · `SECONDS` · `PIPESTATUS` · `BASH_*` · `LINENO`。
-- **权限探测严禁子串匹配**（`AccessDenied` 会出现在事件正文）；不能用不存在的资源 ID 探测（存在性校验先于鉴权）→ 用幂等写。
-- ⚠️ **`DescribeZones` 列出的可用区 ≠ 产品在该区可售**：马尼拉 Tair `DescribeZones` 明确返回 6b 且 `Disabled=false`，但 `CreateInstance --SecondaryZoneId ap-southeast-6b` **一律 `InternalFailure`**（`DescribeAvailableResource --ZoneId 6b` 恒空）→ **Tair 马尼拉不支持跨 AZ**。判"能否多 AZ"必须**实调 DryRun**，不能只看可用区列表。
-- ⚠️ **Tair 改参数用 `ModifyInstanceConfig --Config`**（`{"maxmemory-policy":"allkeys-lru"}`，**标准参数无前缀**）；**`ModifyInstanceParameter` 是"应用参数模板"**（需 `--ParameterGroupId`），直传 `--Parameters` 报 `ProxyError`（误导性强，非参数名错）。白名单组名参数 Tair 是 `--SecurityIpGroupName`、**RDS 是 `--DBInstanceIPArrayName`**（两者不可混用）。
-- ⚠️ **ACK CreateCluster body 的最小必需集**（缺任一即失败）：`cluster_type:ManagedKubernetes` + `profile:Default` + `cluster_spec` + `region_id` + `vpcid` + `vswitch_ids` + **`pod_vswitch_ids`（Terway 必需，漏报 `MissingPodVswitchIds`）** + `kubernetes_version`（须实查，`DescribeKubernetesVersionMetadata` 参数是 **`--Region`** 而非 `--RegionId`）；`enabled_rrsa` 已废弃 → `rrsa_config:{"enabled":true}`。
-- ⛔ **账号级前置**：建 ACK 前须 `aliyun cs OpenAckService --type propayasgo`，否则报 `ErrorNotEnabled: please enable cskpro`。2026-09-28 该调用被 **`RISK.RISK_CONTROL_REJECTION`** 拦截（账号可用余额 0.00 USD）→ **任务 10/11 暂停待解禁**。
-- **NAT / EIP 口径（2026-09-28 实测）**：`CreateNatGateway` 必带 `--NatType Enhanced`（唯一合法值，漏掉报 `MissingParameter`）；`AssociateEipAddress` 的 `InstanceType` 必须是 **`Nat`**（写 `NatGateway` 会返回误导性的 `Invalid.DirectEip.BindType`）；`0.0.0.0/0 → NAT` 路由**由系统自动加**，勿手工加；VPC 系 API 分页用 `--PageSize`（不是 `--MaxResults`）；路由条目 next hop 在 `.NextHops.NextHop[0]`（非顶层）。
-- **资源 ID 前缀不代表地域**（2026-09-28 证伪一条误判）：`5ts`=马尼拉 / `t4n`=新加坡 纯属 ID 池分配巧合 → 判「残留 / 串区」必须实查 API，勿靠前缀猜（曾误判新加坡 VPC `vpc-t4nimmwvruexbnene0a3r` 为深圳残留，实为真实 SG VPC）。
-- **NAT 写入有秒级时序**：`AssociateEipAddress` 返回后**立刻** `CreateSnatEntry` 报 `OperationUnsupported.EipInBinding` / `EipNatGWCheck`（EIP 刚绑未生效），数秒后自动可成 → 写操作一律包重试。脚本：`deploy/task6_nat_eip.sh`（马尼拉）· `deploy/task12_nat_eip_sg.sh`（新加坡），二者均已实跑通过。
-- ⚠️ **VPC 端点两端皆偶发抖动**（mnl `ap-southeast-6` + sg `ap-southeast-1`）→ 任何写操作必须包**重试 ≥3 次**并校验返回是合法 JSON，否则会**静默漏建资源**（实测命中：EIP 绑定、SNAT 表查询、首条 SNAT 创建、`DescribeSnatTableEntries` 返回非 JSON）。
-- ⚠️ **脚本日志勿与 API 输出混流**：`say "+ cmd"` 若写进重定向文件会污染 JSON → jq 假失败。日志走 `exec 3>&2`，数据落文件。
-- **`aliyun` CLI 3.5.1 命令口径（2026-09-28 全量实测，写命令前先看这里）**：
-  - 参数名：**只有 `--ProductCode`**（`--Product` 报 not valid）；`quotas` 分页是 `--MaxResults`（`--PageSize` 报 not valid）；`--QuotaCategory` 合法值 **`CommonQuota`**（`Common` 报 `InvalidQuotaCategory`）。
-  - **配额按产品码分流**：vCPU / 规格类配额在 **`--ProductCode ecs-spec`**（`q_ecs_enterprise_postpay_c` = vCPU 额度，马尼拉 64 · 新加坡 96）；`--ProductCode ecs` 只回 26 条通用配额，**查不到 vCPU**。两者都必须带 `--Dimensions.1.Key regionId --Dimensions.1.Value <region>`，否则回 `cn-hangzhou` 假数据。
-  - **`Status: Agree` 只在 `ListQuotaApplications` 返回**（申请值字段是 `DesireValue`）；`ListProductQuotas` 的对象**没有 Status 字段**。用 `ListProductQuotas | select(.Status=="Agree")` 过滤 → 空集且 **exit 0**，脚本会**假通过**；巡检一律加 `jq -e` 或校验非空输出。
-  - ClickHouse 列实例是 **`DescribeDBInstances`**，返回 `{"Data":{"DBInstances":[...],"TotalCount":n}}`；**不存在 `DescribeDBClusters`**（exit 2）。
-  - jq 路径：`vpc DescribeVpcs` → `.Vpcs.Vpc[]`；`DescribeVSwitches` → `.VSwitches.VSwitch[]`；`quotas` → `.Quotas[]`（**不是** `.Quotas.Quota[]`）。跨字段必须 `[] | [a,b,c] | @tsv`，写成 `[][a,b]` 会报 `Cannot index object`。
-  - 退出码：错 API 名 / 错参数名 = **2**；jq 语法错 = **3**；`jq`（无 `-e`）遇空集 = **0**（静默）。
-  - `ram ListUsers` 是全局服务，不带 `--region` 也通；`resourcemanager` / `bssopenapi` 仍须 `--region ap-southeast-1`。
+- 变量后紧跟中文/全角标点被 bash 3.2 吞 → 一律 `${VAR}`；macOS grep 用 `-E 'A|B'`。
+- 禁用变量名（macOS 只读内建）：`GROUPS` `UID` `EUID` `PPID` `RANDOM` `SECONDS` `PIPESTATUS` `BASH_*` `LINENO`。
+- 函数日志必须 `>&2`；**脚本日志勿与 API 输出混流**（`say "+ cmd"` 写进重定向文件会污染 JSON → jq 假失败）→ 日志走 `exec 3>&2`，数据落文件。
+- **权限探测严禁子串匹配**（`AccessDenied` 会出现在事件正文）；不能用不存在的资源 ID 探测 → 用幂等写。
+- **资源 ID 前缀不代表地域**（`5ts`=马尼拉 / `t4n`=新加坡 纯属 ID 池巧合）→ 判「残留/串区」必须实查 API。
+- **NAT / EIP 口径**：`CreateNatGateway` 必带 `--NatType Enhanced`（唯一合法值，漏掉 `MissingParameter`）；`AssociateEipAddress` 的 `InstanceType` 必须 **`Nat`**（写 `NatGateway` 返回误导性 `Invalid.DirectEip.BindType`）；`0.0.0.0/0 → NAT` 路由**系统自动加**，勿手工加；VPC 系分页用 `--PageSize`（`DescribeEipAddresses` 亦然）；路由 next hop 在 `.NextHops.NextHop[0]`。
+- **NAT 写入有秒级时序**：`AssociateEipAddress` 后立刻 `CreateSnatEntry` 报 `OperationUnsupported.EipInBinding`/`EipNatGWCheck`，数秒后可成 → 写操作一律包重试。
+- ⚠️ **VPC 端点两端皆偶发抖动**（mnl + sg）→ 任何写操作必须**重试 ≥3 次**并校验返回是合法 JSON，否则**静默漏建资源**。脚本：`deploy/task6_nat_eip.sh` · `deploy/task12_nat_eip_sg.sh`（均已实跑通过）。
+- **`aliyun` CLI 3.5.1 命令口径（写命令前先看）**：
+  - 参数名**只有 `--ProductCode`**（`--Product` 报 not valid）；`quotas` 分页 `--MaxResults`（`--PageSize` not valid）；`--QuotaCategory` 合法值 **`CommonQuota`**。
+  - **配额按产品码分流**：vCPU/规格类在 **`--ProductCode ecs-spec`**（`q_ecs_enterprise_postpay_c`：马尼拉 64 · 新加坡 96）；`--ProductCode ecs` 只回 26 条通用配额。两者都必须带 `--Dimensions.1.Key regionId --Dimensions.1.Value <region>`，否则回 `cn-hangzhou` 假数据。申请参数拼写 `--DesireValue`。
+  - **`Status: Agree` 只在 `ListQuotaApplications` 返回**；`ListProductQuotas` 的对象**无 Status 字段** → 用 `select(.Status=="Agree")` 过滤得**空集且 exit 0（假通过）** → 巡检一律 `jq -e` 或校验非空。
+  - ClickHouse 列实例是 **`DescribeDBInstances`**（**无 `DescribeDBClusters`**，exit 2）。
+  - jq 路径：`DescribeVpcs`→`.Vpcs.Vpc[]`；`DescribeVSwitches`→`.VSwitches.VSwitch[]`；`quotas`→`.Quotas[]`。跨字段必须 `[]|[a,b,c]|@tsv`。
+  - 退出码：错 API 名/参数名 = 2；jq 语法错 = 3；`jq`（无 `-e`）遇空集 = 0。
+  - `ram ListUsers` 全局服务不带 `--region` 也通。
+- 一键复核：`deploy/verify_deploy_0_6.sh`（8 项全走 `jq -e`，空即 FAIL；`STRICT=1` 门禁用；输出 PASS/WARN/FAIL，原始响应落 `deploy/logs/verify_0_6_<ts>/`）。**`WARN` ≠ 通过**。当前长期 WARN：CK 未建（任务 29）· RAM 遗留 `zhangzijun`/`xiangdong`。
 
 ## 资源组
-`rg-ph-mnl` `rg-aek4nyivmmsb6iy`｜`rg-sg` `rg-aek4zvb3ldoiyua`｜`rg-nonprod` `rg-aek4hk3prqgqjcy`｜`rg-shared` `rg-aek3yypouljf4ry`｜默认组**禁放** new-api 资源。
-RG 须**创建时**指定（vSwitch 无该参数但继承 VPC 组；不可单独换组）。
+`rg-ph-mnl` `rg-aek4nyivmmsb6iy`｜`rg-sg` `rg-aek4zvb3ldoiyua`｜`rg-nonprod` `rg-aek4hk3prqgqjcy`｜`rg-shared` `rg-aek3yypouljf4ry`｜默认组**禁放** new-api 资源。RG 须**创建时**指定（vSwitch 无该参数但继承 VPC 组，不可单独换组）。
 
 ## RAM 治理
 策略全 Custom，前缀 `newapi-`：admin-identity · ops-operator · cicd-acr-push · iac-terraform · dev-program · enforce-mfa · audit-protect · prod-boundary · prod-oss-guard。
@@ -64,38 +68,63 @@ RG 须**创建时**指定（vSwitch 无该参数但继承 VPC 组；不可单独
 组备注唯一真源 = `deploy/ram_group_annotate.sh` 的 `comments_for()`，**apply 会覆盖控制台手工改动**。
 
 ## ACR（马尼拉）
-`acr-newapi-mnl` = `cri-avfqy9xkqi5bj8ee` @ ap-southeast-6；公网域名 `acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com`（VPC 域名加 `-vpc`）。
-命名空间：`newapi-prod` `crn-axx3yf91h9qi76v6` · `newapi-pre` `crn-gxr29wbcya6axf7q` · `newapi-test` `crn-4fmk61khwp8uuyrq` · `newapi-dev` `crn-vhffmm9qid60vomq`。
-- **ARN 铁律**：`acs:cr:$region:$account:repository/$instanceid/$namespacename[/$repo]`，**无 `namespace/` 前缀**；资源类型只有 `*`/`instance`/`repository`/`chart`。`newapi-cicd-acr-push` 已修 v2。
-- tag 不可变两层：命名空间默认配置（仅对自动建仓生效）+ 仓库自身 `TagImmutability`（**真正生效层**）。四命名空间 `AutoCreateRepo=false`；cicd 未授 `cr:CreateRepository`。
+`acr-newapi-mnl` = `cri-avfqy9xkqi5bj8ee` @ ap-southeast-6；公网 `acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com`（VPC 域名加 `-vpc`）。命名空间：`newapi-prod` `crn-axx3yf91h9qi76v6` · `newapi-pre` `crn-gxr29wbcya6axf7q` · `newapi-test` `crn-4fmk61khwp8uuyrq` · `newapi-dev` `crn-vhffmm9qid60vomq`。
+- **ARN 铁律**：`acs:cr:$region:$account:repository/$instanceid/$namespacename[/$repo]`，**无 `namespace/` 前缀**。`newapi-cicd-acr-push` 已修 v2。
+- tag 不可变两层：命名空间默认配置（仅对自动建仓生效）+ 仓库自身 `TagImmutability`（**真正生效层**）。四命名空间 `AutoCreateRepo=false` → 仓库必须显式 Create；cicd 未授 `cr:CreateRepository`。
+- ⚠️ **仓库口径不一致**：实况 `newapi-prod` 下按主备分仓 `newapi-master` / `newapi-slave`，且 **`newapi-master` = PUBLIC**（与「指向 `new-api` 单仓」口径冲突，且生产镜像公开可读）→ 待定口径 + 改回 PRIVATE。
+- **VPC 端点尚未关联马尼拉 VPC**（`GetInstanceVpcEndpoint` → `LinkedVpcs=[]`）→ VPC 内拉取不通，任务 16 有欠写操作。
 
 ### ⚠️ docker login/push 排障顺序（踩过两轮，务必按序查）
-1. **公网入口**默认 `Enable=false` → 无 DNS 记录、报 `Get "https://<域名>/v2/": EOF`。开：`cr UpdateInstanceEndpointStatus --EndpointType internet --Enable true`（异步 1–2 min）。
-2. **公网 ACL**（第二轮真凶）：入口开启后系统预置 `127.0.0.1/32` 占位 → 真实 IP 全被拒（表现 EOF / 直连 **timeout，非 reset**）。**ACL 无总开关**（只有 Create/Delete，`AclEnable` 恒 true）；**白名单为空 = 全放行**；**拒收 `0.0.0.0/0`**（`INSTANCE_ACCESS_ACL_ENTRY_INVALID`）→ `push.sh --allow-ip all` = `0.0.0.0/1` + `128.0.0.0/1`。
-   控制台：实例详情 → **仓库管理 > 访问控制 > 公网**；Helm Chart 走 **Helm Chart > 访问控制**。
-3. 金标准校验：`curl -sv https://<域名>/v2/` 返 **401 Unauthorized**。
+1. **公网入口**默认 `Enable=false` → 无 DNS、报 `Get "https://<域名>/v2/": EOF`。开：`cr UpdateInstanceEndpointStatus --EndpointType internet --Enable true`（异步 1–2 min）。
+2. **公网 ACL**（第二轮真凶）：入口开启后系统预置 `127.0.0.1/32` 占位 → 真实 IP 全被拒（EOF / 直连 **timeout 非 reset**）。**ACL 无总开关**（只有 Create/Delete）；**白名单为空 = 全放行**；**拒收 `0.0.0.0/0`**（`INSTANCE_ACCESS_ACL_ENTRY_INVALID`）→ `--allow-ip all` = `0.0.0.0/1` + `128.0.0.0/1`。控制台：实例详情 → **仓库管理 > 访问控制 > 公网**（Helm Chart 走 **Helm Chart > 访问控制**）。
+3. 金标准：`curl -sv https://<域名>/v2/` 返 **401**。
 
-## 镜像发布 `push.sh`（仓库根目录）
-`./push.sh -n prod|pre|test|dev -t <tag>`，login→build→tag→push + 逐阶段计时汇总；日志 `deploy/logs/`（`.deploy/` 已改名 `deploy/`）。
-选项：`--open-endpoint` · `--allow-ip <cidr|auto|all>` · `--create-repo` · `-f <df>` / `--upstream` · `--npm-registry cn|official|<url>`（默认 cn）· `--go-proxy cn|aliyun|official|<url>`（默认 cn）· `--proxy <url|auto>` · `--no-proxy` · `--prune` · `--min-disk <GiB>` · `--skip-disk-check` · `--no-build` / `--build-only` / `--dry-run`。
-**Dockerfile 自动选择**：未显式 `-f` 且存在 `Dockerfile.mac` → 用它（banner 标注）；`--upstream` 强制上游原版；CI 显式 `-f` 不受影响。
-登录失败自动分流诊断（连接层 vs 401），连接层会核对**入口 Enable + ACL 白名单**。
-坑：本机 `tee` 单次 ≈0.6s → 逐行日志**不用 tee**（stderr + append）；交互式 `read -rs` 必须在 `--dry-run` 早退之后。
+## 镜像发布 `push.sh`（仓库根）
+`./push.sh -n prod|pre|test|dev -t <tag>`，login→build→tag→push + 逐阶段计时；日志 `deploy/logs/`。
+选项：`--open-endpoint` · `--allow-ip <cidr|auto|all>` · `--create-repo` · `-f <df>`/`--upstream` · `--npm-registry cn|official|<url>`（默认 cn）· `--go-proxy cn|aliyun|official|<url>`（默认 cn）· `--proxy <url|auto>` · `--no-proxy` · `--prune` · `--min-disk <GiB>` · `--skip-disk-check` · `--no-build`/`--build-only`/`--dry-run`。
+**Dockerfile 自动选择**：未显式 `-f` 且存在 `Dockerfile.mac` → 用它；`--upstream` 强制上游原版。登录失败自动分流诊断（核对入口 Enable + ACL 白名单）。
+坑：本机 `tee` ≈0.6s/次 → 逐行日志**不用 tee**（stderr + append）；交互式 `read -rs` 必须在 `--dry-run` 早退之后。
 
-### Docker 构建环境（macOS，2026-09-27 固化；详见 REFERENCE + 规范 §9.4）
-- 虚拟盘上限 = `settings-store.json` 的 `DiskSizeMiB`（原 16 GiB 撞满 → `ResourceExhausted`，**已扩到 64 GiB**）；改配置须 `docker desktop stop` → 改 → `start`（沙箱 `osascript` 报 -10004）。
-- 镜像加速器在 **`~/.docker/daemon.json`**（不是 settings-store）：USTC / 网易 163 **均已停服** → 用 `docker.m.daocloud.io` + `docker.1ms.run` + `docker.1panel.live`。
-- **上游 `Dockerfile` 保持原版勿改**；本地增强在 **`Dockerfile.mac`**（`ARG NPM_REGISTRY` + `ARG GOPROXY` + bun/go cache mount），**默认自动选用**（冷构建 7m17s / 缓存命中 46.8s～1m19s，镜像 222 MB）。
-- ⚠️ **Go 模块源 = 本地构建最常见的硬失败点**：两份 Dockerfile 原先都无 `GOPROXY` → 走 `proxy.golang.org`（`storage.googleapis.com` 承载）→ 直连超时，`RUN go mod download` 报 `…": EOF`。**是 EOF 不是 403，极易误判为构建逻辑问题**。修：`Dockerfile.mac` 加 `ARG GOPROXY=https://goproxy.cn,direct` + `ENV GOPROXY=${GOPROXY}`；`--go-proxy` 可切 aliyun/官方。<br>对照：**npm 官方源只是慢（1041s 能成），Go 官方源是直接失败**。
-- `--proxy auto` = 注入 Docker **预定义 ARG**（`HTTP(S)_PROXY`/`NO_PROXY`，**免声明**）= 一个文件都不改的换源手段；而 `NPM_REGISTRY`/`GOPROXY` 这类**自定义变量必须 `ARG` 声明**才生效（push.sh 已自动检测）。
+### Docker 构建环境（macOS，2026-09-27 固化）
+- 虚拟盘上限 = `settings-store.json` 的 `DiskSizeMiB`（原 16 GiB 撞满 → `ResourceExhausted`，**已扩 64 GiB**）；改配置须 `docker desktop stop` → 改 → `start`（沙箱 `osascript` 报 -10004）。
+- 镜像加速器在 **`~/.docker/daemon.json`**：USTC / 163 **已停服** → 用 `docker.m.daocloud.io` + `docker.1ms.run` + `docker.1panel.live`。
+- **上游 `Dockerfile` 保持原版勿改**；本地增强在 **`Dockerfile.mac`**（`ARG NPM_REGISTRY` + `ARG GOPROXY` + bun/go cache mount），默认自动选用（冷构建 7m17s / 缓存命中 46.8s–1m19s，镜像 222 MB）。
+- ⚠️ **Go 模块源 = 本地构建最常见硬失败点**：无 `GOPROXY` → 走 `proxy.golang.org`（`storage.googleapis.com` 承载）→ 直连超时，`RUN go mod download` 报 **`…": EOF`（不是 403，极易误判为构建逻辑问题）**。修：加 `ARG GOPROXY=https://goproxy.cn,direct`。对照：**npm 官方源只是慢（1041s 能成），Go 官方源是直接失败**。
+- `--proxy auto` = 注入 Docker **预定义 ARG**（`HTTP(S)_PROXY`/`NO_PROXY`，**免声明**）= 零改动换源；`NPM_REGISTRY`/`GOPROXY` 这类**自定义变量必须 `ARG` 声明**才生效。
+
+## Day 1 进度 · 任务 4 RDS（2026-09-28 实测）
+- **包年包月口径**：`PayType=Prepaid` + **`Period=Year` / `UsedTime=1`**（= 12 月）。⚠️ **月付周期上限 <12** → `Period=Month`+`UsedTime=12` 报 `Order.PeriodInvalid`（文案不提"上限"，极易误判为参数名错）。三产品计费参数名**不同**：ECS `InstanceChargeType` · Tair `ChargeType` · RDS `PayType`。
+- **规格/价（ap-southeast-6）**：`pg.x4.2xlarge.2c` = **16核64GB（独享）**；PG 16.0；100G ESSD PL1。标价 **15134.47 USD/年 → 实付 10594.13**（折扣 4540.34 ≈30%，月均 882.84）；月单价 1261.21；按量 2.63232 USD/h（月 1921.59）→ **包年包月省 ≈54%**（≠ECS 的 18%）。
+- **可售**：Prepaid 规格 73 个（6a/6b 各 73）；`cloud_essd`/`essd2`/`essd3` 各 73，**`cloud_ssd`/`local_ssd` = 0**；PG 17.0/16.0/15.0 各 73。
+- ⚠️ **RDS 无配额闸门**：配额中心 `--ProductCode rds` 报 `PARAMETER.ILLEGALL`（`CommonQuota` 也不行，指南原写 `CommonConfig` 非法）→ 改用「Prepaid 可售规格 + 存量实例」双验。
+- ⚠️ **`DescribePrice` 的 `CommodityCode` 会反转口径**：`bards`=按量码，给 Prepaid 查询会强制按量计价（三档价全等于小时价 2.63232，看着像"无折扣"）；`Postpaid` **不带** `CommodityCode` 则 `PriceInfo` 全 `null`（静默）。正确：Prepaid 用 `--CommodityCode rds`（`rds_intl`），Postpaid 用 `bards`（`bards_intl`）；自校 `.chargeType`（1=订阅/2=按量）。
+- ⚠️ **`AutoPay=false` 下单成功 ≠ 实例创建**：返回含预分配 `DBInstanceId` 但 `DescribeDBInstances` 查不到（**正好可作零成本试单**）。`CreateDBInstance` 必填 **9 参数**（含易漏的 `DBInstanceNetType`）；`--AutoRenewPeriod` **不是合法参数**。`ClientToken` 只对同 token 幂等 → 脚本须另查 `QueryOrders ... Unpaid` 拒绝重复下单。
+- **风控差异（重要）**：余额 0 时 **RDS 下单不被拦**（只有 ACK 服务开通被 `RISK.RISK_CONTROL_REJECTION` 拦）→ 任务 4 解除路径 = 充值后直接支付订单，无需先解风控。
+- 产物：脚本 `deploy/task4_rds_mnl.sh`（`verify|price|create|create-pay|check|tag|all`，双重幂等闸门 + PATH 自愈）· 报告 `deploy/Day1任务4_RDS_PostgreSQL_执行报告.md`。**未创建任何计费资源**；产生 1 张未支付订单 `518158947970481`（应付 10594.13），预分配 `pgm-5ts8mee1iiw13m89`。
+- ⚠️ **F11 口径待裁决**：官方规格表标 `pg.x4.2xlarge.2c` 的 `max_connections = 6400`，与 F11 的 800 差 8 倍 → 实例 Running 后必须 `SHOW max_connections;` 定论（若 6400，任务 41 的 640 预算过度保守）。
+- ⚠️ **Tair 实况与指南不符（本轮查订单时发现）**：`r-5tsf1fe16543e274` `tair-mnl-newapi` **已购且已转 PrePaid**（订单 `518158662490481` Convert 64.63 USD 已支付），但 ① 只买 **1 个月**（到期 **2026-10-28**，2026-11-27 释放）非 12 月；② 规格是 **企业版 amber 逻辑多线程 1G/2DB/6proxy**（指南写"标准版 4GB 主从"）；③ 仅 `ap-southeast-6a`，未见 6b 备。**待用户确认口径**。
+
+## Day 2 进度（2026-09-28 实测）
+- **任务 10 未做**：两地 ACK 集群 `total_count=0` → 任务 11 无 `cluster_id`。脚本 `deploy/task10_11_ack_mnl.sh {verify|keypair|cluster|nodepool|kubeconfig|check|all}`（幂等 + 计时日志 `deploy/logs/task10_11_*.log`）；节点 `user_data` = `deploy/task11_node_init.sh`（nofile 三处 + 数据盘兜底）。报告 `deploy/Day2任务11_ACK节点池_执行报告.md`。
+- 任务 11 Step 1 ✅：`ecs.g9i.2xlarge` **6a+6b 双 AZ 可售**（备 g8ine/g9ae 亦双区）；配额 64 `Agree`；**Terway Pod 容量 = (EniQuantity-1)×IPs：g9i=45 · g8ine=75 · g9ae=45**。
+- ⚠️ **指南 C1 校正**：`kubernetes_version` 写 `1.35.0-aliyun.1` **已不可创建** → 马尼拉 creatable 仅 `1.36.2-aliyun.1` / **`1.35.7-aliyun.1`** / `1.34.10-aliyun.1`（ACK 规则：同 minor 出新 patch 后旧 patch 禁建）。
+- ⚠️ **CS CLI 传参**：`DescribeKubernetesVersionMetadata` 必须用 **`--Region`**（`--region`/`--RegionId` 均报 `MissingRegion`）；其余 CS API 用 `--region`。
+- ⚠️ **建簇两处指南漏项（2026-09-28 实跑 400 实测）**：① `pod_vswitch_ids` **必填**（漏 → `MissingPodVswitchIds`，Terway 下 Pod 网络须有 vSwitch；且该错误与其它错误**同时**出现在 `data[]` 数组，排查勿只看首条）；② 须先开通 ACK 服务 → `aliyun cs OpenAckService --type propayasgo`（**仅 `propayasgo` / `edgepayasgo` 两个合法值**），未开通报 `ErrorNotEnabled: please enable cskpro`。脚本已加开通预检硬门禁。
+- ⛔ **余额 0 的第一道墙 = 风控，不是欠费**：`OpenAckService` 返回 `RISK.RISK_CONTROL_REJECTION`（*"your order is suspended… contact Customer Service"*）→ 付费服务开不出来，比资源创建失败更早一步，文案**不明说余额**。处置：充值 + 必要时联系客服。
+- ECS 密钥对已建 `newapi-mnl`（指纹 `732340d017cd1b1297b4d2c547327520`，私钥 `~/.ssh/newapi-mnl.pem` 600）——**地域级资源，新加坡需另建**。
+- ⚠️ 脚本坑复现：`say "...：$pem（..."` 全角括号紧贴变量 → bash 3.2 并入变量名报 `unbound variable`（3 处）。**写法先行全脚本扫描**（python 正则查 `\$VAR` 后跟 `>127` 字符）。
+
+## 付费方式（2026-09-28 用户指令修订）
+**ECS 节点池 + Tair 实例 = 包年包月（`PrePaid`，1 年 + 自动续费）**；**ACK 集群管理费官方口径「不支持转为包年包月」** → 等价手段 = **ACK 资源包**抵扣（小型 720 集群小时 / 大型 8,640 集群小时）。
+- **配额口径整体切换**：包年包月 `q_ecs_enterprise_prepay_c`（马尼拉 **100** / 新加坡 **100**，实测默认值、无需工单）vs 按量 `q_ecs_enterprise_postpay_c`（64 / 96，工单 `Agree`，**现仅作对照**）——**两套独立计量、互不抵扣**；新加坡 96/100 **仅余 4 vCPU**。
+- 实测价（ap-southeast-6）：`ecs.g9i.2xlarge` 包月 **217.17 USD/台/月** + 系统盘 100G ESSD PL1 15.20 + 数据盘 300G 45.60 → 4 台 1 月 **1111.88 USD**（按量约 1136/月，**包月省 ≈18%**）；Tair 4GB `redis.master.stand.default` 包月 **58.75 USD/月**（`r-kvstore DescribePrice --ChargeType PrePaid --Period 1 --Capacity 4096`）。
+- **新坑（已写进指南任务 11）**：① 节点池付费类型决定扩容实例计费 → **HPA 扩容即按 12 个月预付、缩容不退款**（最坏 8 台×1 年）；② 包年包月库存池与按量**不共享** → 机型可售查询必须 `--InstanceChargeType PrePaid`；③ ACK 官方：**已存在数据盘勿勾选转包年包月**（"包年包月云盘无法支持容器应用重启"），转包月只转实例/系统盘。
+- 指南 `deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md` **原地修订 18 处**，备份 `.bak-20260928-214157`；修订记录 `deploy/付费方式修订记录-2026-09-28.md`。顺手修正两处硬错误：K8s `1.35.0-aliyun.1` → **`1.35.7-aliyun.1`**（同 minor 出新 patch 后旧 patch 禁建）、建簇 body 缺 **`pod_vswitch_ids`**（实测 400 `MissingPodVswitchIds`）。
+- 脚本 `deploy/task10_11_ack_mnl.sh` 同步 PrePaid + 新增 **PATH 自愈**（直接 `./deploy/...` 可跑，不依赖调用者 export）。
 
 ## 配额 / 成本
-配额按节点池 **`max_size`** 申请（马尼拉 64 = 8×8 vCPU；新加坡 96 = 12×8），不按常态值；状态值 `Agree`；两地分单。机型 `g8i` 马尼拉**未上架** → `g9i.2xlarge`（备 `g8ine.2xlarge`、`g9ae.2xlarge`）；地域须用维度传（`--Dimensions.1.Key regionId`）。
-⚠️ **换机型必须核「内存比」，不能只看 vCPU/规格后缀**：`2xlarge` 在不同规格族内存可差一倍（`g9i.2xlarge` 8C**32G** vs `c9i.2xlarge` 8C**16G**）。**配额按 vCPU 计（马尼拉 64 → 最多 8 台），内存容量随规格族变** → 换族等于换总容量，且违反坑 9「`instance_types` 只混同规格族」。2026-09-29 实测：马尼拉 8C32G 档最便宜就是 g9i（c9i -17.8% 但内存腰斩；g9ae +12.7%、g8ine +24.4%）。`ecs.DescribeInstanceTypes` 的 `MemorySize` 单位是 **GiB**（非文档惯例 MiB，交叉验证 `g9i.4xlarge`=16C/64）。
-🖼 **节点 OS 镜像**：**ECS 公共镜像页 ≠ ACK 节点镜像清单**（前者有 Ubuntu 26.04/22.04/20.04+UEFI，后者都没有）。ACK（ap-southeast-6）实测 x86 上 Ubuntu **只有 24.04**（`image_type=Ubuntu`）；22.04 仅 `UbuntuArm64`；基线取 **`AliyunLinux3ContainerOptimized`**（ACK 主场，cgroup v2 + IMDSv2）。`ContainerOS` 只读根盘 → 与节点 `user_data` 改 systemd 冲突，勿选。节点池 `scaling_group` 用 **`image_type`**（自定义镜像才用 `image_id`）；查列表用 `cs DescribeKubernetesVersionMetadata`，**必带 `--ClusterType ManagedKubernetes`** 否则 `MissingClusterType`。
-🖥 **购买页选项基线（2026-09-29 实测）**：① **不勾 eRDMA** —— 收益只对 RDMA verbs 应用（NCCL/MPI/NetACC/SMC-R 适配）生效，new-api 走 HTTP/TLS 勾了也不生效；代价是内核模块须随镜像升级反复维护 + 建节点 +3~5min + 需额外挂 **ERI**（ACK 托管节点池不管其生命周期）；**官方明确 eRDMA 跨 AZ 时延≈普通 VPC**，而节点池 `multi_az_policy=BALANCE` 本就跨区。支持性看 `ecs DescribeInstanceTypes` 的 **`EriQuantity`**（>0 才行）：g9i=1 · c9i=1 · g9ae=2 · **g8ine=0**。节点池路径不经过 ECS 购买页（镜像由 `image_type` 定，购买页 cloud-init 与节点池 `user_data` 是两套）。② **云盘容量口径**：购买页底部「各类型云盘容量购买情况 → 当前选配」是**整单口径 = 云盘容量 × 购买量**（上方表单是单实例口径），两者相差的倍数即购买实例数；同行「剩余可购买」= 按量付费云盘容量配额余额（马尼拉 AZ-A 约 215,040 GiB/类，非现实约束）。
-🌐 **公网 IP 与安全组基线（2026-09-29 实测）**：① **EIP ≠ ECS 公网 IP，是两条独立通道** —— 项目 8 个 EIP 全部 `InstanceType=Nat`、绑在 `ngw-5ts…`（马尼拉 4）/`ngw-t4n…`（新加坡 4），是**出口池**（供 VPC 内实例 SNAT 出公网）；**一个 EIP 同时只能绑一个实例**，不能转给 ECS。ECS 购买页「分配公网 IPv4 地址」= **固定公网 IP**（随实例、不可解绑），与 EIP（可解绑/换绑/回收）是两种机制。节点入站走 ALB（`sg-mnl-app` 只放行 `sg-mnl-alb` 打 3000）、出站走 NAT → **一律不勾**（节点池对应 `scaling_group.internet_max_bandwidth_out=0`）。需要临时公网端点时用 EIP 或堡垒机，**禁止安全组放行 `0.0.0.0/0`**。② **安全组必须用「普通安全组」** —— 企业级安全组**不支持组组授权**（不能把安全组 ID 当授权对象、也不能被引用），而 §8.1 规则表 5 条全靠组引用（`sg-mnl-app`←`sg-mnl-alb`、`sg-mnl-db`←`sg-mnl-app` 等），选企业级直接落不了地；附带差异：企业级默认**组内隔离且不可改**、容量 65536 私网 IP（普通 6000）、普通组组授权规则**上限 20 条**。**不要在 ECS 购买页建业务 SG**（默认模板含 RDP 3389 + SSH 22 对 `0.0.0.0/0`）。节点池用 `scaling_group.security_group_ids`（或 `security_group_id`）；集群级 **`is_enterprise_security_group` 保持 `false`**。现状：马尼拉 VPC 内**仅 1 个** `sg-5tshna0oeautlmbvgefd`（`created_by_rds` 托管，不可用于业务），新加坡 **0 个**，业务 SG 待任务 22。
-常态 **9,865.36 USD/月**（4+2 节点）· 接管峰值 15,322.51 · 备站冗余 623.90（6.32%）。单价常量在 `deploy/gen_cost_table.py` 顶部。ECS 询价**系统盘参数必填**；BSS 只能走 `business.ap-southeast-1.aliyuncs.com`。
+配额按节点池 **`max_size`** 申请（马尼拉 64 = 8×8 vCPU；新加坡 96 = 12×8，v2.3 版拟降 64——**以 ① 指南为准仍 96**）；状态 `Agree`；两地分单。机型 `g9i.2xlarge`（g8i 未上架）；地域须用维度传。
+常态 **9,865.36 USD/月**（4+2 节点）· 接管峰值 15,322.51 · 备站冗余 623.90（6.32%）。单价常量在 `deploy/gen_cost_table.py` 顶部。ECS 询价**系统盘参数必填**；BSS 只能走 `business.ap-southeast-1.aliyuncs.com`。**账户余额 0.00 USD**（欠费回收 EIP 风险真实）。
 
 ## 切换（SLA）
 `0.9999^5≈0.9996` → 月不可用 17.28 min，仅余 4.32 min。GTM 判定 45–60s 可控，**DNS 传播 5–30 min 不可控**；GTM 是**主备 failover 不是分摊**；可用 IP 最小阈值 = **1**。正解 = **DCDN 回源层切换**（RTO 10–20s，+74 USD/月）。
