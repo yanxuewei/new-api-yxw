@@ -15,6 +15,11 @@
 #   bash deploy/ops-access.sh --session               # 创建一次性会话（打印 WebSocketUrl + 控制台路径）
 #   bash deploy/ops-access.sh --allow-ssh             # 动态放行本机出口 IP 的 22（默认 120 分钟）
 #   bash deploy/ops-access.sh --allow-ssh --ttl-min 30
+#   bash deploy/ops-access.sh --allow-ssh --ip 1.2.3.4   # 手动补充要放行的出口 IP
+#
+# ⚠️ 出口 IP 探测的坑（2026-09-29 实测）：本机 HTTPS 探测（ifconfig.me）与 SSH 实际出口**不同**
+#   （前者 194.56.225.91，后者 183.23.96.198）→ 只放行 ifconfig.me 的 IP 会让 ssh 卡在 Connecting。
+#   故 --allow-ssh 会同时放行「阿里云视角」（ActionTrail sourceIpAddress，权威）+「本机视角」两类 IP。
 #   bash deploy/ops-access.sh --deny-ssh              # 撤销全部 22 入向（回到零入向）
 #   bash deploy/ops-access.sh --gc                    # 撤销所有已过期的临时规则
 #
@@ -38,6 +43,7 @@ while [[ $# -gt 0 ]]; do
     --deny-ssh)    ACTION=deny ;;
     --gc)          ACTION=gc ;;
     --ttl-min)     shift; TTL_MIN="${1:-120}" ;;
+    --ip)          shift; EXTRA_IP="${1:-}" ;;
     *) echo "未知参数：$1（见脚本头用法）" >&2; exit 2 ;;
   esac
   shift
@@ -47,14 +53,32 @@ done
 say() { printf '%s\n' "$*"; }
 NOW=$(date +%s)
 
-# 取本机当前公网出口 IP（多源兜底）
-my_ip() {
-  local ip
-  for u in https://ifconfig.me https://api.ipify.org https://ipinfo.io/ip; do
-    ip=$(curl -s -m 6 "$u" 2>/dev/null | tr -d '\r\n ')
-    [[ "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] && { printf '%s' "$ip"; return 0; }
+# ⚠️ 2026-09-29 实测教训：本机存在**双出口**——
+#   HTTPS 探测（ifconfig.me）看到 194.56.225.91，而 SSH/裸 TCP 实际从 183.23.96.198 出去。
+#   → 「放行 ifconfig.me 报的 IP」会导致 SSH 卡死在 Connecting（SYN 被丢）。
+#   → 唯一权威来源是**阿里云视角**：ActionTrail 记录调用源 IP（.sourceIpAddress）。
+
+# 取「阿里云视角」的本机源 IP（权威）：先打一条只读 API，再查 ActionTrail 最新事件
+cloud_view_ip() {
+  aliyun ecs DescribeRegions --RegionId "$REGION" >/dev/null 2>&1 || true
+  local i ip
+  for i in 1 2 3 4 5 6; do
+    ip=$(aliyun actiontrail LookupEvents --MaxResults 10 2>/dev/null \
+         | jq -r '[.Events[]?|select(.sourceIpAddress|test("^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$"))][0].sourceIpAddress // empty' 2>/dev/null \
+         | tr -d '\r')
+    [[ -n "$ip" ]] && { printf '%s' "$ip"; return 0; }
+    sleep 2
   done
   return 1
+}
+
+# 取「本机视角」出口 IP（多源兜底；代理/多出口环境可能与上面不同，故两者都放行）
+local_view_ips() {
+  local u ip
+  for u in https://ifconfig.me https://api.ipify.org; do
+    ip=$(curl -s -m 6 "$u" 2>/dev/null | tr -d '\r\n ')
+    [[ "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] && printf '%s\n' "$ip"
+  done | sort -u
 }
 
 ingress_json() {
@@ -121,23 +145,35 @@ case "$ACTION" in
     ;;
 
   allow)
-    IP=$(my_ip) || { say "!! 取不到本机出口 IP，放弃（请检查网络或改用手工 --SourceCidrIp）"; exit 1; }
     EXP=$(( NOW + TTL_MIN*60 ))
-    say "本机出口 IP = $IP（动态）→ 放行 TCP 22，有效期 ${TTL_MIN} 分钟（到期 $EXP）"
-    case "$IP" in 0.0.0.0) say "!! 拒绝 0.0.0.0，终止"; exit 1;; esac
-    gc_rules
-    # 幂等：同源同端口先撤销再加（避免重复规则）
-    aliyun ecs RevokeSecurityGroup --RegionId "$REGION" --SecurityGroupId "$EDGE_SG" \
-      --IpProtocol tcp --PortRange 22/22 --SourceCidrIp "$IP/32" >/dev/null 2>&1 || true
-    if aliyun ecs AuthorizeSecurityGroup --RegionId "$REGION" --SecurityGroupId "$EDGE_SG" \
-         --IpProtocol tcp --PortRange 22/22 --SourceCidrIp "$IP/32" \
-         --Policy accept --Priority 1 \
-         --Description "temp-ssh-exp=$EXP user=$(id -un) ttl=${TTL_MIN}m" >/dev/null 2>&1; then
-      say "  ✅ 已放行。连接：ssh -i <newapi-mnl.pem> root@8.212.176.207"
-      say "  撤销：bash deploy/ops-access.sh --deny-ssh   （或到期后 bash deploy/ops-access.sh --gc）"
-    else
-      say "  !! 放行失败（检查 RAM 是否有 ecs:AuthorizeSecurityGroup 与目标 SG 权限）"; exit 1
+    IPS=()
+    [[ -n "${EXTRA_IP:-}" ]] && IPS+=("$EXTRA_IP")
+    CV=$(cloud_view_ip) && { say "阿里云视角源 IP（权威）= $CV"; IPS+=("$CV"); } || say "!! 取不到阿里云视角源 IP（ActionTrail 查询失败）"
+    while IFS= read -r i; do [[ -n "$i" ]] && IPS+=("$i"); done < <(local_view_ips)
+    # 去重
+    if (( ${#IPS[@]} )); then
+      mapfile -t IPS < <(printf '%s\n' "${IPS[@]}" | sort -u)
     fi
+    (( ${#IPS[@]} )) || { say "!! 未取到任何出口 IP，可用 --ip <addr> 手动指定"; exit 1; }
+    say "将放行 TCP 22 ← ${IPS[*]}，有效期 ${TTL_MIN} 分钟（到期 $EXP）"
+    gc_rules
+    ok=0
+    for IP in "${IPS[@]}"; do
+      case "$IP" in 0.0.0.0|"") say "  !! 跳过非法 IP '$IP'"; continue;; esac
+      aliyun ecs RevokeSecurityGroup --RegionId "$REGION" --SecurityGroupId "$EDGE_SG" \
+        --IpProtocol tcp --PortRange 22/22 --SourceCidrIp "$IP/32" >/dev/null 2>&1 || true
+      if aliyun ecs AuthorizeSecurityGroup --RegionId "$REGION" --SecurityGroupId "$EDGE_SG" \
+           --IpProtocol tcp --PortRange 22/22 --SourceCidrIp "$IP/32" \
+           --Policy accept --Priority 1 \
+           --Description "temp-ssh-exp=$EXP user=$(id -un) ttl=${TTL_MIN}m" >/dev/null 2>&1; then
+        say "  ✅ 已放行 $IP/32"; ok=$((ok+1))
+      else
+        say "  !! 放行失败 $IP/32（检查 RAM 的 ecs:AuthorizeSecurityGroup 权限）"
+      fi
+    done
+    (( ok )) || exit 1
+    say "  连接：ssh -i ~/.ssh/<你的私钥> root@8.212.176.207"
+    say "  撤销：bash deploy/ops-access.sh --deny-ssh   （或到期后 bash deploy/ops-access.sh --gc）"
     ;;
 
   deny)
