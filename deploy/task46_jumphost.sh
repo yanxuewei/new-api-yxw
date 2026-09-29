@@ -327,22 +327,16 @@ fi
 # ---------------------------------------------------------------------------
 step "4. 装机（kubectl + aliyun CLI + 临时 kubeconfig 换票脚本）"
 if [[ -n "$JUMP_ID" && "$DRY_RUN" != "1" && "$VERIFY_ONLY" != "1" ]]; then
-  REC_BLOCK=''
-  if [[ "$ENABLE_RECORDING" == "1" ]]; then
-    REC_BLOCK='
-# 会话录制（补偿云堡垒机的录制能力，2026-09-29 方案 B 变更引入）
-mkdir -p /var/log/ops-sessions
-chmod 700 /var/log/ops-sessions
-cat > /etc/profile.d/ops-record.sh <<'"'"'RECEOF'"'"'
-# 交互式 shell 全量录制到 /var/log/ops-sessions（追加，含时间戳）
-if [ -n "$PS1" ] && [ -z "$OPS_RECORDING" ] && command -v script >/dev/null 2>&1; then
-  export OPS_RECORDING=1
-  exec script -q -a -f "/var/log/ops-sessions/$(date +%Y%m%d-%H%M%S)-$(id -un).log" >/dev/null 2>&1
-fi
-RECEOF
-echo "[rec] session recording enabled -> /var/log/ops-sessions"
+  # ⚠️ 2026-09-29 回退：原 ENABLE_RECORDING=1 会在 /etc/profile.d/ 装一个
+  #   `exec script ... >/dev/null 2>&1` 的 hook —— 它把登录 shell 整个替换掉且丢弃 stdout，
+  #   导致「ssh 登录后无提示符、看起来卡死」。且会话录制已由 **ECS 会话管理**投递 OSS 覆盖，
+  #   该 hook 属冗余且有害 → 本脚本不再安装，并主动清理历史残留（幂等）。
+  REC_BLOCK='
+# 清理历史遗留的录制 hook（有害：会让登录看起来卡死）
+if [ -f /etc/profile.d/ops-record.sh ]; then rm -f /etc/profile.d/ops-record.sh; echo "[rec] 已移除历史 ops-record.sh hook"; fi
+mkdir -p /var/log/ops-sessions && chmod 700 /var/log/ops-sessions
+echo "[rec] 会话录制由 ECS 会话管理承担（投递 oss://'"$OSS_BUCKET"'/'"$OSS_PREFIX"'）"
 '
-  fi
 
   node_sh "05-provision" "set -u
 set -x
