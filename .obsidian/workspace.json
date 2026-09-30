@@ -10,12 +10,12 @@
           {
             "id": "7d7b45c35d8d64dc",
             "type": "split",
-            "dimension": 45.51131928181108,
+            "dimension": 46.44808743169399,
             "children": [
               {
                 "id": "c61469379079cbe3",
                 "type": "tabs",
-                "dimension": 36.40350877192983,
+                "dimension": 43.92338177014531,
                 "children": [
                   {
                     "id": "f6cece173f6c7071",
@@ -36,7 +36,7 @@
               {
                 "id": "54aa6aafb295ed4a",
                 "type": "tabs",
-                "dimension": 63.59649122807017,
+                "dimension": 56.07661822985469,
                 "children": [
                   {
                     "id": "74c2c0cef545cd40",
@@ -60,7 +60,7 @@
           {
             "id": "7a132fbf59c4c6f9",
             "type": "split",
-            "dimension": 54.48868071818892,
+            "dimension": 53.551912568306015,
             "children": [
               {
                 "id": "5da66b33f5bbf458",
@@ -170,7 +170,8 @@
       }
     ],
     "direction": "horizontal",
-    "width": 382.5
+    "width": 200,
+    "collapsed": true
   },
   "right": {
     "id": "af0ce2fcda294e7a",
@@ -277,23 +278,23 @@
   },
   "active": "74c2c0cef545cd40",
   "lastOpenFiles": [
-    "deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md.bak-20260929-214254",
-    "deploy/task9_ck_decision.sh",
+    "Day1任务9_日志库CK决策_执行报告.md",
+    "deploy/logs/task9_ck_wiring_20260930-103508/kms_describe.err",
+    "deploy/logs/task9_ck_wiring_20260930-103508/kms_describe.json",
+    "deploy/logs/task9_ck_wiring_20260930-103508/accts_now.json.err",
+    "deploy/logs/task9_ck_wiring_20260930-103508/accts_now.json",
+    "deploy/logs/task9_ck_wiring_20260930-103508/wl_now.json.err",
+    "deploy/logs/task9_ck_wiring_20260930-103508/wl_now.json",
+    "deploy/logs/task9_ck_wiring_20260930-103508/inst.json.err",
+    "deploy/logs/task9_ck_wiring_20260930-103508/inst.json",
+    "deploy/logs/task9_ck_wiring_20260930-103508",
+    "deploy/_t9w.sh",
     "deploy/Day1任务9_日志库CK决策_执行报告.md",
     "deploy/付费方式修订记录-2026-09-28.md",
-    "deploy/task4_rds_mnl.sh",
-    "deploy/task11_node_init.sh",
-    "deploy/task10_11_ack_mnl.sh",
     "deploy/Day2任务11_ACK节点池_执行报告.md",
     "deploy/Day1任务4_RDS_PostgreSQL_执行报告.md",
-    "deploy/logs/inbound-wecom-20260929-2101/菲律宾部署方案-v2.3-修订版.xlsx",
     "deploy/logs/inbound-wecom-20260929-2101/阿里云国际站菲律宾部署_详细操作指南-v2.0.md",
-    "deploy/logs/inbound-wecom-20260929-2101",
     "deploy/跳板机运维入门_登录机器与Pod_2026-09-29.md",
-    "deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md.tmp.27564.1790678985860",
-    "deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md.tmp.27564.1790678896631",
-    "deploy/logs/task41_ruling_20260929-1830/tpl_template_engineversion_17.json",
-    "deploy/logs/task41_ruling_20260929-1830/readback_parameters.json",
     "deploy/ai_model_price/国内模型价格.png",
     "deploy/ai_model_price/自己部署.jpg",
     "deploy/ai_model_price/cc_claude.jpg",

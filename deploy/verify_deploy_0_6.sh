@@ -3,7 +3,7 @@
 # §0.6 统一复核命令 — 一键执行（跑完贴输出即销账）
 #
 # 对应文档：deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md §0.6
-# 复核 8 项：身份 / VPC / vSwitch / OSS 桶 / CK 实例 / 配额工单 / vCPU 额度 / RAM 用户
+# 复核 8 项：身份 / VPC / vSwitch / OSS 桶 / CK 实例+接线 / 配额工单 / vCPU 额度 / RAM 用户
 #
 # ★ 设计要点（2026-09-28 全套实测踩到的坑，改脚本时勿回退）：
 #   1) 所有 jq 取值走 `jq -e`：空结果 / null 返回非 0 → 杜绝「命令成功但零输出」被当成销账证据。
@@ -14,6 +14,9 @@
 #        · vCPU 额度  → `--ProductCode ecs-spec --QuotaCategory CommonQuota`
 #          （`--ProductCode ecs` 只回 26 条通用配额，查不到 vCPU；`--Product` / `--PageSize` / `--QuotaCategory Common` 均非法）
 #   4) ClickHouse 列实例是 `DescribeDBInstances`（**不存在** `DescribeDBClusters`，写了报 is not a valid api）。
+#      状态字段是 `.Status`（企业版就绪态字面值 `ACTIVATION`），**不是** `.DBInstanceStatus`（该 API 无此字段，取到 null）。
+#      ⚠ 2026-09-30 加：`TotalCount>=1` 只代表"实例已建"，**不代表日志库可用** ⇒ 5/8 还要读 `DescribeSecurityIPList`
+#      与 `DescribeAccounts`，任一未接线整项判 WARN（否则就是"CK 已建"被当成"CK 就绪"的假通过）。
 #   5) `vpc DescribeVpcs` 默认 PageSize=10 且必须显式给；取值按 `EXPECT_VPC_ID` 过滤定位，
 #      不要退回 `.Vpcs.Vpc[0]` —— 该地域 VPC 多于 1 个时下标 0 可能命中非目标对象，
 #      比对口径错了却仍可能报 PASS。
@@ -205,27 +208,60 @@ c4_oss() {
 }
 
 # =============================================================================
-# 5/8 ClickHouse 实例
+# 5/8 ClickHouse 实例 + 接线状态（实例存在 ≠ 日志库可用）
 # =============================================================================
 c5_clickhouse() {
   hr; echo "5/8  ClickHouse 实例  ·  clickhouse DescribeDBInstances --RegionId $REGION"
-  local n
+  local n id ips accts verdict
   if ! ali c5_ck clickhouse DescribeDBInstances --RegionId "$REGION" >/dev/null; then
     bad "调用失败：$(errline c5_ck)"
     info "        若报 is not a valid api → API 名写成了 DescribeDBClusters（不存在）"
     rec fail; return
   fi
   n="$(jq -r '.Data.TotalCount // empty' "$OUTDIR/c5_ck.json" 2>/dev/null)"
-  if [[ -n "$n" && "$n" =~ ^[0-9]+$ && "$n" -ge 1 ]]; then
-    ok "TotalCount = $n（马尼拉 CK 企业版单 AZ 已就绪，F9 落地）"
-    jq -r '.Data.DBInstances[]|[.DBInstanceId,(.DBInstanceStatus//"-"),(.ZoneId//"-")]|@tsv' \
-      "$OUTDIR/c5_ck.json" 2>/dev/null | awk -F'\t' '{printf "       %-28s %-12s %s\n", $1, $2, $3}'
-    rec pass
-  else
+  if [[ -z "$n" || ! "$n" =~ ^[0-9]+$ || "$n" -lt 1 ]]; then
     warn "TotalCount = ${n:-空} → 任务 29 尚未创建，本项【不能】作为销账证据"
     info "        建成后本项转 PASS；Day 1 出口（M1）需要 d1/ck-instance.txt"
-    rec warn
+    rec warn; return
   fi
+  echo "       TotalCount = $n（实例已创建）："
+  jq -r '.Data.DBInstances[]|[.DBInstanceId,(.Status//"-"),(.ZoneId//"-"),(.ChargeType//"-")]|@tsv' \
+    "$OUTDIR/c5_ck.json" 2>/dev/null | awk -F'\t' '{printf "       %-28s %-12s %-18s %s\n", $1, $2, $3, $4}'
+  info "        注：企业版就绪态字面值是 ACTIVATION（不是社区版的 Running）；状态字段名是 .Status，非 .DBInstanceStatus —— 2026-09-30 实测"
+  # 实例存在只是第一步。日志库真正可用还要：白名单放行来源 + 有账号（任务 29 的 S-1/S-2）。
+  id="$(jq -r '.Data.DBInstances[0].DBInstanceId // empty' "$OUTDIR/c5_ck.json" 2>/dev/null)"
+  if [[ -z "$id" ]]; then
+    warn "拿不到 DBInstanceId → 无法复核接线，本项记 WARN"; rec warn; return
+  fi
+  verdict=pass
+  if ali c5_ck_ip clickhouse DescribeSecurityIPList --RegionId "$REGION" --DBInstanceId "$id" >/dev/null \
+     && ips="$(jqget c5_ck_ip '[.Data.GroupItems[].SecurityIPList] | join(",")')" && [[ -n "$ips" ]]; then
+    if [[ "$ips" == "127.0.0.1" ]]; then
+      warn "白名单仅 default=127.0.0.1 → CK 未接线（主站网段未放行，任务 29 的 S-1 未做）"
+      verdict=warn
+    else
+      echo "       白名单已放行：$ips"
+    fi
+  else
+    warn "DescribeSecurityIPList 调用失败或取数为空（空集不判通过）：$(errline c5_ck_ip)"; verdict=warn
+  fi
+  if ali c5_ck_ac clickhouse DescribeAccounts --RegionId "$REGION" --DBInstanceId "$id" >/dev/null \
+     && accts="$(jqget c5_ck_ac '.Data.TotalCount')" && [[ -n "$accts" ]]; then
+    if [[ "$accts" == "0" ]]; then
+      warn "账号数 = 0 → CK 未接线（任务 29 的 S-2 未做）⇒ 日志库仍为 PG，I-1 须按 PG 分支（3680 > 2000）算"
+      verdict=warn
+    else
+      echo "       账号数 = $accts"
+    fi
+  else
+    warn "DescribeAccounts 调用失败或取数为空（空集不判通过）：$(errline c5_ck_ac)"; verdict=warn
+  fi
+  if [[ "$verdict" == pass ]]; then
+    ok "实例已创建且已接线（白名单 + 账号齐）—— 仍需用 LOG_SQL_DSN 与 SELECT version() 端到端复验"
+  else
+    info "        本项汇总判 WARN：CK 只完成了「建实例」，未完成「可用」。销账前勿把任务 41 的 I-1 记到 CK 分支。"
+  fi
+  rec "$verdict"
 }
 
 # =============================================================================

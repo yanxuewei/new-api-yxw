@@ -112,3 +112,54 @@ F9 决策「日志库收口马尼拉 CK 企业版单 AZ」**立论成立**，但
 2. **探针必须选服务端校验点**：拿 CLI 已声明 enum/range 的参数（如 `--NodeCount 1`）当"必失败点"，会在 CLI 本地被拦，**根本到不了服务端**，得到的报错没有判别力（本轮踩过一次）。
 3. **地域能力要用"对照地域"证伪**：只看马尼拉回 1 个 AZ 无法排除"接口没返回全"，加新加坡（3 个 AZ）作对照才成立。
 4. **CLI 大小写**：`StorageType` 值必须小写 `oss`，写 `OSS` 会被 CLI 拒并给出 `did_you_mean`，极易误读成"地域不支持"。
+
+---
+
+## 七、2026-09-30 接线完成（实例已建成 → 日志库可用）
+
+**实例**：`cc-5tsv2o51s1360b0pr`（用户开通；`enterprise` / `single_az` / `ap-southeast-6a` / oss / 按量 —— 与本报告决策口径完全一致）。
+
+### 7.1 接线四件套（`deploy/task9_ck_wiring.sh`：`--check` / `--apply` / `--verify`）
+
+| # | 项 | 结果 |
+|---|---|---|
+| 1 | 白名单组 `mnl_app` | ✅ `10.0.16.0/20,10.0.32.0/20`（default 组保持 `127.0.0.1` 未动） |
+| 2 | 库 `newapi_logs` | ✅ 建成 |
+| 3 | 账号 `newapi`（NormalAccount） | ✅ 建成 + **数据层 GRANT**（见 7.2 坑 10） |
+| 4 | DSN | ⚠ KMS 不可用（见 7.2 坑 11）→ 降级保管 `/root/.deploy_secrets/LOG_SQL_DSN`（600，仓库外） |
+| 5 | RAM 策略 `new-api-kms-readonly` | ✅ 默认版本 v2 已含 LOG_SQL_DSN 两地 ARN（共 16 ARN） |
+
+### 7.2 新坑（9–12）
+
+- **坑 9（实例建成 ≠ 可用）**：新实例白名单仅 `default=127.0.0.1`、账号数 0、无库 —— 「判据四件套」必须逐项过，实例 `ACTIVATION` 不代表可写日志。
+- **坑 10（★ 平台缺陷：`DmlAuthSetting` 授权映射不生效）**：`CreateAccount` 传 `{"DdlAuthority":true,"DmlAuthority":0,"AllowDatabases":["newapi_logs"]}`（JSON 数组是唯一被接受的编码；dotted 形式被 CLI 拒、逗号串被服务端拒）后，`DescribeAccountAuthority` 回读 `AllowDatabases=[]`，SQL 层 `SHOW GRANTS` 仅 `default_role` 管理类授权，**无任何 `ON newapi_logs.*` 数据权限**，`CREATE TABLE` 报 `Not enough privileges`。**绕行**：建 `ckadmin`（SuperAccount，DSN 存 `/root/.deploy_secrets/CK_ADMIN_DSN`），从 VPC 内节点 `GRANT ALL ON newapi_logs.* TO newapi`；应用账号仍是最小权限（只授 newapi_logs 单库）。已固化进 wiring 脚本 `--apply` 步骤 4b。
+- **坑 11（★ KMS 国际站硬阻塞）**：两地 `kms CreateSecret` 均报 `UnsupportedOperation`。根因：国际站「密钥与凭据须属同一 KMS 实例」，账号无 KMS 实例（`ListKeys=0`）。**阻塞任务 17 全部 8 个凭据**，非本任务特有。购 KMS 实例后从保管目录迁移。
+- **坑 12（RAM `ListPolicyVersions` 字段名）**：默认版本判定字段是 **`IsDefaultVersion`**（非 `IsDefault`），数组路径 `.PolicyVersions.PolicyVersion[]`，且 List 自带 PolicyDocument，无需二次 DescribePolicyVersion。
+
+### 7.3 实测新事实（解答 09-29 报告的待办）
+
+| 09-29 待办 | 09-30 实测结论 |
+|---|---|
+| B2 企业版售卖区白名单 | ✅ 已通（实例可建即证明） |
+| B4 是否挂 CLB/ARMS 依赖 | ✅ **未自动创建任何依赖**（马尼拉 CLB 总数不变，无新增计费项） |
+| B5 实例状态字段 | ✅ 企业版为 **`ACTIVATION`** |
+| 内核版本（E9 遗留） | **`26.2.1.698_1`**；存算分离引擎实测 **`SharedMergeTree`** |
+| B1 余额风控 | CK 实例实际开通成功（用户侧操作），B1 对 CK 创建未构成拦截 |
+
+### 7.4 端到端验证（`--verify`，VPC 内 worker 节点发起，全部通过）
+
+| 项 | 结果 |
+|---|---|
+| V1 认证/库/版本 | ✅ `newapi / newapi_logs / 26.2.1.698` |
+| V2 应用同款 DDL 建表 | ✅（表 `logs` 由应用代码自动建，schema 与文档 DDL 基线不同 —— **以代码 `model/main.go` 为准**） |
+| V3 INSERT + count | ✅ 1 |
+| V4 引擎/TTL | ✅ `SharedMergeTree` + `TTL ... + INTERVAL 90 DAY` |
+| V5 TRUNCATE 清探针 | ✅ 0 |
+
+### 7.5 剩余
+
+1. `LOG_SQL_CLICKHOUSE_TTL_DAYS=90` 进任务 17 ConfigMap
+2. DSN 注入待 KMS 实例购买（或临时走保管文件注入 Secret）
+3. 备站 SG 走 CK 公网端点（`CreateEndpoint`）仍待裁定
+4. CK 计算资源包（B3）仍待用户裁定
+5. T1 联动：CK 已创建 ⇒ 任务 41 I-1 的「PG 分支连接数超限」窗口关闭，任务 29/17 可按 CK 主线走

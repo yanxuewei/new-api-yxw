@@ -47,21 +47,23 @@
 - 配额口径切换：包年包月 `q_ecs_enterprise_prepay_c`（马尼拉 **100** / 新加坡 **100**，默认值无需工单）vs 按量 `postpay_c`（64/96，仅对照）——**两套独立计量**；SG 96/100 **仅余 4 vCPU**。
 - 坑：节点池付费类型决定扩容计费 → **HPA 扩容即按 12 个月预付、缩容不退款**；包月/按量**库存池不共享**（查可售须 `--InstanceChargeType PrePaid`）；**已存在数据盘勿转包年包月**（ACK 官方：无法支持容器重启）。
 
-## 任务 9｜日志库 CK = 马尼拉企业版（2026-09-29 API 加固）
-**三个"只有"**：① 可用区**只有 `ap-southeast-6a`**（官方 Multi-AZ=No；`DescribeRegions` 仅回 6a，对照 SG 回 3 个）⇒ 单 AZ 是产品事实非取舍；② 存储**只有 OSS**（ESSD_L0–L3/SSD 不可售）；③ 计费**只有按量**。
-- **创建**：`clickhouse CreateDBInstance`（API 2023-05-22）可直接建，**不必走购买页**；`Category=enterprise` + `DeploySchema=single_az`（合法值实测：`single_az`/`multi_az`）· `ZoneId=ap-southeast-6a` · `VswitchId=vsw-5tswufq2pi26l4ahoiu84`（data-a，10.0.48.0/20）· `StorageType=oss`（**小写**，大写被 CLI 拒）。**无 DryRun、无 `AutoPay=false`** ⇒ 创建即计费，**没有零成本试单**。
-- **状态字段不预设 `Activated`**（社区版是 `Running`，企业版未实测）；**内核版本不可手选**；企业版为存算分离，用户侧用普通 `MergeTree()`，不需 `ON CLUSTER`/ZooKeeper/`Replicated*`。
-- **成本（马尼拉官方）**：计算 `0.185350 USD/CCU·h` · 存储 OSS `0.000044 USD/GB·h` · 计算资源包 `0.03611 USD/CCU·H`（最小包 3000 CCU·H、**预付 3 年、不可退订**、可叠加）。4 CCU 常驻：按量 **541.22 USD/月** → 资源包等效 **152.89**（=28.2%，**省 71.8%**）。**日志库若 3 年内可能裁撤就别买包。**
-- **前置门槛**：官方要求控制台无企业版选项的账号须**提工单加白**（G7）→ 开工前先验。
-- 待办：企业版是否挂 CLB/ARMS 未实测（建成后复查计费）。
-- 脚本 `deploy/task9_ck_decision.sh`（`verify|probe|cost|create --yes|check|all`）· 报告 `deploy/Day1任务9_日志库CK决策_执行报告.md`。
-- ⚠ **与任务 41 I-1 联动**：CK 未创建 ⇒ 日志库仍是 PG 分支（`16×200+24×20=3680 > max_client_conn 2000`）⇒ **"把 CK 提前创建"是唯一不动 conns、不动池参数的解法**（任务 29/17 排期裁定）。
+## 任务 9｜日志库 CK = 马尼拉企业版（✅ 2026-09-30 已接线，日志库可用）
+**三个"只有"**：① 可用区**只有 `ap-southeast-6a`**（官方 Multi-AZ=No）⇒ 单 AZ 是产品事实非取舍；② 存储**只有 OSS**；③ 计费**只有按量**。
+- **实例**：`cc-5tsv2o51s1360b0pr`（enterprise/single_az/6a/oss/POSTPAY；状态字段企业版= **`ACTIVATION`**；内核 **26.2.1.698_1** 不可手选；引擎实测 **`SharedMergeTree`**；`NodeScaleMax` 实际 32 非计划 8，成本复核注意；VPC 端点 `…clickhouseserver.ap-southeast-6.rds.aliyuncs.com:9000`，无公网端点）。
+- **接线已完成**：白名单组 `mnl_app`=`10.0.16.0/20,10.0.32.0/20` · 库 `newapi_logs` · 账号 `newapi` · 端到端验证全过（认证/建表/INSERT/TTL90/TRUNCATE）。日志表 schema **以代码 `model/main.go` 为准**（文档旧 DDL 基线作废）；TTL 由 `LOG_SQL_CLICKHOUSE_TTL_DAYS` 控制（0=永久，方案 90）。
+- **★ 坑：`DmlAuthSetting` 授权映射不生效**（JSON 数组是唯一被接受编码，仍回读空、SQL 层无数据权限）→ 绕行：`ckadmin`(SuperAccount) 从 VPC 内 `GRANT ALL ON newapi_logs.* TO newapi`；已固化 `deploy/task9_ck_wiring.sh --apply` 步骤 4b。
+- **★ 坑：国际站 KMS 凭据管家须先购 KMS 实例**（`CreateSecret`→`UnsupportedOperation`，`ListKeys=0`）→ **阻塞任务 17 全部 8 个凭据**；DSN 暂存 WSL root `/root/.deploy_secrets/{LOG_SQL_DSN,CK_ADMIN_DSN}`（600，仓库外）。
+- RAM 策略 `new-api-kms-readonly` v2（默认）已含 LOG_SQL_DSN 两地 ARN；坑：`ListPolicyVersions` 字段 `IsDefaultVersion`（非 `IsDefault`），List 自带 PolicyDocument。
+- **成本（马尼拉官方）**：计算 `0.185350 USD/CCU·h` · 资源包 `0.03611 USD/CCU·H`（最小 3000、预付 3 年、不可退订，马尼拉抵扣因子 1.45，省 71.8%）。**日志库若 3 年内可能裁撤就别买包**（B3 待用户裁定）。
+- 脚本 `deploy/task9_ck_wiring.sh`（`--check|--apply|--verify`）· 报告 §七 · 指南任务 9 执行记录 2 + 坑 10–12。
+- 备站→CK 跨区写路径未裁定（无公网端点：`CreateEndpoint` 开公网 vs 备站落 PG vs CEN）。
 
 ## 当前状态与阻塞
 - **账户余额 0.00 USD** —— 硬阻塞。**第一道墙是风控不是欠费**：ACK 服务开通报 `RISK.RISK_CONTROL_REJECTION`（文案不明说余额）；但 **RDS 下单不被拦**（可用 `--AutoPay false` 出未支付订单当零成本试单）。
 - 未支付订单 `518158947970481`（RDS，应付 10594.13 USD，预分配 `pgm-5ts8mee1iiw13m89`）。
 - **既有实例实况**：RDS `pgm-5tstdhko64x2c01w`（`rds-mnl-newapi`，`pg.n4.2c.2m`，主 6b / 备 6a，Prepaid，**到期 2026-10-28**）；Tair `r-5tsf1fe16543e274`（`tair-mnl-newapi`，**企业版 amber 1G/2DB/6proxy**、仅 6a、**只买 1 个月**）—— 两者周期/规格与指南口径不符，**待用户裁定**。
-- **CK 实例未建**（`clickhouse DescribeDBInstances --RegionId ap-southeast-6` → `TotalCount=0`）。
+- **CK 实例已建成并接线**（`cc-5tsv2o51s1360b0pr`，2026-09-30，见任务 9 段）⇒ 任务 41 I-1 的 PG 分支连接数窗口关闭。
+- **集群侧已落地（09-30）**：`new-api` namespace/SA/ResourceQuota/ConfigMap 两地 · RRSA 角色 `new-api-rrsa-kms-mnl/-sg` + 注入链路实测通 · 节点 SG 补 kubelet 10250 · 通道 `deploy/ack_remote.sh`。
 - 已落地：VPC/vSwitch · SG 5 个 · NAT/EIP · ACR（**VPC 端点未关联、`newapi-master` 仍 PUBLIC**）· SLS 两项目 · ACK 两集群（mnl `cd57e40c…` / sg `ca75829e…`）+ 节点池 · 私网运维通道。
 - ⚠️ **F11 待裁决**：官方规格表标 `pg.x4.2xlarge.2c` `max_connections=6400`，与 F11 的 800 差 8 倍 → 实例 Running 后 `SHOW max_connections;` 定论。
 - 仍未闭环门禁：G1 实名 · G4 NS · G5 证书 · G6 模板 PR · **G7 产品开通（含 CK 企业版白名单）** · **G8 代码补项（/healthz·/readyz·/metrics + 限流降级放行）** · G11 连接预算表 · G12 SLA 签字 · G13 staging · 上游 8 EIP 白名单。
