@@ -191,6 +191,8 @@ please complete the AliyunOOSLifecycleHook4CSRole ramrole authorization
 > 结论：**任务 11 的 17/17 PASS 只覆盖「配置项」；功能层 4/4 节点全部 bootstrap 失败，集群 0 Worker。**
 > 根因：**ACK 创建集群时没有在「控制面 ENI 的安全组」放行 TCP 6443** → 节点与 Pod 都无法直连 API Server ENI。
 > 处置：补齐该安全组规则 + 重跑 bootstrap → **4/4 `Ready`，集群可用**。**全程不需要任何 hosts / EndpointSlice hack。**
+>
+> **📌 工单闭环（2026-09-30）**：就"为何控制面 SG 不放行 6443"提的阿里云工单已答复——**平台侧已修复**（对**新建**集群生效）。存量两集群的 6443 仍由我方 09-29 所补规则承担（`CreateTime` 可证），**勿撤**；SOP 维持（新建集群仍先复核 6443，若观察到 ACK 已自动放行即可降级该步骤）。详见 `deploy/工单_ACK马尼拉控制面安全组缺失.md` §7。
 
 ### 7.1 现象：控制台「失败 2」是失真显示
 
