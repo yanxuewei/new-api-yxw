@@ -1,6 +1,10 @@
 #!/bin/bash
 # task17_rrsa.sh — 任务 17 第 1 步：RRSA 角色 + KMS 只读策略（两地各一角色）
 #
+# ⛔ 已废弃（2026-09-30）：KMS/凭据管家链路整体弃用（裁定：deploy/KMS弃用_手工Secret注入_裁定_2026-09-30.md），
+#    本脚本所建的角色/策略已于当日删除。注入改为手工 Secret：deploy/task17_manual_secret.sh。
+#    若未来重启 KMS 路线，可复跑本脚本 --apply 重建角色/策略（幂等）。
+#
 # 为什么两地要两个角色：信任策略里 oidc:iss / Federated 绑定的是**集群专属 OIDC Provider**，
 # 马尼拉与新加坡的 OIDC 不同 → 同一角色无法同时被两集群 AssumeRole。
 #

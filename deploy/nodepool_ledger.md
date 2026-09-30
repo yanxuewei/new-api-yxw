@@ -395,4 +395,31 @@ aliyun cs DescribeClusterUserKubeconfig --ClusterId <cid> --region ap-southeast-
 
 **容量口径**：按 **request** 规划 + 留 30% 余量（8C 节点可分配 ≈7.2C，stable 副本 request 2C → 每节点 ≈3 副本）；**勿按 limit 4C 算**。
 
-**未完成**：任务 42 步骤 4 的 `pdb-new-api-stable`（`minAvailable: 70%`）依赖 namespace `new-api`（**任务 17** 创建）→ 顺延。
+## 11. ✅ 任务 42 收尾（2026-09-30，PDB 已建，本卡全部落地）
+
+- `pdb-new-api-stable`（ns `new-api`，`minAvailable: 70%`，selector `app=new-api,track=stable`）**已创建**（此前因任务 17 未建 ns 而顺延）。当前 `ALLOWED DISRUPTIONS=0` 属预期——匹配 Pod 为 0，stable Deployment（任务 23）上线后随副本数变化。
+- **AzBalance 复断言（2026-09-30）**：两池均重跑 `nodepool_azbalance_fix.sh`（幂等），分布 **6a:2/6b:2**、**1a:1/1b:1**，与 09-29 一致，无漂移。
+- 配额不变量复核：马尼拉 8×8=64 / 新加坡 12×8=96，均顶满已批配额（64/96，工单 Agree）——`max_size` 不可再调大，除非先提配额。
+
+**⛔ 仍挂账：伸缩压测验证（卡片「验证方法」整段）**——唯一前置：`new-api-stable` Deployment 尚未部署（任务 23/24），无从 scale。
+（付费方式订正见下 §11.1：**实为按量**，无"预付/不退款"问题，原"须预算签字"前提作废；配额约束 = 马尼拉 8×8=64 顶满按量已批 64、新加坡 12×8=96 顶满 96。）
+→ 触发条件：任务 23 部署 stable 后，低峰窗口执行「scale 12 → 观察 Pending→扩容→Running → 缩回 4」，证据回填本节。
+
+### 11.1 ⚠️ 付费方式实测订正（2026-09-30）：两池实为**按量（PostPaid）**，"全面转包年"决策未落地
+
+三层 API 证据一致（控制台节点池列表"自动收缩策略"列显示"（包年包月）"与执行层矛盾，**以 API 为准**）：
+
+| 视角 | 字段 | 马尼拉 | 新加坡 |
+|---|---|---|---|
+| ACK 节点池 `DescribeClusterNodePoolDetail` | `scaling_group.instance_charge_type` / `period` / `auto_renew` | `PostPaid` / 0 / false | `PostPaid` / 0 / false |
+| ECS 实例本体 `DescribeInstances` | `InstanceChargeType` / `ExpiredTime` | `PostPaid` / `2099-12-31`（按量哨兵值） | 同 |
+| ESS 伸缩配置 `DescribeScalingConfigurations`（**扩容新节点真正走的那层**） | `InstanceChargeType` / `Period` | `null`（ESS 中 null=按量） | `null` |
+
+根因：建池脚本 `task11_nodepool_mnl.sh` 写死 `instance_charge_type:"PostPaid"` → **2026-09-28"ECS 节点池全面转包年（PrePaid，1 年 + 自动续费）"决策从未落到节点池**，而任务 11 坑 7/7b（扩容即预付、库存独立）与本卡前置的成本模型都建立在 PrePaid 前提上。
+
+**✅ 已裁定（2026-09-30，负责人）：选 A —— 维持按量**；配额口径固定为按量 `q_ecs_enterprise_postpay_c`（64/96，顶满 max_size），`prepay_c`=100/100 降为备查。三选项留档：
+- **A. 维持按量 ✅**：弹性最灵活，新加坡备区（低频启用）语义合适；代价是马尼拉 4 台常驻节点按量单价高于包年（实测差价可用 `DescribePrice`，注意任务 11 坑 7：Prepaid 用 `--CommodityCode rds`、Postpaid 用 `bards`，先看 `chargeType` 自校）。
+- ~~**B. 补执行转包年**~~（否决）：基线 4 台走 ECS `ModifyInstanceChargeType`；节点池 `instance_charge_type` 改 PrePaid 让扩容走包年 → 回到坑 7"扩容即预付、缩容不退款"的成本刚性。
+- ~~**C. 混合**~~（否决）：马尼拉基线转包年 + 新加坡保持按量；成本表需分列两种口径。
+
+**文档回写**：v2.0 指南共 **38 处**已按本裁定订正（`deploy/patch_prepaid_to_postpaid_20260930.py`，幂等，含建池 body/配额口径/成本表/坑 7·7b 状态标记），备份 `*.bak-prepaid2postpaid-20260930-180320`；另见 `付费方式修订记录-2026-09-28.md` 追加的 2026-09-30 节。

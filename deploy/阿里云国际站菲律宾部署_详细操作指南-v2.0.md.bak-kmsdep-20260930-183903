@@ -5,8 +5,7 @@
 > 2. **操作口径**：每步以 `aliyun` CLI / `kubectl` / `psql` 真实命令为主路径（AI agent 可直接执行），控制台独有操作标 **【控制台】** 并配截图占位；关键命令一律附「期望输出」文本作为即贴即证。
 > 3. **决策修订（2026-09-27）**：日志库改为**马尼拉云数据库 ClickHouse 企业版（单 AZ）**（F9）；连接收敛改为**自建 PgBouncer**（F10）；线上 RDS PG 实测 `max_connections = 800`，连接预算按 **800 × 0.8 = 640** 全量重算（F11）。
 > 4. **付费方式修订（2026-09-28）**：**ECS 节点池 = 按量（2026-09-30 裁定维持 `PostPaid`：实测两池/节点/ESS 伸缩配置均为 PostPaid，"转包年"未落地且不再转，见 `nodepool_ledger.md` §11.1）**；**Tair = 包年包月（PrePaid，已落地）**；配额核量口径 = 按量 `q_ecs_enterprise_postpay_c`（马尼拉 64 / 新加坡 96，**顶满 max_size**），`q_ecs_enterprise_prepay_c`（100/100，2026-09-28 实测）降为备查；**ACK 集群管理费官方口径为按量付费、不支持转包年包月**，等价手段 = 购买 **ACK 资源包**抵扣。连带影响见 §2.1 基线表、任务 10（资源包）、任务 11 坑 7/坑 7b/坑 10（**按量口径下暂不适用**，留作未来转 PrePaid 时启用）与任务 52 成本表（ECS 行取按量价）。
-> 5. **KMS 弃用（2026-09-30）**：**KMS/凭据管家/ExternalSecret/ack-secret-manager 链路整体弃用**——凭据管家需先购软件密钥管理实例（太贵），且 `ack-secret-manager` 不在马尼拉集群 addon 目录 → 改为**手工 Secret 注入**（`deploy/task17_manual_secret.sh`，两集群 `new-api-secret` 7 键；值源本地加密保管，补偿控制见裁定文件）。RRSA 角色/策略已删（端到端验证 PASS 后随裁定退役），任务 3 证书私钥改本地保管，双密钥轮换/泄露应急/成本表/交付自检均改口径。权威全文：`deploy/KMS弃用_手工Secret注入_裁定_2026-09-30.md`。
-> 6. **日志库决策 API 加固（2026-09-29，任务 9 复核）**：F9 的"马尼拉 CK 企业版单 AZ"由 API 硬证据复核并**收紧三处口径** —— ① 马尼拉 CK **可用区只有 `ap-southeast-6a` 一个**（官方 Multi-AZ=No，`DescribeRegions` 实测仅回 6a）⇒ 单 AZ 是产品事实而非我们的取舍；② **存储只有 OSS**（ESSD_L0–L3/SSD 在马尼拉不可售）；③ **计费只有按量付费**（商品类型即「企业版 Serverless & 社区兼容版按量付费」，`CreateDBInstance` 无 `PayType`）⇒ **不适用付费方式修订，但可用计算资源包降本**（马尼拉抵扣因子 **1.45**）。同时否定"仅购买页可创建"（`clickhouse CreateDBInstance` API 2023-05-22 可直接建）。详见任务 9「2026-09-29 复核证据」表。
+> 5. **日志库决策 API 加固（2026-09-29，任务 9 复核）**：F9 的"马尼拉 CK 企业版单 AZ"由 API 硬证据复核并**收紧三处口径** —— ① 马尼拉 CK **可用区只有 `ap-southeast-6a` 一个**（官方 Multi-AZ=No，`DescribeRegions` 实测仅回 6a）⇒ 单 AZ 是产品事实而非我们的取舍；② **存储只有 OSS**（ESSD_L0–L3/SSD 在马尼拉不可售）；③ **计费只有按量付费**（商品类型即「企业版 Serverless & 社区兼容版按量付费」，`CreateDBInstance` 无 `PayType`）⇒ **不适用付费方式修订，但可用计算资源包降本**（马尼拉抵扣因子 **1.45**）。同时否定"仅购买页可创建"（`clickhouse CreateDBInstance` API 2023-05-22 可直接建）。详见任务 9「2026-09-29 复核证据」表。
 >
 > **配套文件**：`.deploy/菲律宾部署方案-v2.1-修订版.xlsx`（任务/人时/验收标准唯一权威源）、`impl_deploy.md`（架构依据）、`.deploy/` 各落地执行报告（已落地事实源）。
 > **任何一处与国际站控制台不一致，以控制台 + 工单答复为准。**
@@ -109,7 +108,7 @@ gantt
 | 14  | RDS 备份 PITR+WAL                          | D2      | Day1·B ✅策略+链路已验证      | B   | 1        |
 | 15  | RDS 公网+白名单收死                             | D3      | Day1·B ✅已执行(09-29)   | B   | 2        |
 | 16  | 马尼拉 ACR+CI 推镜像（单地域）                       | D1      | Day1·A                | B   | 1        |
-| 17  | ConfigMap/Secret（手工注入；2026-09-30 裁定弃用 KMS/ExternalSecret） | D2/D3   | Day2·A                | B   | 3        |
+| 17  | RRSA+KMS+ExternalSecret+ConfigMap/Secret | D2/D3   | Day2·A                | B   | 3        |
 | 18  | master AutoMigrate 幂等                    | D4      | Day2·A                | B   | 3        |
 | 19  | 马尼拉 ALB+AlbConfig                        | D3      | Day2·B                | A   | 3        |
 | 20  | WAF 3.0+CC+回调源 IP                        | D5      | Day3·A                | A   | 2        |
@@ -307,7 +306,7 @@ aliyun ram ListUsers | jq -r '.Users.User[]|.UserName'   # 期望 admin/ops/cicd
 | ACK 版本               | 1.35                                                                                                                    | 勿用 EOL 版本                |
 | 节点机型                 | `ecs.g9i.2xlarge` 8C32G                                                                                                 | g8i 未上架，备选 g8ine.2xlarge |
 | 节点池                  | 马尼拉 4×（上限 8，**按量**配额 64/64 顶满 vCPU）/ 新加坡 2×（上限 12，**按量**配额 96/96 顶满 vCPU）（2026-09-30 裁定维持按量）                                                                       | 配额工单 Agree               |
-| SESSION_SECRET       | 手工 Secret `new-api-secret`（双集群同值；2026-09-30 裁定弃用 KMS）                                                                         | 轮换见任务 55                 |
+| SESSION_SECRET       | KMS 凭据 `newapi/prod/session-secret`，**双区域同源一致**                                                                         | 轮换见任务 55                 |
 | SYNC_FREQUENCY       | 生产 30（代码默认 60）                                                                                                          | 任务 53 验证收敛               |
 | BATCH_UPDATE_ENABLED | **false**（红线）                                                                                                           | 见任务 41/37 额度对账           |
 | SQL_MAX_OPEN_CONNS   | **2026-09-29 裁定 ①：主站 `100`**（一个值同时管主库与日志库，代码里没有 `LOG_SQL_MAX_OPEN_CONNS`）经**托管 PgBouncer**（内网串 6432）；**裁定 ②：新加坡备站 `10` 走乙＝公网串 6432 经池**（甲路 5432 直连已作废）。**服务端上限口径 = 实测 `max_connections 800 × 0.8 = 640`（F11），客户端上限 = 实测 `pgbouncer.max_client_conn 2000` ⇒ I-1 **仅 CK 日志库分支成立（1840 ✅）**，日志库仍为 PG 时 3680 ❌**；`SQL_MAX_IDLE_CONNS`（代码默认 100，本方案取 **50**/备站 **5**）与 `SQL_MAX_LIFETIME`（默认 60s）也必须显式给值，勿按代码默认 1000 推算 | G11、任务 41                |
@@ -652,13 +651,13 @@ for i in $(seq 1 12); do curl -s -m5 https://ifconfig.me; echo; done | sort | un
 **操作步骤（CLI-first）**：
 
 ```bash
-# 1. ~~私钥+证书链入 KMS 凭据~~ ⏸ 2026-09-30 裁定 KMS 弃用：私钥**本地加密保管**（密码管理器/0600 文件）；ALB 直接引用 CAS 证书 ID（任务 19 `CERT_ID_ALB`），集群内不需要 tls secret
+# 1. 私钥+证书链入 KMS 凭据（值从本地安全文件读，走 KMS 落库，绝不进 Git）
 aliyun kms CreateSecret --SecretName "new-api/prod/tls-wildcard" \
   --SecretData "$(cat ${CERT_PEM} ${INTERMEDIATE_PEM} ${KEY_PEM})" \
   --VersionId v1 --Description "*.likha.com TLS chain + private key"
 ```
 
-⏸ **2026-09-30 裁定 KMS 弃用，本步取消**（原为 KMS 凭据管家建 tls-wildcard）。私钥本地加密保管；ALB 走 CAS 证书 ID，不需要集群内 tls secret——证书续期与 AlbConfig 同步见任务 38。
+期望输出：`{"SecretName": "new-api/prod/tls-wildcard", ...}`，无报错。（若马尼拉/新加坡 KMS 实例未开通，此步在 KMS 控制台创建同名凭据：【控制台】`[图 D1-A-3｜拍摄对象：KMS 凭据管理-new-api/prod/tls-wildcard 详情（凭据值页不截图）；打码：凭据值、账号 UID]`）
 
 ```bash
 # 2. 本地核验证书有效期与覆盖域名
@@ -696,7 +695,7 @@ aliyun kms DescribeSecret --SecretName "new-api/prod/tls-wildcard" \
 
 | 症状 | 诊断 → 修复 |
 | --- | --- |
-| ~~KMS 列表无该凭据~~ | ⏸ 2026-09-30 裁定 KMS 弃用，本行取消（私钥本地加密保管，不入任何云端凭据库） |
+| KMS 列表无该凭据 | `CreateSecret` 报错（KMS 实例/权限）→ 按报错开通或补 `kms:CreateSecret` 权限后重试 |
 | 本地 notAfter 与页面不一致 | 拿了旧版本文件 → 从 CAS 重新下载当前「已签发」记录对应文件，重灌 KMS 并升版本 |
 | 证书状态非「已签发」 | G5 未真正闭环 → 回到 §3.7 完成签发/DCV，本卡其余步骤可先行 |
 | SAN 不含 `likha.com` 裸域 | 签单时只填了通配 → 追加覆盖域名重新签发；D1 记录阻塞项，不阻塞本卡其余步骤 |
@@ -783,7 +782,7 @@ aliyun cr CreateInstanceVpcEndpointLinkedVpc \
 # 提交后轮询 GetInstanceVpcEndpoint，直到 .LinkedVpcs 非空且状态为可用（实测状态值以此处输出为准），再跑验证 a
 ```
 
-3. 访问凭证：CI 用固定密码走 CI secret 变量 `${ACR_PASS}`（不写明文；CI secret 变量即托管处，KMS 已弃用）；缺失时到「实例 → 访问凭证」设置：
+3. 访问凭证：CI 用固定密码走 CI secret 变量 `${ACR_PASS}`（KMS/密钥管家托管，不写明文）；缺失时到「实例 → 访问凭证」设置：
    【控制台】`[图 D1-A-16｜拍摄对象：容器镜像服务 ACR 企业版实例-访问凭证页；打码：固定密码、账号 UID]`
 4. 命名空间按环境四个已建（见基线表）。⚠ **`AutoCreateRepo=false`**：推送到不存在的仓库会失败，**仓库必须显式创建**（控制台或 `aliyun cr CreateRepository --InstanceId $MNL_INST --RepoNamespaceName newapi-prod --RepoName <repo> --RepoType PRIVATE --Summary <...>`）。旧卡「勾选自动创建仓库」的表述与实况不符，已订正。
 5. ~~镜像同步规则~~ **本方案无同步规则**（单地域镜像源）。原「新加坡（高级版）为源 → 马尼拉（基础版）为目标」的双地域复制随新加坡实例不创建而取消；`CreateRepoSyncTask` 亦不再需要。
@@ -917,7 +916,7 @@ dig SOA likha.com +short          # 改记录后期望 SOA 序列号递增
 ☐ 8 个 EIP 同列一张台账（RDS 白名单/供应商加白双身份已标注）
    └ 台账 `deploy/eip_ledger.md` 8 行已填；剩余待办＝交各上游供应商取书面确认 + 进马尼拉 RDS 公网白名单
 ☐ 禁止 DNAT 已确认；节点池不分配公网 IP 已写入任务 10 交底
-☐ 证书 *.likha.com 状态「已签发」，notAfter ≥ 今+30 天；私钥本地加密保管（KMS 已弃用；ALB 引用 CAS 证书 ID）；到期告警已建；部署模板备好未执行
+☐ 证书 *.likha.com 状态「已签发」，notAfter ≥ 今+30 天；私钥在 KMS new-api/prod/tls-wildcard；到期告警已建；部署模板备好未执行
 ☐ ACR 马尼拉企业版 RUNNING、**VPC 端点已关联马尼拉 VPC（`LinkedVpcs` 非空；实测 2026-09-28 为空，未通过）**、马尼拉 VPC 域名 kubectl 拉取输出 ok、新加坡跨区公网域名拉取输出 ok 且**耗时已记录**（§11 RTO 输入）
 ☐ 镜像 tag=git sha 且 CI 拒绝 latest；credential-helper 覆盖 new-api namespace
 ☐ G0 表全部通过（含配额：**按量** vCPU 马尼拉=64、新加坡=96（`q_ecs_enterprise_postpay_c` 工单 `Agree`，**顶满 max_size**）；`prepay_c`=100/100 备查）；机型统一 ecs.g9i.2xlarge；**付费方式：ECS 节点池 = 按量（2026-09-30 裁定）；Tair/RDS = 包年包月（PrePaid）；ACK 集群管理费走 ACK 资源包；CK 企业版只能按量（可选计算资源包，抵扣因子 1.45）**
@@ -930,7 +929,7 @@ dig SOA likha.com +short          # 改记录后期望 SOA 序列号递增
 > 基线参数（浓缩自 §2.1/§2.2，本泳道全程照此执行）：主 region `ap-southeast-6`（仅 6a/6b 两个可用区），备 region `ap-southeast-1`（**不部署任何数据库**）；服务端口 3000；账号 `5108890064395960`。
 > **真实网络 ID（实测确认，覆盖 v2.1 文档占位）**：马尼拉 VPC `vpc-5tst1tgeessxn1azwasg2`（交换机 `vsw-mnl-data-a` `10.0.48.0/20`、`vsw-mnl-data-b` `10.0.64.0/20` 供 RDS/Tair）；新加坡 VPC `vpc-t4nimmwvruexbnene0a3r`。应用网段 `10.0.16.0/20`（6a）/`10.0.32.0/20`（6b）。
 > **配额 API 实测坑（适用于本泳道全部资源申请）**：调用配额中心 API 必须带 `--Dimensions.1.Key regionId --Dimensions.1.Value <地域>`，否则返回 cn-hangzhou 的配额；审批通过的状态值是 `Agree`（不是 Approved）；申请量参数拼写是 `--DesireValue`；**Tair/RDS 配额需在产品开通后复查**（ECS 配额已批：马尼拉 64 / 新加坡 96）。
-> 所有密码、DSN、连接串一律以 `${PLACEHOLDER}` 出现，真实值**只进本地加密保管（密码管理器 / 0600 临时文件，用完销毁）**，经**手工 `kubectl create secret`**（`new-api-secret`，helper：`deploy/task17_manual_secret.sh`）注入集群，严禁落盘 Git/CI 变量/镜像。（2026-09-30 裁定弃用 KMS/ExternalSecret，全文见 `deploy/KMS弃用_手工Secret注入_裁定_2026-09-30.md`）
+> 所有密码、DSN、连接串一律以 `${PLACEHOLDER}` 出现，真实值只进**密钥管理服务（凭据管家）**，经 ExternalSecret 注入集群，严禁落盘 Git/CI 变量。
 
 ### Day 1 · 任务 4｜马尼拉 RDS PostgreSQL 高可用版（计费：选择包年包月）
 
@@ -1101,7 +1100,7 @@ aliyun rds DescribeAccounts --DBInstanceId ${RDS_MNL_ID} \
 # ★ 字段名实测：列表在 `.Accounts.DBInstanceAccount[]`，**不是 `.Accounts.DBAccount[]`**（后者恒为 null → jq 报 "Cannot iterate over null"，写错会误判成"账号没建成"）
 ```
 
-1. 建库与三个业务账号（密码一律来自本地环境变量/密码管理器，**不写明文**；KMS 已弃用）：
+1. 建库与三个业务账号（密码一律来自本地环境变量/KMS，**不写明文**）：
 
 ```bash
 # PG 的 CharacterSetName 必须是「字符集,Collate,Ctype」三段，只写 UTF8 会报错（坑 5）
@@ -1397,7 +1396,7 @@ aliyun r-kvstore DescribeInstanceAttribute --InstanceId ${TAIR_MNL_ID} \
 
 【控制台】连接信息页复制内网地址（不要手拼），并确认页面显示的"可用区"为主备双区。
 `[图 D1-B-7｜拍摄对象：Tair 连接信息页（内网地址+账号栏）；打码：实例连接串]`
-DSN 中地址**从连接信息页复制**；真实密码只进本地加密保管，经手工 Secret（`new-api-secret`）注入：
+DSN 中地址**从连接信息页复制**；真实密码只进 KMS 凭据管家，经 ExternalSecret 注入：
 
 ```
 REDIS_CONN_STRING=redis://<user>:${TAIR_PW}@${TAIR_MNL_HOST}:6379/0
@@ -2102,7 +2101,7 @@ psql "$DSN_MIGRATE" -c "select usename,state,count(*) from pg_stat_activity grou
 - [ ] 三不变量 I-1/I-2/I-3 用 ConfigMap 真实值（非默认 1000/100）与**托管池实测参数**（`max_client_conn 2000`/`default_pool_size 50`）计算成立——**2026-09-29 四项裁定后复算**：I-1 在 **CK 日志库分支成立**（`16×100 + 24×10 = 1840 ≤ 2000`，余量仅 160）、在 **PG 日志库分支仍不成立**（`16×200 + 24×20 = 3680 > 2000`），而 **CK 实例尚未创建 ⇒ 当下按 PG 分支**；出口动作是"CK 实例提前到应用首启之前"或"窗口内临时 `SQL_MAX_OPEN_CONNS=45`"（任务 41 步骤 2 的 (a)/(b)），二选一必须在本项销账；I-2 按乙重算 ≈170（PG）/120（CK）`≤ 640` ✅；I-3 迁移走内网 5432 直连 + 应急开关"DSN 端口退回 5432 **且** conns 降到 ≤40（CK）/≤20（PG）"演练过（任务 41）。观测走 CMS `db.pgbouncer.*` + `pg_stat_activity`（`stats_users=newapi_ops` 已生效，但 admin 库登录**尚未实测** ⇒ `SHOW POOLS` 不得写进应急手册）；经池的 transaction 模式四项兼容性子集已跑（**裁定 ③：`pool_mode` 维持 transaction ⇒ 本项无退路，未全过不得切流**；任务 43 只跑子集，全量矩阵顺延 T+14）。
 - [ ] 新加坡 Tair `allkeys-lru` 生效、备站限流出现足量 429、`LOG_SQL_DSN` 指向本地日志库（任务 29）。
 - [ ] SG→MNL RTT ≤ 45ms、pgbench 单连接 TPS ≥ 20、TLS 握手成功率 100%、建连平均 ≤ 200ms；V1–V3 通过，V4 拔线自愈；实测值已回填接管 SLA 口径表（任务 30）。
-- [ ] 所有新增 Secret 均以手工 `kubectl create secret`（`new-api-secret`）注入（2026-09-30 裁定弃用 KMS/ExternalSecret），仓库/CI/ConfigMap 明文中无任何密码或完整 DSN。
+- [ ] 所有新增 Secret 均已入 KMS 凭据管家并经 ExternalSecret 注入，仓库/CI/ConfigMap 明文中无任何密码或完整 DSN。
 ## Day 2 · 泳道 A：ACK 集群、节点池、密钥链路与迁移版本化
 
 > 本泳道目标：两集群（马尼拉主 + 新加坡备）建成并配好自动伸缩，密钥链路（访问控制 RAM RRSA → 密钥管理服务（凭据管家）→ ExternalSecret）打通，Namespace/ConfigMap/Secret 落地，master AutoMigrate 幂等验证通过，迁移版本化基线建立，运维访问面收敛到私网 + 临时 kubeconfig。
@@ -2413,7 +2412,7 @@ aliyun cs DescribeClusterUserKubeconfig --ClusterId $ID_SG --TemporaryDurationMi
 aliyun cs DescribeClusterDetail --ClusterId $ID_SG | jq '.rrsa_config.enabled'   # true（任务 17 备侧 RRSA 前提）
 ```
 
-4. 与马尼拉的一致性检查（最容易漏的一步）：备集群不是"另一套系统"，是同一系统的第二份算力——`SESSION_SECRET` 来源（双集群同值手工 Secret）、镜像 tag、`NODE_TYPE=slave`、标签口径必须与主站逐项一致，全部用同一套 IaC/Helm values 按 region 渲染；新加坡无本地镜像源，跨区走马尼拉**公网**端点 `${ACR_PUB_PREFIX}`（代价与缓解见任务 16 坑 2）。
+4. 与马尼拉的一致性检查（最容易漏的一步）：备集群不是"另一套系统"，是同一系统的第二份算力——`SESSION_SECRET` 来源（同一 KMS Secret Key）、镜像 tag、`NODE_TYPE=slave`、标签口径必须与主站逐项一致，全部用同一套 IaC/Helm values 按 region 渲染；新加坡无本地镜像源，跨区走马尼拉**公网**端点 `${ACR_PUB_PREFIX}`（代价与缓解见任务 16 坑 2）。
 
 **验证方法**
 
@@ -2523,19 +2522,17 @@ kubectl get nodes -o custom-columns=NAME:.metadata.name,CREATING:.metadata.creat
 
 **前置/状态**：任务 10 集群已开 RRSA（拿 OIDC Provider ARN 与 Issuer URL）；RDS/Tair 账号与 KMS 侧凭据值由数据泳道提供，本卡一律用 `${PLACEHOLDER}` 指代，**绝不落 Git/镜像/CR**。三条信任边界（读原图 8 的结论）：① CI 不持有云账号密钥，只需 ACR 推送凭据，既不要 kubeconfig 也不要长期 AK/SK；② Pod 经 webhook 注入 OIDC token 短时投影 `AssumeRoleWithOIDC`；③ 密钥管理服务是 **region 级**——新加坡读不到马尼拉的 Secret，备 region 必须另建一套并在双写流程同步（M4 演练最常见失败点）。
 
-> **✅ 执行登记（2026-09-30 复查补齐；同日二次修订：KMS 弃用 → 手工 Secret 注入）**：
+> **◐ 执行登记（2026-09-30 复查补齐）——RRSA 链路 100%，Secret 注入链路挂账两项外部依赖**：
 >
-> - **RRSA 角色/策略：建 → 验证 PASS → 删（全在 09-29/09-30 两日内闭环）**。两集群角色 `new-api-rrsa-kms-mnl/-sg` + 策略 `new-api-kms-readonly`（v2，14 个 Secret ARN）曾端到端验证 PASS（测试 Pod 注入 `ALIBABA_CLOUD_ROLE_ARN`/OIDC token/STS VPC 端点全对）；因 **KMS 弃用裁定**随之删除（DetachPolicy → DeletePolicyVersion v1 → DeleteRole ×2 → DeletePolicy，复核均 `EntityNotExist`）；`deploy/task17_rrsa.sh` 头部标记 ⛔ 废弃（重启 KMS 路线可复跑重建）。SA `new-api-app` 的 `pod-identity…role-name` 注解已移除；`ack-pod-identity-webhook` addon 与集群 RRSA 开关保留（无害）。⚠️ 本卡正文步骤 1 的角色名（无后缀）与整段步骤已过时，以裁定文件为准。
-> - **步骤 2 ✅**：ns `new-api` + `injection=on` label（保留，无害）；ResourceQuota（48C/96Gi-64C/128Gi）✓。
-> - **步骤 3 → 手工 Secret**：KMS 凭据不再创建（实测 0 个，且不采购 KMS 实例）。替代 = 操作员本地加密保管值源 + `deploy/task17_manual_secret.sh` 在两集群创建 **`new-api-secret`**（7 键：SQL_DSN、SQL_DSN_MIGRATE、REDIS_CONN_STRING、SESSION_SECRET、SESSION_SECRET_OLD、PAYMENT_PRIVATE_KEY、TLS_WILDCARD；Pod 侧 secretKeyRef/任务 23 manifest 零改动）。**仍挂账：7 个凭据值待数据泳道**（与 KMS 无关）；值齐后 `VALUES_FILE=... --apply mnl` → `--check` → 任务 23 部署时做注入 smoke。本卡正文 `new-api/prod/sql-dsn` 小写与 YAML 里 `aone/newapi/prod/*` 前缀均已过时（键名以 helper 脚本口径为准）。
-> - **步骤 4 ✅（除 Secret 本体）**：ConfigMap 9 键齐（2026-09-30 补 `SQL_MAX_IDLE_CONNS:"50"`——此前缺失会按默认 100 占客户端槽位，任务 41 I-1 风险；另有增量键 `LOG_SQL_CLICKHOUSE_TTL_DAYS`）。~~ExternalSecret / ack-secret-manager 选型~~ **随裁定取消**（该组件本就不在 addon 目录，缺口自然消失）。
-> - **验证**：① RRSA 端到端曾 PASS（已随退役失去意义，留档 `deploy/logs/task17_*/`）；④ ✅ git 全历史 **0 真实泄漏**（17 处命中均为教学 SVG 占位 + go.sum 噪声）。**新增手工 Secret 验证**：`bash deploy/task17_manual_secret.sh --check`（7 键齐全）+ 任务 23 部署时 Pod 注入 smoke。
-> - **新加坡集群同构 apply**：未做——跳板机私网到不了 SG 集群 API Server（任务 46 跨区限制）；helper 已预留 `--apply sg`（当前拒绝执行并提示），通道建立后执行。
-> 裁定全文：`deploy/KMS弃用_手工Secret注入_裁定_2026-09-30.md`；卡内状态 = 2026-09-30。
+> - **步骤 1 ✅（2026-09-29 已完成，本次复核确认）**：两集群角色 `new-api-rrsa-kms-mnl` / `new-api-rrsa-kms-sg` + 自定义策略 `new-api-kms-readonly`（**v2**，`kms:GetSecretValue` 精确到 **14 个 Secret ARN** = `new-api/prod/{SQL_DSN, SQL_DSN_MIGRATE, REDIS_CONN_STRING, SESSION_SECRET, SESSION_SECRET_OLD, PAYMENT_PRIVATE_KEY, TLS_WILDCARD}` × 两地域，不给 `*`；脚本 `deploy/task17_rrsa.sh`，AttachDate `2026-09-29T08:24Z`）。⚠️ **本卡正文步骤 1 的角色名 `new-api-rrsa-kms`（无后缀）已过时**——实际交付为**按集群后缀命名**（两地 OIDC Provider 不同，单一角色无法被两集群 Assume）。
+> - **步骤 2 ✅（2026-09-30 补齐）**：ns `new-api` 补上 `pod-identity.alibabacloud.com/injection=on`（此前**缺失**，注入开关没开）；SA `new-api-app` + `role-name` 注解早已就位（指向 `-mnl` 角色）；ResourceQuota `new-api-quota`（48C/96Gi requests，64C/128Gi limits）✓。
+> - **步骤 3 ❌ 挂账（KMS 凭据 0 个）**：`kms ListSecrets` TotalCount=0，且账号内无 KMS 实例/密钥。阻塞两项：① 国际站凭据管家需先购买 **KMS 软件密钥管理实例**（花费动作，待批准）；② 7 个凭据**值**待数据泳道提供（命名 `new-api/prod/<KEY>` UPPER_SNAKE，与策略 ARN 严格对齐；本卡正文 `new-api/prod/sql-dsn` 小写命名与步骤 4 YAML 里 `aone/newapi/prod/*` 前缀均已过时，**以脚本/策略口径为准**）。
+> - **步骤 4 ◐**：ConfigMap ✅——2026-09-30 补 `SQL_MAX_IDLE_CONNS: "50"`（**此前缺失**：不显式给值按默认 100 占客户端槽位，直接冲击 pgbouncer.max_client_conn，任务 41 I-1 风险）；现有 9 键与卡片段落一致 + 增量键 `LOG_SQL_CLICKHOUSE_TTL_DAYS`（CK 相关，合理）。**⛔ 方案缺口：注入组件不可用**——`ack-secret-manager` **不在本集群 addon 目录**（`DescribeClusterAddonsVersion` 全量核对无任何 secret 类组件；CSI `SecretProviderClass` 的 driver 同样不可用），ExternalSecret 的 CRD 都不存在。**裁定前 ExternalSecret 不建**（也无法 apply）。需负责人三选一：① Helm 装 External Secrets Operator（社区版；集群实测可拉 docker.io 镜像）；② 手动部署 secrets-store-csi-driver + alibaba provider（CSI 路线）；③ 应用改直读 KMS OpenAPI（代码变更，改动最大）。
+> - **验证**：① ✅ **RRSA 注入端到端 PASS**（2026-09-30：测试 Pod 注入 `ALIBABA_CLOUD_ROLE_ARN=…role/new-api-rrsa-kms-mnl` + `OIDC_PROVIDER_ARN` + token 文件 + STS **VPC 端点**；注意 ResourceQuota 强制 requests/limits，测试 Pod 必须带 resources，`kubectl run --limits` 在 kubectl 1.35 已移除、用 manifest）；② ③ ⛔ 依赖步骤 3/4；④ ✅ git 全历史扫描 **0 真实泄漏**（17 处命中均为教学 SVG 占位 `LTAI5tXXXXXXXXXXXXXX` + go.sum 哈希噪声，见 `gen_guide_images.py`）。
+> - **新加坡集群同构 apply**：未做——跳板机私网到不了 SG 集群 API Server（任务 46 跨区限制），挂账至 SG 通道建立。
+> 台账/证据：`deploy/logs/task17_*/`（脚本日志）、本节；卡内状态标记 = 2026-09-30。
 
 **操作步骤（CLI-first）**
-
-> ⛔ **2026-09-30 裁定：KMS/ExternalSecret 链路整体弃用 → 手工 Secret 注入**（helper：`deploy/task17_manual_secret.sh`，两集群 `new-api-secret` 7 键；RRSA 角色已随之删除）。下方**步骤 1（RRSA 角色）、步骤 3（KMS 凭据）、步骤 4 的 ExternalSecret 段全部作废**，仅 Namespace/ResourceQuota/ConfigMap/SA 部分仍有效；**「DSN 端口口径」整段仍然有效**。现行为与证据见上方执行登记及 `deploy/KMS弃用_手工Secret注入_裁定_2026-09-30.md`。
 
 1. RRSA 角色（访问控制 RAM）——信任策略限定"集群 + namespace + SA"三元组：
 
@@ -2759,7 +2756,7 @@ aliyun actiontrail LookupEvents --StartTime ${T0} --EndTime ${T1} --EventName Gr
 
 ### Day 2 · 任务 18｜master Deployment 跑通 AutoMigrate，连跑两次验幂等（单人，2 人时，13:30–15:30）
 
-**前置/状态**：任务 17 的 Namespace/ConfigMap 已就绪、手工 Secret `new-api-secret` 已注入（2026-09-30 裁定弃用 ExternalSecret/KMS）；镜像已推 ACR（`${ACR_MNL_PREFIX}:<git-sha>`，见任务 16）；stable Deployment 尚未接流量。**红线**：master 判定是 `os.Getenv("NODE_TYPE") != "slave"` 的字符串不等判断——**NODE_TYPE 留空即 master**；只有本卡的 master Deployment 允许显式 `NODE_TYPE=master`，其余一律继承 ConfigMap 的 `"slave"`。`SESSION_SECRET` 未设置/为默认 `random_string` 会 `log.Fatal` 起不来（好事）；若图省事让代码随机生成，**每次重启全员登出**。
+**前置/状态**：任务 17 的 Namespace/ConfigMap/ExternalSecret 已 Ready；镜像已推 ACR（`${ACR_MNL_PREFIX}:<git-sha>`，见任务 16）；stable Deployment 尚未接流量。**红线**：master 判定是 `os.Getenv("NODE_TYPE") != "slave"` 的字符串不等判断——**NODE_TYPE 留空即 master**；只有本卡的 master Deployment 允许显式 `NODE_TYPE=master`，其余一律继承 ConfigMap 的 `"slave"`。`SESSION_SECRET` 未设置/为默认 `random_string` 会 `log.Fatal` 起不来（好事）；若图省事让代码随机生成，**每次重启全员登出**。
 
 **操作步骤（CLI-first）**
 
@@ -2781,7 +2778,7 @@ spec:
         env:
         - {name: NODE_TYPE, value: "master"}     # 只有这里允许 master
         envFrom: [ {configMapRef: {name: new-api-config}} ]
-        # SQL_DSN / SESSION_SECRET 等经 secretKeyRef 注入手工创建的 new-api-secret（deploy/task17_manual_secret.sh）
+        # SQL_DSN / SESSION_SECRET 等经 secretKeyRef 注入 ExternalSecret 生成的 new-api-secret
         volumeMounts:
         - {name: data, mountPath: /app/data}
       volumes:
@@ -3059,7 +3056,7 @@ aliyun alb GetListenerHealthStatus --ListenerId ${HTTPS_LISTENER_ID} | jq -r '.L
 
 ### Day 2 · 任务 23｜stable Deployment（4 副本 + PDB + HPA + 反亲和）（单人，2 人时，D2 上午 09:00–11:00）
 
-**前置/状态**：任务 18 节点池（g9i.2xlarge）就绪；`new-api-config` ConfigMap 与手工 Secret `new-api-secret` 已建（`SESSION_SECRET` 等仅经 secretKeyRef 注入，manifest 不出现明文；2026-09-30 裁定弃用 ExternalSecret）；任务 19 的 IngressClass `alb` 已建；镜像 `${ACR_MNL_PREFIX}:<git-sha>` 已推 ACR（CI pin SHA，禁 `latest`）。
+**前置/状态**：任务 18 节点池（g9i.2xlarge）就绪；`new-api-config` ConfigMap 与 ExternalSecret 已建（`SESSION_SECRET` 等密钥仅经 KMS 注入，manifest 不出现明文）；任务 19 的 IngressClass `alb` 已建；镜像 `${ACR_MNL_PREFIX}:<git-sha>` 已推 ACR（CI pin SHA，禁 `latest`）。
 
 **操作步骤（CLI-first）**：
 
@@ -3213,7 +3210,7 @@ spec:
         resources: {requests: {cpu: "2", memory: 4Gi}, limits: {cpu: "4", memory: 8Gi}}
 ```
 
-2. 手工 Secret `new-api-secret` 在新加坡集群另建一份（键同名，helper：`deploy/task17_manual_secret.sh --apply sg`，跨区通道建立后执行），`SQL_DSN` 指向**马尼拉 RDS 公网串**（`${SG_SQL_DSN_PLACEHOLDER}`）+ `sslmode=verify-full`；`SESSION_SECRET` 与主站**同值**（同一份本地加密保管源，双集群各自 kubectl apply）：
+2. `ExternalSecret` 在新加坡另建一份（键同名），`SQL_DSN` 指向**马尼拉 RDS 公网串**（`${SG_SQL_DSN_PLACEHOLDER}`）+ `sslmode=verify-full`；`SESSION_SECRET` 与主站引用同一 KMS 凭据：
 
 ```bash
 kubectl --context sg apply -f external-secret-sg.yaml
@@ -3243,7 +3240,7 @@ curl -s -H "Authorization: Bearer ${MNL_TOKEN_PLACEHOLDER}" https://<SG_ALB_DNS>
 
 **不通过时修复**：
 - Pod 起来但 readiness 不过 → 诊断：跨区 DSN 握手失败（TLS/白名单）→ 修复：回 §6.1 V1–V3 定位，不要先怀疑应用。
-- V4 返回 401 → 诊断：两集群 `SESSION_SECRET` 不同 → 修复：统一手工 Secret 源（双集群同值），改后两侧 `kubectl rollout restart`。
+- V4 返回 401 → 诊断：两集群 `SESSION_SECRET` 不同 → 修复：统一 KMS 源，改后两侧 `kubectl rollout restart`。
 - 频繁重启（`Liveness probe failed: timeout`）→ 诊断：PG 慢时 `/api/status` 也慢 → 修复：加大 `timeoutSeconds`/`failureThreshold`；根治要补 `/healthz`（不查库），即 G8。
 - 备站把表结构改了 → 诊断：`NODE_TYPE` 非 slave（§6.2 坑 1）→ 修复：立刻回滚 + 数据核对；这是最高优先级修复项。
 
@@ -3913,7 +3910,7 @@ psql "${DSN_APP_READONLY}" -c "select id,status from orders where out_trade_no='
 
 **操作步骤（CLI-first）**：
 
-1. Secret 版本位（手工）：`SESSION_SECRET`（当前值 A）与 `SESSION_SECRET_OLD`（轮换窗口内的旧值位）。写入新值前做长度/字符集校验（≥32 随机字节）；**双集群都要改**（先备份当前 Secret 以便回滚）：
+1. KMS 建版本位：`SESSION_SECRET`（当前值 A）与 `SESSION_SECRET_OLD`（轮换窗口内的旧值位）。写入新值前做长度/字符集校验（≥32 随机字节）：
 
 ```bash
 NEW_SECRET=$(openssl rand -base64 48 | tr -d '\n')   # 仅演示；实际由密管系统生成并直接写入，终端不回显
@@ -3931,8 +3928,8 @@ f3a1...-uuid-B    2026-09-27T06:12:44Z   # 新版本（B）
 2. 重叠窗口滚动（时间线 T0–T6，**只有 T6 不可逆**）：
 
 ```
-T0   SESSION_SECRET = A                        （全部 Pod 认 A；Secret 改值不重启无影响，env 只在启动时读）
-T1   Secret 值改为 B（先不重启；双集群）
+T0   SESSION_SECRET = A                        （全部 Pod 认 A；KMS 改值不重启无影响，env 只在启动时读）
+T1   KMS 值改为 B（先不重启）
 T1+  分批滚动 stable：先 1 个 Pod → 观察 → 全量
      ⚠ 滚动期间 A/B Pod 混跑，同一用户可能命中不同 Pod → "偶发 401"是预期现象，不是故障；
        必须在变更窗口内执行并挂公告，否则会被立案为登录 Bug
@@ -3943,7 +3940,7 @@ T5   复验下方 V1–V4 含接管链路
 T6   T+24h 自动清空 SESSION_SECRET_OLD，密钥面回到 1（唯一不可逆点；此前任意时刻可回滚）
 ```
 
-3. 回滚方向唯一：把 Secret 值改回 A + 全量 `rollout restart`，**不要改前端**。
+3. 回滚方向唯一：把 KMS 改回 A + 全量 `rollout restart`，**不要改前端**。
 4. 真双密钥为推荐落地形态（写入 G8 需求）：`secrets := []string{os.Getenv("SESSION_SECRET"), os.Getenv("SESSION_SECRET_OLD")}`，签发只用 `[0]`，验签按顺序尝试非空项。
 
 **验证方法**：
@@ -3952,14 +3949,14 @@ T6   T+24h 自动清空 SESSION_SECRET_OLD，密钥面回到 1（唯一不可逆
 # V1 重叠窗口：旧 token 在滚动后仍可用
 curl -sS -H "Authorization: Bearer ${OLD_TOKEN}" https://api.likha.com/api/user/self | jq -e '.success'   # 期望 true
 # V2 新签发 token 立即可用，且 A/B 两拨 Pod 都认
-# V3 轮转窗口结束后清掉 SESSION_SECRET_OLD 键（手工 Secret 无版本位，防误恢复/回滚混淆）
+# V3 轮转后 KMS 旧版本不可读（防误恢复）
 aliyun kms GetSecretValue --SecretName new-api/prod/SESSION_SECRET --VersionId ${OLD_VERSION_ID}   # 期望报错或按策略拒绝
 # V4 审计：轮换动作在操作审计 ActionTrail 有记录（事件名 PutSecretValue），且变更单号可关联
 aliyun actiontrail LookupEvents --StartTime $(date -u -v-1d +%FT%TZ) --EventName PutSecretValue --MaxResults 10 | jq '.Events | length'
 ```
 
 **不通过时修复**：
-- V1 失败（旧 token 401）→ 诊断：代码不支持双密钥且 Pod 未全部滚完，或该 Pod 读到空值崩溃重启（`log.Fatal`）。修复：立即把 Secret 值改回 A + 全量 `rollout restart`（回滚方向唯一）；再排查 `common/init.go` 读取路径。
+- V1 失败（旧 token 401）→ 诊断：代码不支持双密钥且 Pod 未全部滚完，或该 Pod 读到空值崩溃重启（`log.Fatal`）。修复：立即 KMS 改回 A + 全量 `rollout restart`（回滚方向唯一）；再排查 `common/init.go` 读取路径。
 - V2 部分 Pod 认新不认旧且已滚完 → 备 region 未同步（坑 1）→ 补滚 + 复验接管链路。
 - V4 无审计事件 → ActionTrail 投递被误删（前序泳道已落地，查 `DescribeTrails`）→ 恢复投递后再演练一轮。
 - 滚动期间 401 持续超窗 → 会话保持未生效 → 核对 ALB 监听一致性哈希配置。
@@ -5088,7 +5085,7 @@ kubectl --context perf -n new-api-perf exec deploy/new-api -- sh -c \
 **坑**：
 - **坑 1｜移交 = 丢文档。** 后果：D10 起所有问题回来找原执行人，等于没移交。改进：安排 **2 周影子值班**（运维主导、原执行人旁观），并在验收单上双方签字。
 - **坑 2｜已知限制没写下来。** 后果：接手方把架构决策当 bug 反复排查（典型："为什么不建新加坡库""为什么 ALB 入向是全开"）。改进：`impl_deploy.md` 与本指南差异表一起归档，并在每个"看起来像漏洞"的配置旁写一句 reason（**注释即文档**）。
-- **坑 3｜密钥归属不清。** 后果：轮换无人执行、到期才发现。改进：每个 Secret 键有 owner + 轮换周期字段（网络与安全规划表已列，交接时复述；手工 Secret 无平台审计，轮换日历必须落值班表）。
+- **坑 3｜密钥归属不清。** 后果：轮换无人执行、到期才发现。改进：每个 KMS Secret 有 owner + 轮换周期字段（网络与安全规划表已列，交接时复述）。
 
 ### Day 4 出口（M5）
 
@@ -5145,7 +5142,7 @@ kubectl --context perf -n new-api-perf exec deploy/new-api -- sh -c \
 | ARMS APM 马尼拉未确认（P1-12） | 不纳入证据链 | 上线后提工单确认，再启用链路追踪 |
 | 马尼拉仅 2 AZ（P1-8） | 3AZ 方案不可行 | 接受；region 级故障走排除项② |
 | Managed Grafana 不在马尼拉（P1-11） | 建在新加坡 | 跨区看板读取延迟，非生产链路依赖 |
-| 会话在接管后依赖两侧同 SESSION_SECRET | 双集群手工 Secret 同值 | 轮换 SOP 强制双集群同步；任务 36 覆盖 |
+| 会话在接管后依赖两侧同 SESSION_SECRET | 已统一 KMS 源 | 轮换 SOP 强制双 region 同步；任务 36 覆盖 |
 | Redis 独立导致接管后限流重计数 | 已知行为 | 写进口径；高价值用户 DB 侧兜底 |
 | **g9i 机型依赖（原方案 g8i 全系未在马尼拉上架，2026-09-25 API 实测）** | 节点池已改 `g9i.2xlarge` 首位 + `g8ine.2xlarge`/`g9ae.2xlarge` 多机型 + 双可用区；§2.1 request/limit 按 g9i 实际 vCPU 重算 | 残余：g9i 单 AZ 库存波动 → Day 2/Day 4 扩容前各复跑一次 `DescribeAvailableResource`；库存告急时按机型列表顺延并复核 HPA 上限；**4 天口径下不允许压测当天首次验机型** |
 | **`BATCH_UPDATE_ENABLED` 额度批量合并写的丢失窗口** | 额度增量先在内存按行聚合、按 `BatchUpdateInterval` 定时落库；Pod 优雅退出会 flush，但崩溃/SIGKILL 丢失至多一个周期的增量 | 接管/切换对账"差异 = 0"须在无流量稳定期读取 `sum(quota)`；`terminationGracePeriodSeconds` ≥ 合并周期；真实故障强杀场景对账容差 = 2× `BatchUpdateInterval`，超出即按额度事故升级；此残余写入已知限制清单交运维知悉 |
@@ -5280,7 +5277,7 @@ aliyun cs ModifyClusterNodePool --ClusterId ${ACK_MNL_ID} --NodepoolId ${NP_MNL}
 
 1. 立即在访问控制（RAM）禁用相关 AK；上游渠道 key 在厂商侧吊销并轮换。
 2. `SESSION_SECRET` 轮换（§9.6）——注意这会**强制全员重登**，属预期代价。
-3. 时间线取证：ActionTrail（API 侧）+ 跳板机会话录制（OSS）+ kubectl events（手工 Secret 无 KMS 访问记录可拉，以「谁在何时改了 Secret」替代），出事件报告。
+3. 从 KMS 拉取受影响 Secret 的访问记录 + 操作审计（ActionTrail）时间线，出事件报告。
 4. **Git 历史里的密钥不算已清除**：轮换是唯一有效修复。
 
 ### 裁剪预案（4 天高压期专用，按顺序砍）
@@ -5476,7 +5473,7 @@ kubectl -n new-api get events --sort-by=.lastTimestamp | tail -20
 ☐ 每张任务卡四段齐全：操作步骤 / 验证方法 / 不通过时的修复 / 坑（现象→后果→改进）
 ☐ 所有 CLI 命令均为已验证形式且给出期望输出（尤其配额/机型命令的
   --Dimensions.1.Key regionId、--DesireValue、状态过滤 Agree），不照抄过期截图
-☐ 所有密钥/凭据均走手工 Secret（本地加密保管 → `kubectl create secret`，helper `deploy/task17_manual_secret.sh`），正文一律 ${PLACEHOLDER}，无一处真实密钥值（2026-09-30 裁定弃用 KMS）
+☐ 所有密钥/凭据均走 KMS + RRSA/ExternalSecret，正文一律 ${PLACEHOLDER}，无一处真实密钥值
 ☐ 所有破坏性操作（PITR 覆盖、migrate down、白名单摘除、drain、scale 0）都标注了执行窗口与**远程第二方核准留痕**（单人口径）
 ☐ 所有"可能已变化"的云产品事实都要求了 【控制台核实】，实测项注明来源日期（2026-09-25/26）
 ☐ 4 天压缩日历的人力缺口在对应任务卡显式标注（谁顶替 / 哪项后置 / 触发 §13.8 裁剪原则的条件），
