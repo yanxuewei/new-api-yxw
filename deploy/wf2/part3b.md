@@ -1,6 +1,6 @@
 ## Day 3 · 泳道 B：可观测、HPA 容量与灰度/故障演练
 
-> 本泳道参数基线（§2.1）：主 region `ap-southeast-6`（马尼拉，仅 6a/6b）、备 region `ap-southeast-1`（新加坡）、域名 `api.likha.com` / `ops.likha.com`、命名空间 `new-api`、服务端口 `3000`、K8s 1.35 + Terway。节点池机型 `g9i.2xlarge`（g8i 未上架马尼拉）；HPA 上限对应配额已批：**MNL 64 vCPU = 8 节点、SG 96 vCPU = 12 节点**。
+> 本泳道参数基线（§2.1）：主 region `ap-southeast-6`（马尼拉，仅 6a/6b）、备 region `ap-southeast-1`（新加坡）、域名 `www.likha.hk` / `ops.likha.hk`、命名空间 `new-api`、服务端口 `3000`、K8s 1.35 + Terway。节点池机型 `g9i.2xlarge`（g8i 未上架马尼拉）；HPA 上限对应配额已批：**MNL 64 vCPU = 8 节点、SG 96 vCPU = 12 节点**。
 >
 > **⚠ 探针降级口径（贯穿全泳道，每个涉及探针的卡都必须带）**：当前仓库**没有** `/healthz`、`/readyz`、`/metrics`，唯一状态接口为 `GET /api/status`（`router/api-router.go:26`）。G8 代码补项未完成前，所有基于自定义指标 HPA、ServiceMonitor 抓取、P95 首字延迟门禁均为降级运行，**SLA 承诺应相应下调**，并在 §12 证据链中如实记录。ARMS APM 马尼拉可用性未确认（P1-12），**不纳入证据链**。
 
@@ -57,7 +57,7 @@ kubectl --context mnl get ds,deploy -n arms-prom
 5. 云监控站点监控：探测点选可用的（新加坡/东京/香港），断言响应含 `"success":true` 且 `version` 匹配：
 
 ```bash
-aliyun cms DescribeSiteMonitorList --Keyword api.likha.com
+aliyun cms DescribeSiteMonitorList --Keyword www.likha.hk
 ```
 
 **马尼拉探测点未确认（P1-13），必须叠加三重兜底**：云监控站点监控（外部）+ ACK 内 `blackbox-exporter` 多 region 自拨 + GTM 健康探测。
@@ -106,7 +106,7 @@ curl -s "${ARMS_PROM_ENDPOINT}/api/v1/query?query=container_memory_working_set_b
 
 ```promql
 # 燃烧率示例（rapid burn，触发 P1/P2）
-(sum(rate(alb_upstream_5xx{host="api.likha.com"}[1h])) / sum(rate(alb_requests_total{host="api.likha.com"}[1h])))
+(sum(rate(alb_upstream_5xx{host="www.likha.hk"}[1h])) / sum(rate(alb_requests_total{host="www.likha.hk"}[1h])))
   / 0.0005 > 2
 ```
 
@@ -116,7 +116,7 @@ curl -s "${ARMS_PROM_ENDPOINT}/api/v1/query?query=container_memory_working_set_b
 aliyun cms DescribeContactList   # 期望：含 2 名值班 + 项目负责人，电话已验证
 ```
 
-4. 【控制台】云监控告警规则绑定联系人组并勾选**电话通道**；值班表 2 人轮换 + 项目负责人升级路径；`ops.likha.com` 只对内网/堡垒开放。
+4. 【控制台】云监控告警规则绑定联系人组并勾选**电话通道**；值班表 2 人轮换 + 项目负责人升级路径；`ops.likha.hk` 只对内网/堡垒开放。
    `[图 D3-B-32a｜拍摄对象：云监控报警规则的通知方式（电话+短信+钉钉群）与联系人组页；打码：值班人员手机号、钉钉群 webhook]`
 5. 发布冻结决策接入燃尽曲线：月累计预算消耗 >25% → 只允许修复类变更；>50% → 冻结，需架构负责人签字例外；解冻条件为连续 7 天燃烧率 <1 且复盘关闭。
 
@@ -153,7 +153,7 @@ kubectl --context mnl -n new-api scale deploy/new-api-stable 4
 
 ```bash
 hey -z 120s -q <rate> -c <conc> -m POST -H "Content-Type: application/json" \
-  -D /tmp/req.json https://api.likha.com/v1/chat/completions
+  -D /tmp/req.json https://www.likha.hk/v1/chat/completions
 ```
 
 在 perf 环境按 100/250/500/800/1200 并发 SSE 逐档记录 CPU p50、内存、FD、p95 首字延迟、5xx；取"p95 仍满足 SLO 且 5xx<0.1%"的最大并发 = **C**。峰值 1,500 并发 ⇒ 需 `ceil(1500 / C)` 副本 ≤ 16，否则升规格/优化或申请 max 24（配额联动 §3.4）。
@@ -312,9 +312,9 @@ kubectl --context mnl -n new-api get deploy,svc,ingress -l 'track in (stable,can
 
 ```bash
 # V1 头流量强制进 canary
-curl -sS -H "x-canary: 1" https://api.likha.com/api/status | jq -r .version   # 期望：candidate 版本号
+curl -sS -H "x-canary: 1" https://www.likha.hk/api/status | jq -r .version   # 期望：candidate 版本号
 # V2 权重比例统计（1000 次采样，canary 版本占比 ≈5%）
-for i in $(seq 1 1000); do curl -s https://api.likha.com/api/status | jq -r .version; done | sort | uniq -c
+for i in $(seq 1 1000); do curl -s https://www.likha.hk/api/status | jq -r .version; done | sort | uniq -c
 # V3 权重归零即时生效（最快回滚通道，秒级）
 kubectl --context mnl -n new-api annotate ingress new-api-canary alb.ingress.kubernetes.io/canary-weight="0" --overwrite
 # 期望：≤30s 后 V2 统计 canary 占比为 0；验完改回 "5"
@@ -371,7 +371,7 @@ deployment "new-api-stable" successfully rolled out
 # 各档通过线：5% canary 5xx ≤ 基线+0.05pp；20% P95 ≤ SLO(如800ms)；50% DB 连接数/CPU 无阶跃；100% 对账差异 0
 # 回滚演练（本卡核心证据）：权重归 0 生效 ≤30s 且无残余错误
 time (kubectl --context mnl -n new-api annotate ingress new-api-canary alb.ingress.kubernetes.io/canary-weight="0" --overwrite && \
-      until [ "$(curl -s https://api.likha.com/api/status | jq -r .version)" = "$STABLE_VER" ]; do sleep 1; done)
+      until [ "$(curl -s https://www.likha.hk/api/status | jq -r .version)" = "$STABLE_VER" ]; do sleep 1; done)
 ```
 
 **不通过时修复**：
@@ -445,7 +445,7 @@ SQL
 1. 后台打流量并启动对账采样：
 
 ```bash
-hey -z 900s -c 100 -m GET https://api.likha.com/api/status &
+hey -z 900s -c 100 -m GET https://www.likha.hk/api/status &
 ```
 
 2. 【控制台】RDS → 实例详情 →「服务可用性」→「主备切换」（指定 5 分钟内），同时记录发起时刻 `T0`。

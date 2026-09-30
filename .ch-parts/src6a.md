@@ -18,7 +18,7 @@ metadata:
 spec:
   ingressClassName: alb
   rules:
-  - host: sg-standby.internal.likha.com      # 仅用于 SNI 路由与验收，不上公网
+  - host: sg-standby.internal.likha.hk      # 仅用于 SNI 路由与验收，不上公网
     http:
       paths: [{path: /, pathType: Prefix, backend: {service: {name: new-api-ph-standby, port: {number: 80}}}}]
 ```
@@ -26,14 +26,14 @@ spec:
 **验证**：
 
 ```bash
-curl -sS --resolve sg-standby.internal.likha.com:443:${SG_ALB_VIP} \
-  https://sg-standby.internal.likha.com/api/status | jq -e '.success'
+curl -sS --resolve sg-standby.internal.likha.hk:443:${SG_ALB_VIP} \
+  https://sg-standby.internal.likha.hk/api/status | jq -e '.success'
 # 主站 token 打备站业务接口（SESSION_SECRET 一致性复验，§7.4 V4）
 ```
 
 **修复与坑**：
 - `IngressClass is invalid` → SG 集群未装 `alb-ingress-controller` 或未建 `IngressClass alb`（与主站各自独立，两集群都要建）。
-- **坑｜把备站 Ingress host 写成 `api.likha.com`。** 后果：一旦 GTM 或本地 hosts 指错，公网流量进备站，且证书/SNI 与主站混用。改进：备站 host 一律加 `.internal.` 段，并在 CI 里禁止 `api.likha.com` 出现在 SG 集群 manifest。
+- **坑｜把备站 Ingress host 写成 `www.likha.hk`。** 后果：一旦 GTM 或本地 hosts 指错，公网流量进备站，且证书/SNI 与主站混用。改进：备站 host 一律加 `.internal.` 段，并在 CI 里禁止 `www.likha.hk` 出现在 SG 集群 manifest。
 - **坑｜新加坡 ALB 未挂 WAF。** 后果：接管后无 L7 防护。改进：D6 同步给 SG ALB 接 WAF（云原生模式），规则从主站导出模板保持一致 —— 这也是 §1.1#6 提到"规则差异导致切换后行为不一致"的根治。
 
 ### 9.2 任务 26｜SLS / ARMS Prometheus / Grafana / 站点拨测
@@ -144,9 +144,9 @@ alb.ingress.kubernetes.io/canary-by-header-value: "1"
 
 ```bash
 # V1 头流量强制进 canary
-curl -sS -H "x-canary: 1" https://api.likha.com/api/status | jq -r .version
+curl -sS -H "x-canary: 1" https://www.likha.hk/api/status | jq -r .version
 # V2 权重比例统计（1000 次采样，canary 版本占比 ≈5%）
-for i in $(seq 1 1000); do curl -s https://api.likha.com/api/status | jq -r .version; done | sort | uniq -c
+for i in $(seq 1 1000); do curl -s https://www.likha.hk/api/status | jq -r .version; done | sort | uniq -c
 # V3 canary 异常秒级归零
 kubectl -n new-api annotate ingress new-api-canary alb.ingress.kubernetes.io/canary-weight="0" --overwrite
 ```
@@ -269,7 +269,7 @@ secrets := []string{os.Getenv("SESSION_SECRET"), os.Getenv("SESSION_SECRET_OLD")
 
 ```bash
 # V1 重叠窗口：旧 token 在滚动后仍可用
-curl -sS -H "Authorization: Bearer $OLD_TOKEN" https://api.likha.com/api/user/self | jq -e '.success'   # 期望 true
+curl -sS -H "Authorization: Bearer $OLD_TOKEN" https://www.likha.hk/api/user/self | jq -e '.success'   # 期望 true
 # V2 新签发 token 立即可用且被两 Pod 都认
 # V3 轮转后 KMS 旧版本不可读（防止误恢复）
 aliyun kms GetSecretValue --SecretName aone/newapi/prod/SESSION_SECRET --VersionId <old>   # 期望报错或按策略拒绝
@@ -320,7 +320,7 @@ psql "$DSN_MIGRATE" -c "select id,status from orders where out_trade_no='TEST'" 
 ```bash
 # 从 CAS 取证书 ID 并确认覆盖域名
 aliyun cas DescribeUserCertificateDetail --CertId ${CERT_ID} | jq -r '.CommonName, .Sans'
-# 期望 Sans 含 api.likha.com, ops.likha.com, *.likha.com
+# 期望 Sans 含 www.likha.hk, ops.likha.hk, *.likha.hk
 
 # 部署到 ALB listener（AlbConfig 里声明式管理，见 §6.3；不要控制台手工挂）
 # WAF / DCDN 侧在各自控制台或 OpenAPI 绑定同一 CertId
@@ -330,11 +330,11 @@ aliyun cas DescribeUserCertificateDetail --CertId ${CERT_ID} | jq -r '.CommonNam
 
 ```bash
 # V1 SNI 正确（同 IP 多域名场景）
-echo | openssl s_client -connect ${ALB_VIP}:443 -servername api.likha.com 2>/dev/null | openssl x509 -noout -dates -subject
-echo | openssl s_client -connect ${ALB_VIP}:443 -servername nonexistent.likha.com 2>&1 | grep -Ei "alert|error"
+echo | openssl s_client -connect ${ALB_VIP}:443 -servername www.likha.hk 2>/dev/null | openssl x509 -noout -dates -subject
+echo | openssl s_client -connect ${ALB_VIP}:443 -servername nonexistent.likha.hk 2>&1 | grep -Ei "alert|error"
 # V2 证书链完整（Android/老客户端友好）
-curl -sSIv https://api.likha.com/api/status 2>&1 | grep -E "SSL certificate|issuer"
-nmap --script ssl-enum-ciphers -p 443 api.likha.com | tail -20    # 期望 grade A，无 SHA1/弱套件
+curl -sSIv https://www.likha.hk/api/status 2>&1 | grep -E "SSL certificate|issuer"
+nmap --script ssl-enum-ciphers -p 443 www.likha.hk | tail -20    # 期望 grade A，无 SHA1/弱套件
 # V3 到期与自动续期
 aliyun cas DescribeUserCertificateList --ShowSize 50 | jq -r '.CertificateList[] | [.Name,.Fingerprint,.AfterDate] | @tsv'
 # 期望 AfterDate ≥ 今天 + 25 天；<30 天触发告警（P0-7：最长约 199/200 天）
@@ -342,7 +342,7 @@ aliyun cas DescribeUserCertificateList --ShowSize 50 | jq -r '.CertificateList[]
 
 **坑**：
 - **坑 1｜只换 CAS 证书，没同步 AlbConfig。** 后果：ALB 继续用旧证书，到期日全站 HTTPS 报错。改进：**证书部署纳入 GitOps**（CertManager + `cert-manager-alibabacloud-dns01-webhook`，或 ACM/KMS → 外部同步 Job 调 `UpdateListenerAttribute`）；到期告警必须打到 §10.8 值班通道。
-- **坑 2｜通配符不覆盖多级。** `*.likha.com` **不覆盖** `a.b.likha.com`。若将来用 `cdn.api.likha.com` 会握手失败。改进：域名规划统一二级。
+- **坑 2｜通配符不覆盖多级。** `*.likha.hk` **不覆盖** `a.b.likha.hk`。若将来用 `cdn.www.likha.hk` 会握手失败。改进：域名规划统一二级。
 - **坑 3｜国际站没有免费 DV（P0-7）**，别按国内站经验"等免费证书签发"。改进：付费 DigiCert/GlobalSign 通配符 + 托管自动续期，预算入 §9.9。
 - **坑 4｜证书私钥落盘在本地。** 改进：私钥只在 CAS/KMS；导出仅限轮换窗口并即时销毁（安全核查 #38 会查）。
 

@@ -69,7 +69,7 @@ aliyun ecs DescribeSecurityGroupAttribute --RegionId ap-southeast-6 --SecurityGr
   | jq -r '.Permissions.Permission[] | select(.Direction=="ingress" and .SourceCidrIp=="0.0.0.0/0") | [.PortRange,.IpProtocol,.Description] | @tsv'
 
 nc -vz ${NODE_PUBLIC_IP} 3000                                              # 期望 refused/timeout（V1）
-curl -sS https://api.likha.com/api/status | jq -e '.success'               # 期望 true（V2 ALB→Pod 通）
+curl -sS https://www.likha.hk/api/status | jq -e '.success'               # 期望 true（V2 ALB→Pod 通）
 timeout 5 psql "host=${RDS_MNL_PRI} dbname=postgres user=newapi sslmode=require" -c 'select 1'  # 非 app 网段执行，期望 timeout（V3）
 kubectl -n new-api run scan --image=busybox --rm -it --restart=Never -- \
   sh -c 'nc -vz 10.0.32.1 22 || echo blocked'                              # 期望 blocked（V4）

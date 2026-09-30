@@ -306,7 +306,7 @@ spec:
     protocol: HTTP
     httpDefaultActions:
     - type: Redirect
-      redirectConfig: {host: api.likha.com, https: on, port: "443"}
+      redirectConfig: {host: www.likha.hk, https: on, port: "443"}
   - port: 443
     protocol: HTTPS
     securityPolicyId: tls_cipher_policy_1_2_strict_with_1_3
@@ -362,13 +362,13 @@ aliyun alb GetListenerAttribute --ListenerId ${HTTPS_LISTENER_ID} | jq '{IdleTim
 # 期望：{"IdleTimeout":60,"RequestTimeout":600}
 
 # V3 TLS 策略
-echo | openssl s_client -connect ${ALB_DNS}:443 -servername api.likha.com 2>/dev/null | grep -E "Protocol|Cipher"
+echo | openssl s_client -connect ${ALB_DNS}:443 -servername www.likha.hk 2>/dev/null | grep -E "Protocol|Cipher"
 # 期望 TLSv1.2/1.3；再用弱版本反例：
 echo | openssl s_client -connect ${ALB_DNS}:443 -tls1_1 2>&1 | grep -Ei "alert|error"   # 期望握手失败
 
 # V4 HTTP→HTTPS 跳转
-curl -sSI --resolve api.likha.com:80:${ALB_VIP} http://api.likha.com/ | grep -Ei "^HTTP|^location"
-# 期望 301 + Location https://api.likha.com/
+curl -sSI --resolve www.likha.hk:80:${ALB_VIP} http://www.likha.hk/ | grep -Ei "^HTTP|^location"
+# 期望 301 + Location https://www.likha.hk/
 
 # V5 健康检查后端全绿
 aliyun alb ListServerGroups --ServerGroupNames.1 new-api-stable | jq '.ServerGroups[0].HealthCheck'
@@ -788,7 +788,7 @@ done
 # 期望三份 JSON 都含 "success":true 且 "version" 与镜像 tag 一致
 
 # V2 压测基线
-hey -z 60s -c 200 -m POST -H "Authorization: Bearer $TOKEN" -D body.json https://api.likha.com/v1/chat/completions
+hey -z 60s -c 200 -m POST -H "Authorization: Bearer $TOKEN" -D body.json https://www.likha.hk/v1/chat/completions
 # 记录 p50/p95/p99、错误率、上游 429 次数
 
 # V3 环境隔离

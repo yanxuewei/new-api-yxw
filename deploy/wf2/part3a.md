@@ -1,6 +1,6 @@
 ## Day 3 · 泳道 A：安全组、WAF、证书、密钥轮换与安全核查
 
-> 本泳道基线（§2.1 实测修订版）：账号 `5108890064395960`（`export ALIYUN_PROFILE=ph-prod`）；业务域名 `api.likha.com`、运维域名 `ops.likha.com`、通配证书 `*.likha.com`；主 region `ap-southeast-6`（仅 6a/6b）、备 region `ap-southeast-1`；马尼拉 VPC `vpc-5tst1tgeessxn1azwasg2`（10.0.0.0/16）、新加坡 VPC `vpc-t4nimmwvruexbnene0a3r`（10.1.0.0/16）；命名空间 `new-api`，服务端口 3000；kubectl 上下文 `mnl` / `sg`。
+> 本泳道基线（§2.1 实测修订版）：账号 `5108890064395960`（`export ALIYUN_PROFILE=ph-prod`）；业务域名 `www.likha.hk`、运维域名 `ops.likha.hk`、通配证书 `*.likha.hk`；主 region `ap-southeast-6`（仅 6a/6b）、备 region `ap-southeast-1`；马尼拉 VPC `vpc-5tst1tgeessxn1azwasg2`（10.0.0.0/16）、新加坡 VPC `vpc-t4nimmwvruexbnene0a3r`（10.1.0.0/16）；命名空间 `new-api`，服务端口 3000；kubectl 上下文 `mnl` / `sg`。
 >
 > **排期位移声明（贯穿全泳道）**：① 上游出口固定 EIP 共 **8 个（马尼拉 4 + 新加坡 4）**已在 Day 1 任务 6/12 建好并**当日提交**给各上游供应商（任务 56 为外部等待项，对方审批 1–3 天），本泳道卡 56 只做**生效登记确认**，不再包含提交动作；② RAM `ops-prod_group` 用户组、操作审计 ActionTrail 投递、OSS 审计桶（含 `backup-data-tiering` / `backup-audit-tiering` / `backup-cleanup` 三条规则、CRR→`oss-newapi-backup-sgp` 实测成功）均已在前序泳道落地，本泳道只做核查引用。
 >
@@ -84,7 +84,7 @@ aliyun ecs DescribeSecurityGroupAttribute --RegionId ap-southeast-6 --SecurityGr
 nc -vz ${NODE_PUBLIC_IP} 3000                                   # 期望 refused/timeout
 curl -sS --max-time 5 http://${NODE_PUBLIC_IP}:3000/api/status  # 期望失败
 # V2 ALB → Pod 通
-curl -sS https://api.likha.com/api/status | jq -e '.success'    # 期望 true
+curl -sS https://www.likha.hk/api/status | jq -e '.success'    # 期望 true
 # V3 RDS 内网只对 app 组开放（从非 app 网段的 ECS 执行）
 timeout 5 psql "host=${RDS_MNL_PRI} dbname=newapi user=newapi sslmode=require" -c 'select 1'   # 期望 timeout
 # V4 出向：Pod 能到上游，但不能横向扫内网
@@ -122,7 +122,7 @@ wc -l /tmp/dcdn-l2.txt    # 期望非空（10–30 条网段）
 ```
 
    同步脚本进 crontab/函数计算，**每日比对差异并告警**（网段会变，见坑 1）。
-2. SNI/域名校验落位：确认 ALB 监听上未匹配 `api.likha.com` / `ops.likha.com` 的 host **不命中默认后端**。ALB Ingress/服务器组层面配置兜底规则（无匹配 → 固定 404 动作），确认已生效：
+2. SNI/域名校验落位：确认 ALB 监听上未匹配 `www.likha.hk` / `ops.likha.hk` 的 host **不命中默认后端**。ALB Ingress/服务器组层面配置兜底规则（无匹配 → 固定 404 动作），确认已生效：
 
 ```bash
 aliyun alb ListListeners --LoadBalancerIds.1 ${ALB_MNL_ID} \
@@ -159,7 +159,7 @@ comm -13 <(aliyun ecs DescribeSecurityGroupAttribute --RegionId ap-southeast-6 -
 curl -sSk -o /dev/null -w "%{http_code}\n" --resolve evil.com:443:${ALB_VIP} https://evil.com/api/status
 # 期望 404/421，绝不能 200
 # V2 合法 Host 正常
-curl -sS -o /dev/null -w "%{http_code}\n" https://api.likha.com/api/status    # 期望 200
+curl -sS -o /dev/null -w "%{http_code}\n" https://www.likha.hk/api/status    # 期望 200
 # V3 ALB 入向复核（与任务 22 步骤 3 同一条 jq，双卡互证）
 aliyun ecs DescribeSecurityGroupAttribute --RegionId ap-southeast-6 --SecurityGroupId ${SG_MNL_ALB} \
   | jq -r '.Permissions.Permission[] | select(.Direction=="ingress") | [.PortRange,.SourceCidrIp] | @tsv'
@@ -199,7 +199,7 @@ aliyun waf-openapi DescribeInstance --RegionId ap-southeast-1
 ```bash
 aliyun waf-openapi DescribeDomains --RegionId ap-southeast-1 --InstanceId ${WAF_INSTANCE_ID} \
   | jq -r '.Domains[]? | .Domain'
-# 期望：api.likha.com 出现在防护域名列表（透明代理接入同样注册为防护对象）
+# 期望：www.likha.hk 出现在防护域名列表（透明代理接入同样注册为防护对象）
 ```
 
 2. 【控制台】接入管理 → 云原生接入 → ALB 页签 → 新增监听，选中 `alb-newapi-mnl` 的 443：
@@ -217,19 +217,19 @@ aliyun sls GetLogs --ProjectName sls-newapi-mnl --LogStoreName waf-log --From $(
 
 ```bash
 # V1 WAF 已介入
-curl -sSI https://api.likha.com/api/status | grep -Ei "waf|server"
+curl -sSI https://www.likha.hk/api/status | grep -Ei "waf|server"
 # V2 攻击特征被拦
-curl -sS -o /dev/null -w "%{http_code}\n" "https://api.likha.com/api/user/login?username=admin%27%20OR%20%271%27%3D%271"
+curl -sS -o /dev/null -w "%{http_code}\n" "https://www.likha.hk/api/user/login?username=admin%27%20OR%20%271%27%3D%271"
 # 期望 405/403（WAF 拦截），而不是 200/401
 # V3 CC 触发阈值（测试机执行；验完必须从白名单移除测试 IP）
-for i in $(seq 1 2000); do curl -s -o /dev/null -w "%{http_code} " https://api.likha.com/api/status; done; echo
+for i in $(seq 1 2000); do curl -s -o /dev/null -w "%{http_code} " https://www.likha.hk/api/status; done; echo
 # 期望尾部出现连续 403/405
 # V4 回调不被拦（真实签名回调或渠道沙箱）
-curl -sS -o /dev/null -w "%{http_code}\n" -X POST "https://api.likha.com${NOTIFY_PATH}" --data-binary @/tmp/signed-notify.txt   # 期望非 403
+curl -sS -o /dev/null -w "%{http_code}\n" -X POST "https://www.likha.hk${NOTIFY_PATH}" --data-binary @/tmp/signed-notify.txt   # 期望非 403
 ```
 
 **不通过时修复**：
-- V2 返回 200/401 → 诊断 `aliyun waf-openapi DescribeDefenseRules --InstanceId ${WAF_INSTANCE_ID} --Query {"resource":"api.likha.com"}` 确认托管规则组是否启用 → 未启用则开启正常防护模式（观察模式=只记不拦，接入初期易忘切）。
+- V2 返回 200/401 → 诊断 `aliyun waf-openapi DescribeDefenseRules --InstanceId ${WAF_INSTANCE_ID} --Query {"resource":"www.likha.hk"}` 确认托管规则组是否启用 → 未启用则开启正常防护模式（观察模式=只记不拦，接入初期易忘切）。
 - V3 无拦截 → CC 规则未绑定防护对象/域名，或阈值仍宽于 1800 → 核对规则生效域名与优先级；若 CC 先于应用 429 触发说明阈值设得过紧，回调放宽到应用限流的 3–5 倍。
 - V4 被拦 → 例外规则路径写成 contains 而非精确匹配反向漏配，或方法未限定 POST 导致规则未命中 → 修正为精确路径匹配；同时检查源 IP 是否恰在渠道段外（转任务 48 处理）。
 - SLS 无日志 → 日志投递开关未开或 RAM 授权 `AliyunServiceRoleForWaf` 缺失 → 控制台补授权。
@@ -255,8 +255,8 @@ aliyun cas DescribeUserCertificateDetail --CertId ${CERT_ID} | jq -r '.CommonNam
 期望输出：
 
 ```
-*.likha.com
-api.likha.com,ops.likha.com,*.likha.com
+*.likha.hk
+www.likha.hk,ops.likha.hk,*.likha.hk
 ```
 
 2. 部署到负载均衡 ALB 监听：**在 AlbConfig 里声明式管理**（GitOps 仓库 `certificates:` 段引用 CertId），不要在控制台手工挂载；WAF / 全站加速 DCDN 侧在各自控制台或 OpenAPI 绑定**同一 CertId**。下发后确认监听实际证书：
@@ -273,19 +273,19 @@ ${CERT_ID}    # AlbConfig 声明的 CertId
 ${CERT_ID}    # 监听实际生效的 CertId
 ```
 
-3. DCDN（如启用）绑定：`aliyun dcdn SetDomainServerCertificate --DomainName media.likha.com --CertId ${CERT_ID} --SSLProtocol on`（期望返回 RequestId 无 Code）。
+3. DCDN（如启用）绑定：`aliyun dcdn SetDomainServerCertificate --DomainName media.likha.hk --CertId ${CERT_ID} --SSLProtocol on`（期望返回 RequestId 无 Code）。
 
 **验证方法**：
 
 ```bash
 # V1 SNI 正确（同 IP 多域名场景）
-echo | openssl s_client -connect ${ALB_VIP}:443 -servername api.likha.com 2>/dev/null | openssl x509 -noout -dates -subject
-# 期望 subject 含 *.likha.com；notAfter 在未来
-echo | openssl s_client -connect ${ALB_VIP}:443 -servername nonexistent.likha.com 2>&1 | grep -Ei "alert|error"
+echo | openssl s_client -connect ${ALB_VIP}:443 -servername www.likha.hk 2>/dev/null | openssl x509 -noout -dates -subject
+# 期望 subject 含 *.likha.hk；notAfter 在未来
+echo | openssl s_client -connect ${ALB_VIP}:443 -servername nonexistent.likha.hk 2>&1 | grep -Ei "alert|error"
 # 期望有握手拒绝输出（未下发默认证书外域名不被静默命中）
 # V2 证书链完整（Android/老客户端友好）
-curl -sSIv https://api.likha.com/api/status 2>&1 | grep -E "SSL certificate|issuer"
-nmap --script ssl-enum-ciphers -p 443 api.likha.com | tail -20    # 期望 grade A，无 SHA1/弱套件
+curl -sSIv https://www.likha.hk/api/status 2>&1 | grep -E "SSL certificate|issuer"
+nmap --script ssl-enum-ciphers -p 443 www.likha.hk | tail -20    # 期望 grade A，无 SHA1/弱套件
 # V3 到期与自动续期
 aliyun cas DescribeUserCertificateList --ShowSize 50 | jq -r '.CertificateList[] | [.Name,.Fingerprint,.AfterDate] | @tsv'
 # 期望 AfterDate ≥ 今天 + 25 天；<30 天必须已有告警（通配符签发周期最长约 199/200 天）
@@ -299,7 +299,7 @@ aliyun cas DescribeUserCertificateList --ShowSize 50 | jq -r '.CertificateList[]
 
 **坑**：
 - **坑 1｜只换数字证书管理服务里的证书，没同步 AlbConfig。** 后果：ALB 继续用旧证书，到期日全站 HTTPS 报错。改进：证书部署纳入 GitOps（CertManager + `cert-manager-alibabacloud-dns01-webhook`，或 KMS → 外部同步 Job 调 `UpdateListenerAttribute`）。
-- **坑 2｜通配符不覆盖多级。** `*.likha.com` **不覆盖** `a.b.likha.com`。后果：将来 `cdn.api.likha.com` 直接握手失败。改进：域名规划统一二级。
+- **坑 2｜通配符不覆盖多级。** `*.likha.hk` **不覆盖** `a.b.likha.hk`。后果：将来 `cdn.www.likha.hk` 直接握手失败。改进：域名规划统一二级。
 - **坑 3｜按国内站经验"等免费 DV 签发"。** 后果：国际站无免费 DV（P0-7），流程卡死。改进：付费通配符 + 托管续期，预算已入任务 52 成本表。
 - **坑 4｜证书私钥落盘在本地。** 后果：审计不过、泄露风险。改进：私钥只在数字证书管理服务/密钥管理服务（凭据管家）；导出仅限轮换窗口并即时销毁，任务 38 第 1 项会 `gitleaks` 扫仓验证。
 
@@ -408,7 +408,7 @@ T6   T+24h 自动清空 SESSION_SECRET_OLD，密钥面回到 1（唯一不可逆
 
 ```bash
 # V1 重叠窗口：旧 token 在滚动后仍可用
-curl -sS -H "Authorization: Bearer ${OLD_TOKEN}" https://api.likha.com/api/user/self | jq -e '.success'   # 期望 true
+curl -sS -H "Authorization: Bearer ${OLD_TOKEN}" https://www.likha.hk/api/user/self | jq -e '.success'   # 期望 true
 # V2 新签发 token 立即可用，且 A/B 两拨 Pod 都认
 # V3 轮转后 KMS 旧版本不可读（防误恢复）
 aliyun kms GetSecretValue --SecretName new-api/prod/SESSION_SECRET --VersionId ${OLD_VERSION_ID}   # 期望报错或按策略拒绝
@@ -572,7 +572,7 @@ aliyun quotas ListApprovalRequests | jq -r '.QuotaApplications.QuotaApplication[
 | 2 | 依赖漏洞 | ACR 企业版镜像扫描 + `govulncheck ./...` + `npm audit --omit=dev` | Critical=0；High 有豁免单 | [ ] |
 | 3 | Secret 权限边界 | `kubectl --context mnl auth can-i --as-group newapi-viewer get secrets -n new-api` | 拒绝（`no`） | [ ] |
 | 4 | 容器逃逸面 | `kubectl -n new-api get deploy -o json \| jq` 查 securityContext | `runAsNonRoot`、`readOnlyRootFilesystem`、`drop:[ALL]`、禁 `privileged` 全满足（写 `/app/logs` 用 emptyDir） | [ ] |
-| 5 | 传输加密 | `nmap --script ssl-enum-ciphers -p 443 api.likha.com` + 响应头抽查 | 全站 HTTPS + HSTS（`max-age=31536000; includeSubDomains`）+ TLS1.2+，grade A | [ ] |
+| 5 | 传输加密 | `nmap --script ssl-enum-ciphers -p 443 www.likha.hk` + 响应头抽查 | 全站 HTTPS + HSTS（`max-age=31536000; includeSubDomains`）+ TLS1.2+，grade A | [ ] |
 | 6 | SQL 注入面 | `grep -rn "\.Raw(\|\.Exec(" --include='*.go'` 查拼接 | 全参数化、无拼接；ClickHouse 同样参数化 | [ ] |
 | 7 | 越权 | 水平（`/api/user/:id` 类）/垂直（普通号访问 admin）用例各 ≥10 条 | 全部 403/404 | [ ] |
 | 8 | 认证与令牌 | 复核 §6.2 与任务 55：bcrypt/argon2 成本、`access_token` 熵、登录限速、会话固定 | SESSION_SECRET 双密钥演练 V1–V4 全过；`0.0.0.0/0` 入向仅 80/443（任务 22 jq 为空）；伪造 Host 非 200（任务 47 V1） | [ ] |
@@ -580,7 +580,7 @@ aliyun quotas ListApprovalRequests | jq -r '.QuotaApplications.QuotaApplication[
 | 10 | 审计链路 | `aliyun actiontrail DescribeTrails` 确认投递 OSS 审计桶已落地（前序泳道完成）；`aliyun oss api get-bucket-logging --bucket oss-prod-newapi-audit` 复核 | 事件可查 ≥180 天（P1-17），抽样能查到 90 天前事件 | [ ] |
 | 11 | 备份加密与访问 | `aliyun oss stat oss://oss-prod-newapi-backup-mnl \| grep -i acl` + RDS TDE 开关 + `ossutil api get-bucket-lifecycle --bucket oss-prod-newapi-backup-mnl` | bucket 禁公共读；已落地三条规则 `backup-data-tiering` / `backup-audit-tiering` / `backup-cleanup`；**旧"30d→IA/90d→Archive"口径作废——ZRS 冗余不支持该分层转换，不得以此判不通过** | [ ] |
 | 12 | 日志脱敏 | `aliyun sls GetLogs` 抽查 app/waf/rds-audit Logstore | 不出现完整 token/API Key/密码（`redact` 生效） | [ ] |
-| 13 | CORS | `curl -sSI -H "Origin: https://evil.example" https://api.likha.com/api/status \| grep -i access-control` | `Access-Control-Allow-Origin` 白名单，禁 `*` + credentials | [ ] |
+| 13 | CORS | `curl -sSI -H "Origin: https://evil.example" https://www.likha.hk/api/status \| grep -i access-control` | `Access-Control-Allow-Origin` 白名单，禁 `*` + credentials | [ ] |
 | 14 | 镜像签名/来源 | 部署 manifest 抽查 | ACR 企业版 + 仅 VPC 内网域名拉取 + 禁 `latest`，全 SHA 摘要 | [ ] |
 | 15 | 供应链 | 查 CI 配置 | `go.sum`/`bun.lock` 入仓且不跳过校验，构建脚本来源固定 | [ ] |
 
@@ -597,7 +597,7 @@ kubectl --context mnl -n new-api get deploy new-api-stable -o json \
   | grep -Ei 'runAsNonRoot|readOnlyRootFilesystem|"ALL"'
 # 期望：runAsNonRoot=true、readOnlyRootFilesystem=true、capabilities.drop 含 ALL，全文无 privileged: true
 # #5 传输加密（HSTS 响应头）
-curl -sSI https://api.likha.com/api/status | grep -i strict-transport-security
+curl -sSI https://www.likha.hk/api/status | grep -i strict-transport-security
 # 期望：max-age=31536000; includeSubDomains
 # #11 备份桶三条规则与 ACL
 aliyun oss stat oss://oss-prod-newapi-backup-mnl | grep -i acl                      # 期望 ACL: private

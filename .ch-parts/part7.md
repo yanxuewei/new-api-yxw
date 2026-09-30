@@ -229,7 +229,7 @@ kubectl --context sg -n new-api create job warmup --image=${ACR_SG_PREFIX}:${SHA
 
 ```bash
 # 1) DNS 正式切到 GTM（若之前直连 ALB 做验收）
-dig +short api.likha.com @8.8.8.8
+dig +short www.likha.hk @8.8.8.8
 # 2) 小流量观察（若有灰度开关/白名单用户优先放行）
 # 3) 30/60/120 分钟三次快照：错误率、P95、DB 连接、上游 429、账单速率
 # 4) 宣布上线完成，进入 72h 冻结窗口（只允许回滚，不允许功能变更）
@@ -404,7 +404,7 @@ kubectl -n new-api annotate ingress new-api-canary alb.ingress.kubernetes.io/can
 ```
 
 - 维护页必须在**上线前就已部署好**并能一键切换（否则故障时来不及做）。
-- DNS 直连兜底：`api.likha.com` 的**低 TTL A 记录**（预置为 ALB IP）作为 GTM 失效逃生通道，并在 Runbook 里标注"这会绕过 GTM，只用于极端场景"。
+- DNS 直连兜底：`www.likha.hk` 的**低 TTL A 记录**（预置为 ALB IP）作为 GTM 失效逃生通道，并在 Runbook 里标注"这会绕过 GTM，只用于极端场景"。
 
 ### 13.5 运维通道失效
 

@@ -1,0 +1,53 @@
+{
+  "nodepool_info": {
+    "name": "np-jkt-dev-app"
+  },
+  "scaling_group": {
+    "vswitch_ids": [
+      "vsw-k1agmhxtf974bmzbjlnkp",
+      "vsw-k1aoupd0er378rku728d3",
+      "vsw-k1an7x32b5qjtsmklelkt"
+    ],
+    "instance_types": [
+      "ecs.g9i.large",
+      "ecs.g8ine.large",
+      "ecs.g9ae.large"
+    ],
+    "instance_charge_type": "PostPaid",
+    "system_disk_category": "cloud_essd",
+    "system_disk_size": 40,
+    "image_type": "AliyunLinux3ContainerOptimized",
+    "security_group_ids": [
+      "sg-k1ag5j7s6xbuyjkv3j8c"
+    ],
+    "multi_az_policy": "BALANCE",
+    "internet_max_bandwidth_out": 0
+  },
+  "auto_scaling": {
+    "enable": true,
+    "min_instances": 1,
+    "max_instances": 3,
+    "type": "cpu"
+  },
+  "kubernetes_config": {
+    "runtime": "containerd",
+    "labels": [
+      {
+        "key": "site",
+        "value": "jkt-dev"
+      },
+      {
+        "key": "track",
+        "value": "dev"
+      },
+      {
+        "key": "env",
+        "value": "dev"
+      },
+      {
+        "key": "project",
+        "value": "new-api"
+      }
+    ]
+  }
+}

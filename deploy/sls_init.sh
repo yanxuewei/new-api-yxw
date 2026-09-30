@@ -25,7 +25,7 @@ SITES=(
 )
 
 # Logstore：name:ttl
-LOGSTORES="app-stdout:30 app-file:30 alb-access:30 waf-log:30 rds-audit:30 actiontrail:30 app-file-audit:180"
+LOGSTORES="app-stdout:30 app-file:30 alb_access:30 waf-log:30 rds-audit:30 actiontrail:30 app-file-audit:180"
 
 say() { printf '%s\n' "$*" >&2; }
 

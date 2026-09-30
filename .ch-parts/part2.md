@@ -7,7 +7,7 @@
 ```mermaid
 flowchart TB
   U["用户 菲律宾为主 / 泰国二期接入马尼拉"]
-  DNS["云解析 DNS + GTM<br/>api.likha.com TTL 60s"]
+  DNS["云解析 DNS + GTM<br/>www.likha.hk TTL 60s"]
   U --> DNS
 
   subgraph MNL["主站点 ap-southeast-6 马尼拉 · 常态承载 100% 流量"]
@@ -102,9 +102,9 @@ flowchart LR
 
 | 参数 | 取值 | 备注 |
 | --- | --- | --- |
-| 业务域名 | `api.likha.com` | 全表统一 |
-| 运维域名 | `ops.likha.com` | |
-| 通配证书 | `*.likha.com` | |
+| 业务域名 | `www.likha.hk` | 全表统一 |
+| 运维域名 | `ops.likha.hk` | |
+| 通配证书 | `*.likha.hk` | |
 | 主 region / AZ | `ap-southeast-6` / `ap-southeast-6a`+`6b` | **只有这两个 AZ** |
 | 备 region | `ap-southeast-1` | 不部署任何数据库 |
 | 马尼拉 VPC | `vpc-newapi-mnl-prod` `10.0.0.0/16` | |
@@ -168,7 +168,7 @@ sequenceDiagram
   participant CK as 日志库
   participant UP as 上游模型厂商
 
-  C->>G: 解析 api.likha.com
+  C->>G: 解析 www.likha.hk
   Note over C,G: 客户端本地 DNS 缓存不受我方控制 = SLA 排除项 4
   G-->>C: 返回 ALB 解析结果
   C->>W: HTTPS POST /v1/chat/completions
@@ -372,9 +372,9 @@ WAF 3.0 开通时**必须选「资产地域」= 非中国内地（Outside Chines
 
 **操作步骤**
 
-1. **「域名（Domains）」控制台** → 查询/注册 `likha.com`（若已有域名，跳过注册）。开启**自动续费 + 隐私保护**。
+1. **「域名（Domains）」控制台** → 查询/注册 `likha.hk`（若已有域名，跳过注册）。开启**自动续费 + 隐私保护**。
 2. **域名实名登记（Real-name Verification）**：「域名」→ 选中域名 → **实名登记** → 上传与**阿里云账号实名主体一致**的证件。
-3. **云解析 DNS（控制台 → 公网域名解析）→ 添加域名** → 输入 `likha.com` → 系统分配两个 NS（形如 `ns1.alidns.com` / `ns2.alidns.com`，以页面为准）。
+3. **云解析 DNS（控制台 → 公网域名解析）→ 添加域名** → 输入 `likha.hk` → 系统分配两个 NS（形如 `ns1.alidns.com` / `ns2.alidns.com`，以页面为准）。
 4. 回到**「域名」→ 域名管理 → DNS 修改（DNS Servers）→ 更换为云解析 DNS 分配的 NS**。
 5. **不要在此处加业务解析记录**，等 D1/GTM 阶段统一加（CNAME 给 GTM 的接入域名）。
 
@@ -382,9 +382,9 @@ WAF 3.0 开通时**必须选「资产地域」= 非中国内地（Outside Chines
 
 ```bash
 # 权威 NS 是否已切
-dig +short NS likha.com                      # 期望：ns1/ns2.alidns.com（或分配值）
+dig +short NS likha.hk                      # 期望：ns1/ns2.alidns.com（或分配值）
 # 逐跳确认（在注册商 NS 上查已失效、在阿里云 NS 上查有记录 = 生效）
-dig @ns1.alidns.com api.likha.com +short
+dig @ns1.alidns.com www.likha.hk +short
 ```
 
 **验证不通过的修复**
@@ -406,7 +406,7 @@ dig @ns1.alidns.com api.likha.com +short
 **操作步骤**
 
 1. **数字证书管理服务（原 SSL 证书）→ SSL 证书管理 → 创建证书 / 购买证书**。
-2. 国际站**无免费 DV 额度**——购买 **Rapid(DV) / DigiCert / GlobalSign / GeoTrust / Alibaba Cloud 自有根**，「域名类型」选**通配域名（Wildcard Domain）**，填 `*.likha.com`。
+2. 国际站**无免费 DV 额度**——购买 **Rapid(DV) / DigiCert / GlobalSign / GeoTrust / Alibaba Cloud 自有根**，「域名类型」选**通配域名（Wildcard Domain）**，填 `*.likha.hk`。
 3. 生成 CSR：本地 `openssl req -new -newkey rsa:2048 ...`（私钥自己留）或用数字证书管理服务代生成。
 4. **域名验证选 DNS 验证**（域名已在阿里云 DNS，可自动添加 TXT）。
 5. DV 签发 **1–15 分钟**；OV 需 3–5 工作日 → **本方案用 DV 即可**。
@@ -416,16 +416,16 @@ dig @ns1.alidns.com api.likha.com +short
 **验证方法**
 
 ```bash
-openssl x509 -in likha.com.pem -noout -text | grep -A1 "Subject Alternative Name"
-# 期望 DNS:*.likha.com
-openssl x509 -in likha.com.pem -noout -dates       # 记录 notAfter
+openssl x509 -in likha.hk.pem -noout -text | grep -A1 "Subject Alternative Name"
+# 期望 DNS:*.likha.hk
+openssl x509 -in likha.hk.pem -noout -dates       # 记录 notAfter
 ```
 控制台证书状态 = **已签发（Issued）**，且已出现在数字证书管理服务证书列表。
 
 **坑与注意事项**
 
 - **坑｜2026-02-25 起单张证书最长有效期降到约 199/200 天**，1 年订单被拆成两张约 6 个月 + 托管续期。**后果**：按"一年一续"运维 → 第 6 个月全站 HTTPS 突然红色告警/握手失败，且续期不是瞬间完成。**改进**：**必须**开启托管 + 自动部署到 ALB/WAF/DCDN；§12 每里程碑人工复核一次 `notAfter`。
-- **坑｜通配符不覆盖子主域**：`*.likha.com` 覆盖 `api.likha.com`，**不覆盖** `likha.com`，也不覆盖 `a.b.likha.com`。**后果**：直连裸域 502/证书错误。**改进**：证书加 `likha.com` 多域名（SAN），或裸域做 301 → `api.likha.com`（DCDN/ALB 层）。
+- **坑｜通配符不覆盖子主域**：`*.likha.hk` 覆盖 `www.likha.hk`，**不覆盖** `likha.hk`，也不覆盖 `a.b.likha.hk`。**后果**：直连裸域 502/证书错误。**改进**：证书加 `likha.hk` 多域名（SAN），或裸域做 301 → `www.likha.hk`（DCDN/ALB 层）。
 - **坑｜中间证书链缺失**。**后果**：ALB 上传报链不完整，或 Android/旧客户端验证失败。**改进**：CAS 下载的 **fullchain PEM** 整包上传，不要手挑首段。
 - **坑｜方案 R63 说"要求 TLS 1.2+1.3"** → ALB 侧对应 **TLS 安全策略（TLS security policy）** 名称：`tls_cipher_policy_1_2_strict_with_1_3`（§6.3 用这个）。
 
@@ -530,7 +530,7 @@ PgBouncer：`SHOW POOLS;` → `cl_waiting` 长期为 0；`SHOW STATS;` 看 `sv_a
 | G2 | 马尼拉配额批复 | 工单号 | ☐ |
 | G3 | 可下单（真实建过一个测试 EIP） | 资源 ID | ☐ |
 | G4 | `dig NS` 指向阿里云 | 命令输出 | ☐ |
-| G5 | 证书 `Issued` + SAN 含 `*.likha.com` | `openssl` 输出 | ☐ |
+| G5 | 证书 `Issued` + SAN 含 `*.likha.hk` | `openssl` 输出 | ☐ |
 | G6 | 配置模板 PR 已合并 | PR 链接 | ☐ |
 | G7 | 全部产品已开通（含 ClickHouse 替代决策） | 截图 | ☐ |
 | G8 | `/healthz` `/readyz` `/metrics` + 限流降级 **已合并** | commit/MR | ☐ |

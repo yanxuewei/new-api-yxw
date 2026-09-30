@@ -2,11 +2,11 @@
 
 ## Day 2 · 泳道 B：Deployment、ALB、GTM 与异地备集群
 
-> 参数基线（§2.1，全泳道统一）：业务域名 `api.likha.com`、运维域名 `ops.likha.com`、通配证书 `*.likha.com`；主 region `ap-southeast-6`（**仅 6a/6b 两个可用区**）、备 region `ap-southeast-1`（不部署任何数据库）；马尼拉 VPC `10.0.0.0/16`、新加坡 VPC `10.1.0.0/16`；K8s 1.35 + Terway；应用命名空间 `new-api`（备站同名，staging `new-api-staging`、压测 `new-api-perf`）；服务端口 `3000`；镜像前缀 `registry-vpc.ap-southeast-6.aliyuncs.com/newapi/new-api`（EE 实例前缀为实例名，以 §4.2 核实为准，下文以 `${ACR_MNL_PREFIX}`/`${ACR_SG_PREFIX}` 占位）。节点池机型 **g9i.2xlarge**（g8i 未上架马尼拉，2026-09-25 实测）。所有密钥/DSN 一律 `${PLACEHOLDER}`，真实值只存在于 KMS/ExternalSecret。
+> 参数基线（§2.1，全泳道统一）：业务域名 `www.likha.hk`、运维域名 `ops.likha.hk`、通配证书 `*.likha.hk`；主 region `ap-southeast-6`（**仅 6a/6b 两个可用区**）、备 region `ap-southeast-1`（不部署任何数据库）；马尼拉 VPC `10.0.0.0/16`、新加坡 VPC `10.1.0.0/16`；K8s 1.35 + Terway；应用命名空间 `new-api`（备站同名，staging `new-api-staging`、压测 `new-api-perf`）；服务端口 `3000`；镜像前缀 `registry-vpc.ap-southeast-6.aliyuncs.com/newapi/new-api`（EE 实例前缀为实例名，以 §4.2 核实为准，下文以 `${ACR_MNL_PREFIX}`/`${ACR_SG_PREFIX}` 占位）。节点池机型 **g9i.2xlarge**（g8i 未上架马尼拉，2026-09-25 实测）。所有密钥/DSN 一律 `${PLACEHOLDER}`，真实值只存在于 KMS/ExternalSecret。
 
 ### Day 2 · 任务 19｜马尼拉 ALB + AlbConfig + 健康检查（人员A，2 人时，D2 上午 09:00–11:00）
 
-**前置/状态**：任务 18 马尼拉 ACK（1.35 + Terway）就绪；`vsw-mnl-pub-a`（10.0.0.0/24, 6a）/`vsw-mnl-pub-b`（10.0.1.0/24, 6b）已建且 `AvailableIpAddressCount` 基线已记录；`*.likha.com` 证书已签发并拿到 `${CERT_ID_ALB}`；SLS Project `sls-newapi-mnl` 可后置（见坑 5）。
+**前置/状态**：任务 18 马尼拉 ACK（1.35 + Terway）就绪；`vsw-mnl-pub-a`（10.0.0.0/24, 6a）/`vsw-mnl-pub-b`（10.0.1.0/24, 6b）已建且 `AvailableIpAddressCount` 基线已记录；`*.likha.hk` 证书已签发并拿到 `${CERT_ID_ALB}`；SLS Project `sls-newapi-mnl` 可后置（见坑 5）。
 
 **操作步骤（CLI-first）**：
 
@@ -40,7 +40,7 @@ spec:
     protocol: HTTP
     httpDefaultActions:
     - type: Redirect
-      redirectConfig: {host: api.likha.com, https: on, port: "443"}
+      redirectConfig: {host: www.likha.hk, https: on, port: "443"}
   - port: 443
     protocol: HTTPS
     securityPolicyId: tls_cipher_policy_1_2_strict_with_1_3
@@ -80,10 +80,10 @@ aliyun alb GetLoadBalancerAttribute --LoadBalancerId ${ALB_MNL_ID} | jq -r '.DNS
 aliyun alb GetListenerAttribute --ListenerId ${HTTPS_LISTENER_ID} | jq '{IdleTimeout,RequestTimeout}'
 # 期望：{"IdleTimeout":60,"RequestTimeout":600}
 # V3 TLS 策略
-echo | openssl s_client -connect ${ALB_DNS}:443 -servername api.likha.com 2>/dev/null | grep -E "Protocol|Cipher"
+echo | openssl s_client -connect ${ALB_DNS}:443 -servername www.likha.hk 2>/dev/null | grep -E "Protocol|Cipher"
 # 期望 TLSv1.2/1.3；弱版本反例：echo | openssl s_client -connect ${ALB_DNS}:443 -tls1_1 2>&1 | grep -Ei "alert|error"  # 期望握手失败
 # V4 HTTP→HTTPS 跳转
-curl -sSI --resolve api.likha.com:80:${ALB_VIP} http://api.likha.com/ | grep -Ei "^HTTP|^location"   # 期望 301 + Location https://api.likha.com/
+curl -sSI --resolve www.likha.hk:80:${ALB_VIP} http://www.likha.hk/ | grep -Ei "^HTTP|^location"   # 期望 301 + Location https://www.likha.hk/
 # V5 健康检查后端全绿
 aliyun alb GetListenerHealthStatus --ListenerId ${HTTPS_LISTENER_ID} | jq -r '.ListenerHealthStatus[].ServerGroupInfos[].NonnormalServers'  # 期望 []
 ```
@@ -322,7 +322,7 @@ metadata:
 spec:
   ingressClassName: alb
   rules:
-  - host: sg-standby.internal.likha.com      # 仅用于 SNI 路由与验收，不上公网
+  - host: sg-standby.internal.likha.hk      # 仅用于 SNI 路由与验收，不上公网
     http:
       paths: [{path: /, pathType: Prefix, backend: {service: {name: new-api-ph-standby, port: {number: 80}}}}]
 ```
@@ -330,12 +330,12 @@ spec:
 **验证方法**：
 
 ```bash
-curl -sS --resolve sg-standby.internal.likha.com:443:${SG_ALB_VIP} \
-  https://sg-standby.internal.likha.com/api/status | jq -e '.success'
+curl -sS --resolve sg-standby.internal.likha.hk:443:${SG_ALB_VIP} \
+  https://sg-standby.internal.likha.hk/api/status | jq -e '.success'
 # 期望：true
 # 主站 token 打备站业务接口（SESSION_SECRET 一致性复验，§7.4 V4）
-curl -s -H "Authorization: Bearer ${MNL_TOKEN_PLACEHOLDER}" --resolve sg-standby.internal.likha.com:443:${SG_ALB_VIP} \
-  https://sg-standby.internal.likha.com/v1/dashboard/billing/subscription | jq -e '.success'
+curl -s -H "Authorization: Bearer ${MNL_TOKEN_PLACEHOLDER}" --resolve sg-standby.internal.likha.hk:443:${SG_ALB_VIP} \
+  https://sg-standby.internal.likha.hk/v1/dashboard/billing/subscription | jq -e '.success'
 # 期望：true
 aliyun alb GetListenerAttribute --ListenerId ${SG_HTTPS_LISTENER_ID} --region ap-southeast-1 | jq '{IdleTimeout,RequestTimeout}'
 # 期望：{"IdleTimeout":60,"RequestTimeout":600}
@@ -346,13 +346,13 @@ aliyun alb GetListenerAttribute --ListenerId ${SG_HTTPS_LISTENER_ID} --region ap
 - 健康检查全不绿 → 诊断：同任务 19 的 SG 侧 `sg-sg-app` 入向 3000 放行问题 → 修复：对照 §6.3 修复表放行 ALB→Pod 网段（`10.1.0.0/24,10.1.1.0/24`）。
 
 **坑**：
-- 坑 1｜把备站 Ingress host 写成 `api.likha.com`。现象：GTM 或本地 hosts 指错 → 后果：公网流量进备站，且证书/SNI 与主站混用 → 改进：备站 host 一律加 `.internal.` 段，并在 CI 里禁止 `api.likha.com` 出现在 SG 集群 manifest。
+- 坑 1｜把备站 Ingress host 写成 `www.likha.hk`。现象：GTM 或本地 hosts 指错 → 后果：公网流量进备站，且证书/SNI 与主站混用 → 改进：备站 host 一律加 `.internal.` 段，并在 CI 里禁止 `www.likha.hk` 出现在 SG 集群 manifest。
 - 坑 2｜新加坡 ALB 未挂 WAF。现象：接管后无 L7 防护 → 后果：切换即裸奔 → 改进：D6 同步给 SG ALB 接 WAF（云原生模式），规则从主站导出模板保持一致——这也是 §1.1#6"规则差异导致切换后行为不一致"的根治。
 - 坑 3｜SG 侧 listener 同样只能由 AlbConfig 独占配置（无 Ingress 注解可用），禁止控制台改，与主站同规。
 
 ### Day 2 · 任务 21｜GTM 实例 + 访问池 + 健康探测，先只挂马尼拉（人员A，2 人时，D2 下午 14:00–16:00）
 
-**前置/状态**：任务 19 马尼拉 ALB DNS 名称已取得；任务 25 新加坡 ALB 已建（但**D8 前不入池**）；`api.likha.com` 托管在云解析 DNS；**P1-8：马尼拉仅 2 个可用区，3AZ 容灾不可行**，本任务按双 AZ 口径配置。
+**前置/状态**：任务 19 马尼拉 ALB DNS 名称已取得；任务 25 新加坡 ALB 已建（但**D8 前不入池**）；`www.likha.hk` 托管在云解析 DNS；**P1-8：马尼拉仅 2 个可用区，3AZ 容灾不可行**，本任务按双 AZ 口径配置。
 
 **操作步骤（CLI-first）**：
 
@@ -365,7 +365,7 @@ aliyun alb GetListenerAttribute --ListenerId ${SG_HTTPS_LISTENER_ID} --region ap
 3. 云解析 DNS 把业务域名 CNAME 到 GTM 接入域名：
 
 ```bash
-aliyun alidns AddDomainRecord --DomainName likha.com --RR api --Type CNAME --Value ${GTM_ACCESS_CNAME}
+aliyun alidns AddDomainRecord --DomainName likha.hk --RR www --Type CNAME --Value ${GTM_ACCESS_CNAME}
 ```
 
 **切换延迟三层模型（别把 60s 当成 RTO，图 10 口径）**：第 1 层 GTM 判定与摘除，最坏约 3×15s 加判定开销合计 ≤60s；第 2 层递归 DNS 缓存，理论 60s、实际 5–30 分钟（取决于运营商与公共 resolver 是否尊重 TTL），不可控，靠 TTL 尽量小 + 客户端 SDK 连接池定期重建 + 应用层 5xx/超时后强制重新解析压住；第 3 层客户端已建立的长连接与 SSE 流不会迁移，直到超时或主动重连——这一层是 RTO 的真实上限。**该口径必须写进 SLA 与演练报告**：对外承诺"切换时间"用第 3 层实测值（D8 接管演练记录），不引用"60 秒"；这也是 §11.2 接管演练"回切后要等稳定 15 分钟"的原因。
@@ -374,12 +374,12 @@ aliyun alidns AddDomainRecord --DomainName likha.com --RR api --Type CNAME --Val
 
 ```bash
 # V1 CNAME 链正确
-dig +short CNAME api.likha.com @8.8.8.8 ; dig +short api.likha.com @8.8.8.8
+dig +short CNAME www.likha.hk @8.8.8.8 ; dig +short www.likha.hk @8.8.8.8
 # 期望：先 GTM 接入域名，再解析到 ALB DNS
 # V2 TTL 与预期一致
-dig api.likha.com +noall +answer | awk '{print $2}'    # 期望 60
+dig www.likha.hk +noall +answer | awk '{print $2}'    # 期望 60
 # V3 健康探测在 GTM 侧全绿（控制台核对），并用真实探测断言
-curl -sS https://api.likha.com/api/status | jq -e '.success == true and .version != ""'
+curl -sS https://www.likha.hk/api/status | jq -e '.success == true and .version != ""'
 # V4 故障发现（演练窗口内；备池未挂，表现为"探测告警"而非切换——这一步只验"能不能发现"）
 kubectl --context mnl -n new-api scale deploy/new-api-stable 0
 # 期望：GTM 在 ≤60s 判定异常并告警
@@ -409,7 +409,7 @@ kubectl --context mnl -n new-api scale deploy/new-api-stable 4
 kubectl --context mnl -n new-api get cm new-api-config -o jsonpath='{.data.SYNC_FREQUENCY}'; echo    # 期望 30
 ```
 
-2. 在管理后台（`ops.likha.com`）改一个可观测配置（如某渠道名称/权重/倍率），断言所有副本（含新加坡备站）在 ≤ SYNC_FREQUENCY 内读到新值：
+2. 在管理后台（`ops.likha.hk`）改一个可观测配置（如某渠道名称/权重/倍率），断言所有副本（含新加坡备站）在 ≤ SYNC_FREQUENCY 内读到新值：
 
 ```bash
 for ctx in mnl sg; do
@@ -480,7 +480,7 @@ for db in sqlite mysql pg; do
 done
 # 期望：三份 JSON 都含 "success":true 且 "version" 与镜像 tag 一致
 # V2 压测基线
-hey -z 60s -c 200 -m POST -H "Authorization: Bearer ${TOKEN_PLACEHOLDER}" -D body.json https://api.likha.com/v1/chat/completions
+hey -z 60s -c 200 -m POST -H "Authorization: Bearer ${TOKEN_PLACEHOLDER}" -D body.json https://www.likha.hk/v1/chat/completions
 # 记录 p50/p95/p99、错误率、上游 429 次数
 # V3 环境隔离
 kubectl -n new-api-staging get deploy -o jsonpath='{..image}' | tr ' ' '\n' | sort -u
@@ -503,8 +503,8 @@ kubectl -n new-api-staging get deploy -o jsonpath='{..image}' | tr ' ' '\n' | so
 - [ ] 马尼拉 ALB：双 AZ（6a+6b）绑定、`IdleTimeout=60`/`RequestTimeout=600`、TLS1.2 strict + 1.3、HTTP→HTTPS 301、健康检查 `/api/status` 全绿（任务 19 V1–V5）。
 - [ ] stable：4 副本 6a/6b 各 ≥2、PDB `minAvailable: 3`、HPA 4→16 可触发、rollout 零 5xx（任务 23 V1–V4）。
 - [ ] 新加坡备站：2 副本双 AZ、同 SHA、`NODE_TYPE=slave`、V2 建表被拒、V4 主站 token 备站可用（SESSION_SECRET 一致性验收）。
-- [ ] 新加坡 ALB：仅 `sg-standby.internal.likha.com` 内部验收，公网 DNS 零挂载。
-- [ ] GTM：`Ttl=60`、`api.likha.com` CNAME 链正确、主池仅 `pool-mnl`、备池未入池、可用 IP 阈值 = 1、V4 故障发现 ≤60s（告警不切换）。
+- [ ] 新加坡 ALB：仅 `sg-standby.internal.likha.hk` 内部验收，公网 DNS 零挂载。
+- [ ] GTM：`Ttl=60`、`www.likha.hk` CNAME 链正确、主池仅 `pool-mnl`、备池未入池、可用 IP 阈值 = 1、V4 故障发现 ≤60s（告警不切换）。
 - [ ] SYNC_FREQUENCY=30：马尼拉副本 30s 收敛、新加坡备站 60s 收敛、"改价→计费"端到端断言通过。
 - [ ] staging/perf：三库冒烟通过、perf 独立节点池带 taint、staging `SESSION_SECRET` 与 prod 不同。
 - [ ] G8 缺口登记：`/healthz`、`/readyz`、`/metrics` 未注册（`router/api-router.go:26` 仅 `/api/status`），ALB/GTM/readiness 三处探测路径切换全部挂 G8 跟踪项。

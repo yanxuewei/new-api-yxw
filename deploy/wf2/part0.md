@@ -154,7 +154,7 @@ gantt
 | F5 | **OSS 已建**：生命周期 30d→IA/90d→Archive **被双可用区 ZRS 产品限制否决**，实际落地 `backup-data-tiering` / `backup-audit-tiering` / `backup-cleanup`；CRR→`oss-newapi-backup-sgp` 实测成功 | 任务 8 ✅ | 所有引用旧分层规则的核查项改按新规则 |
 | F6 | **RAM 已落地**：admin/ops（MFA、无 AK）、cicd-push/iac-terraform（程序 AK）、dev-zhangzijun/dev-xiangdong（程序 AK 无控制台）、ops-prod_group 用户组已建；yanxuewei 遗留 AK 待降权 | G9 大部闭环 | 任务 46 直接引用真实用户/组 + 归档 SVG 配图 |
 | F7 | Tair / RDS 配额需在**产品开通后复查**（配额中心按产品分组，未开通时查不到） | 未闭环 | Day 1 泳道 B 首步执行 |
-| F8 | 账号 ID `5108890064395960`；域名 `api.likha.com` / `ops.likha.com`；镜像前缀 `registry-vpc.ap-southeast-6.aliyuncs.com/newapi/new-api` | 基线参数 | §2 参数表按真值更新 |
+| F8 | 账号 ID `5108890064395960`；域名 `www.likha.hk` / `ops.likha.hk`；镜像前缀 `registry-vpc.ap-southeast-6.aliyuncs.com/newapi/new-api` | 基线参数 | §2 参数表按真值更新 |
 
 ## 0.6 进展快照（截至 2026-09-27，开工前必读，防止重做）
 
@@ -172,7 +172,7 @@ aliyun quotas ListProductQuotas --ProductCode ecs --RegionId ap-southeast-6 \
 aliyun ram ListUsers | jq -r '.Users.User[]|.UserName'   # 期望 admin/ops/cicd-push/iac-terraform/dev-*
 ```
 
-**仍未闭环、Day 0 前必须完成**：G1 实名 `Verified`、G4 NS 指向阿里云、G5 证书 `Issued`（含 SAN `*.likha.com`）、G6 配置模板 PR、G7 产品开通（含 Tair/CK 决策落地）、**G8 代码补项（/healthz、/readyz、/metrics + 限流降级放行）合并**、G11 连接数预算表、G12 SLA 口径签字、G13 staging 方案、上游 8 EIP 白名单提交。
+**仍未闭环、Day 0 前必须完成**：G1 实名 `Verified`、G4 NS 指向阿里云、G5 证书 `Issued`（含 SAN `*.likha.hk`）、G6 配置模板 PR、G7 产品开通（含 Tair/CK 决策落地）、**G8 代码补项（/healthz、/readyz、/metrics + 限流降级放行）合并**、G11 连接数预算表、G12 SLA 口径签字、G13 staging 方案、上游 8 EIP 白名单提交。
 
 ## 0.7 G0 门禁判定表（Day 1 启动前逐条打勾，任一未过不启动）
 
@@ -182,7 +182,7 @@ aliyun ram ListUsers | jq -r '.Users.User[]|.UserName'   # 期望 admin/ops/cicd
 | G2 | 马尼拉配额批复 | 工单号 b140e263-…（ECS 已 Agree） | ECS 部分闭环，Tair/RDS 待 F7 复查 | ☐ |
 | G3 | 可下单（测试 EIP） | 资源 ID | 已验证 | ☐ |
 | G4 | `dig NS` 指向阿里云 | 命令输出 | 待闭环 | ☐ |
-| G5 | 证书 `Issued` + SAN `*.likha.com` | openssl 输出 | 待闭环 | ☐ |
+| G5 | 证书 `Issued` + SAN `*.likha.hk` | openssl 输出 | 待闭环 | ☐ |
 | G6 | 配置模板 PR 已合并 | PR 链接 | 待闭环 | ☐ |
 | G7 | 全部产品开通（含 CK 替代决策） | 控制台列表 | 待闭环 | ☐ |
 | G8 | `/healthz` `/readyz` `/metrics` + 限流降级 **已合并** | commit/MR | **待闭环——未完成则 SLA 承诺下调** | ☐ |
@@ -253,8 +253,8 @@ aliyun ram ListUsers | jq -r '.Users.User[]|.UserName'   # 期望 admin/ops/cicd
 | 账号 ID | `5108890064395960` | 国际站 |
 | 主 region | `ap-southeast-6`（马尼拉，2 AZ：6a/6b） | 全部用户主流量 |
 | 备 region | `ap-southeast-1`（新加坡） | PH 备站点，**无独立数据库** |
-| api.likha.com | 生产 API 域名 | GTM 调度 |
-| ops.likha.com | 管理面板域名 | WAF + IP 白名单 |
+| www.likha.hk | 生产 API 域名 | GTM 调度 |
+| ops.likha.hk | 管理面板域名 | WAF + IP 白名单 |
 | VPC（马尼拉） | `vpc-5tst1tgeessxn1azwasg2` 10.0.0.0/16 | ✅ 已建 |
 | VPC（新加坡） | `vpc-t4nimmwvruexbnene0a3r` 10.1.0.0/16 | ✅ 已建 |
 | 镜像前缀 | `registry-vpc.ap-southeast-6.aliyuncs.com/newapi/new-api` | ACR 企业版 |

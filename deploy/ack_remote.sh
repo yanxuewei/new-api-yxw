@@ -20,8 +20,9 @@ case "$SITE" in
   *)   echo "site must be mnl|sg"; exit 2 ;;
 esac
 
-KCDIR="/tmp/ackctl-$SITE"
+KCDIR="${ACKCTL_DIR:-/tmp/ackctl-$SITE}"
 mkdir -p "$KCDIR"
+[ -s "$KCDIR/kubeconfig" ] || chmod 700 "$KCDIR" 2>/dev/null || true
 
 # 1) admin 私网 kubeconfig（缓存）
 if [ ! -s "$KCDIR/kubeconfig" ]; then
@@ -54,7 +55,7 @@ echo "[i] site=$SITE region=$REGION cluster=$CID node=$NODE_ARG"
 
 # 3) 组装远端脚本：注入证书 + kubeconfig + 用户 body
 python3 - "$BODY" "$KCDIR/kubeconfig" <<'PY'
-import sys
+import sys, os
 body = open(sys.argv[1], encoding='utf-8').read().replace('\r\n', '\n')
 kc   = open(sys.argv[2], encoding='utf-8').read().replace('\r\n', '\n')
 pre = """#!/bin/bash
@@ -76,13 +77,13 @@ fi
 command -v kubectl >/dev/null 2>&1 && echo "[bootstrap] kubectl $(kubectl version --client -o json 2>/dev/null | head -c 0; kubectl version --client 2>/dev/null | head -1)" || echo "[bootstrap] kubectl 不可用"
 echo "================= BODY START ================="
 """ % kc
-open('/tmp/remote_body.sh', 'w').write(pre + body)
+open(os.path.dirname(sys.argv[2]) + '/remote_body.sh', 'w').write(pre + body)
 PY
 
 # 4) 下发
 INV=$(aliyun ecs RunCommand --RegionId "$REGION" --region "$REGION" --Type RunShellScript \
   --InstanceId.1 "$NODE_ARG" --ContentEncoding Base64 --Name "ackctl-$SITE" --Timeout 900 \
-  --CommandContent "$(base64 -w0 /tmp/remote_body.sh)" 2>&1 | python3 -c "
+  --CommandContent "$(base64 -w0 "$KCDIR/remote_body.sh")" 2>&1 | python3 -c "
 import sys,json
 try: print(json.load(sys.stdin).get('InvokeId',''))
 except Exception: print('FAIL')")

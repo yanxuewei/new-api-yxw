@@ -7,7 +7,7 @@
 | 参数 | 实测值 |
 | --- | --- |
 | 账号 UID | `5108890064395960`（profile：`export ALIYUN_PROFILE=ph-prod`） |
-| 业务/运维域名 | `api.likha.com` / `ops.likha.com`；通配证书 `*.likha.com` |
+| 业务/运维域名 | `www.likha.hk` / `ops.likha.hk`；通配证书 `*.likha.hk` |
 | 主 region / AZ | `ap-southeast-6`（菲律宾-马尼拉），**仅 6a/6b 两个可用区** |
 | 备 region | `ap-southeast-1`（新加坡），不部署任何数据库 |
 | 马尼拉 VPC | `vpc-newapi-mnl-prod` = `vpc-5tst1tgeessxn1azwasg2`，`10.0.0.0/16` |
@@ -258,7 +258,7 @@ for i in $(seq 1 12); do curl -s -m5 https://ifconfig.me; echo; done | sort | un
 
 ### Day 1 · 任务 3｜证书就绪与部署预置（人员A，1 人时，S2）
 
-**前置/状态**：通配证书 `*.likha.com` 已于 G5（§3.7）签发。D1 只做三件事：① 私钥入密钥管理服务 KMS（不入 Git/ConfigMap）；② 建好到期告警；③ 备好「部署到 ALB/WAF/DCDN」的任务模板但**不执行**（资源还没建）。**为什么不能提前部署**：v2.0 的时序错误就是「D1 部署证书，但 ALB/WAF 在 D3/D5 才建」→ 部署任务找不到资源、后续靠手工补，最终 D6 才发现某处还在用自签/旧证书。
+**前置/状态**：通配证书 `*.likha.hk` 已于 G5（§3.7）签发。D1 只做三件事：① 私钥入密钥管理服务 KMS（不入 Git/ConfigMap）；② 建好到期告警；③ 备好「部署到 ALB/WAF/DCDN」的任务模板但**不执行**（资源还没建）。**为什么不能提前部署**：v2.0 的时序错误就是「D1 部署证书，但 ALB/WAF 在 D3/D5 才建」→ 部署任务找不到资源、后续靠手工补，最终 D6 才发现某处还在用自签/旧证书。
 
 **操作步骤（CLI-first）**：
 
@@ -266,7 +266,7 @@ for i in $(seq 1 12); do curl -s -m5 https://ifconfig.me; echo; done | sort | un
 # 1. 私钥+证书链入 KMS 凭据（值从本地安全文件读，走 KMS 落库，绝不进 Git）
 aliyun kms CreateSecret --SecretName "new-api/prod/tls-wildcard" \
   --SecretData "$(cat ${CERT_PEM} ${INTERMEDIATE_PEM} ${KEY_PEM})" \
-  --VersionId v1 --Description "*.likha.com TLS chain + private key"
+  --VersionId v1 --Description "*.likha.hk TLS chain + private key"
 ```
 
 期望输出：`{"SecretName": "new-api/prod/tls-wildcard", ...}`，无报错。（若马尼拉/新加坡 KMS 实例未开通，此步在 KMS 控制台创建同名凭据：【控制台】`[图 D1-A-3｜拍摄对象：KMS 凭据管理-new-api/prod/tls-wildcard 详情（凭据值页不截图）；打码：凭据值、账号 UID]`）
@@ -274,8 +274,8 @@ aliyun kms CreateSecret --SecretName "new-api/prod/tls-wildcard" \
 ```bash
 # 2. 本地核验证书有效期与覆盖域名
 openssl x509 -in ${CERT_PEM} -noout -enddate -ext subjectAltName
-# 期望：notAfter ≥ 今天 + 30 天；SAN 同时含 *.likha.com 与 likha.com
-# 若缺裸域 SAN：api.likha.com 不受影响，但 D3 配 ALB 默认域名时须另签
+# 期望：notAfter ≥ 今天 + 30 天；SAN 同时含 *.likha.hk 与 likha.hk
+# 若缺裸域 SAN：www.likha.hk 不受影响，但 D3 配 ALB 默认域名时须另签
 ```
 
 3. 到期告警：数字证书管理服务（原 SSL 证书）→ 证书消息提醒，勾选到期提醒（30/15/7 天三档）；云监控配告警联系人组指向运维值班。此步以控制台为准：
@@ -310,7 +310,7 @@ aliyun kms DescribeSecret --SecretName "new-api/prod/tls-wildcard" \
 | KMS 列表无该凭据 | `CreateSecret` 报错（KMS 实例/权限）→ 按报错开通或补 `kms:CreateSecret` 权限后重试 |
 | 本地 notAfter 与页面不一致 | 拿了旧版本文件 → 从 CAS 重新下载当前「已签发」记录对应文件，重灌 KMS 并升版本 |
 | 证书状态非「已签发」 | G5 未真正闭环 → 回到 §3.7 完成签发/DCV，本卡其余步骤可先行 |
-| SAN 不含 `likha.com` 裸域 | 签单时只填了通配 → 追加覆盖域名重新签发；D1 记录阻塞项，不阻塞本卡其余步骤 |
+| SAN 不含 `likha.hk` 裸域 | 签单时只填了通配 → 追加覆盖域名重新签发；D1 记录阻塞项，不阻塞本卡其余步骤 |
 | 到期告警收不到 | 联系人未验证邮箱/手机 → 完成验证并重发测试通知 |
 
 **坑**：
@@ -414,7 +414,7 @@ aliyun ecs DescribeAvailableResource --RegionId ap-southeast-6 --DestinationReso
 
 ```bash
 # 4.（任务 2）域名 NS 复核：重跑 §3.6 的 dig
-dig +short NS likha.com
+dig +short NS likha.hk
 # 期望：两行阿里云分配的 NS（ns*.aliyuncs.com），与云解析 DNS 控制台一致
 ```
 
@@ -422,17 +422,17 @@ dig +short NS likha.com
 
 | 主机记录 | 类型 | 值 | TTL |
 | --- | --- | --- | --- |
-| `api` | CNAME | GTM（全局流量管理）接入域名（§8.1 产出；未产出前先占位再改） | **60** |
+| `www` | CNAME | GTM（全局流量管理）接入域名（§8.1 产出；未产出前先占位再改） | **60** |
 | `ops` | CNAME/A | 堡垒机/VPN 入口 | 600 |
 | `static` | CNAME | DCDN 加速域名（如启用） | 600 |
 
-【控制台】`[图 D1-A-2｜拍摄对象：云解析 DNS-likha.com 记录列表（三行预建记录）；打码：堡垒机公网 IP]`
+【控制台】`[图 D1-A-2｜拍摄对象：云解析 DNS-likha.hk 记录列表（三行预建记录）；打码：堡垒机公网 IP]`
 
 **验证方法**：
 
 ```bash
-dig +short api.likha.com          # 期望：解析到 GTM 接入域名/占位值
-dig SOA likha.com +short          # 改记录后期望 SOA 序列号递增
+dig +short www.likha.hk          # 期望：解析到 GTM 接入域名/占位值
+dig SOA likha.hk +short          # 改记录后期望 SOA 序列号递增
 ```
 
 **不通过时修复**：
@@ -442,11 +442,11 @@ dig SOA likha.com +short          # 改记录后期望 SOA 序列号递增
 | 配额查询数值异常（如仍是 50 或查不到） | 漏带 `--Dimensions.1.Key regionId` → 补维度重查；`Status` 非 `Agree` → 用 `--DesireValue`（注意此拼写）重申并等审批 |
 | `g8i` 查无库存/不可售 | 实测 g8i 未在马尼拉上架 → 节点池机型统一改 `ecs.g9i.2xlarge`，同步修订 §4.10 及清单 |
 | NS 不是阿里云 | 域名未改 NS → 到域名注册控制台改 DNS 服务器，等 TTL 传播；期间勿在第三方继续加记录 |
-| `dig +short api` 为空 | 记录未保存/主机记录写成 `api.likha.com`（应为 `api`）→ 修正记录名 |
+| `dig +short www.likha.hk` 为空 | 记录未保存/主机记录写成 `www.likha.hk`（应为 `www`）→ 修正记录名 |
 
 **坑**：
 
-- **坑｜TTL 太长导致切换演练「通过不了」**：GTM 目标 ≤60s 切换，但 `api` 记录 TTL=600 时客户端会缓存 10 分钟。后果：演练时观察到「解析早该切了但用户还在打老地址」，误判为 GTM 故障，浪费半天。改进：`api` 记录 **TTL 60**；演练报告里区分「GTM 池切换时间」与「客户端恢复时间」两个指标，**对外承诺用后者**（§8.1）。
+- **坑｜TTL 太长导致切换演练「通过不了」**：GTM 目标 ≤60s 切换，但 `www` 记录 TTL=600 时客户端会缓存 10 分钟。后果：演练时观察到「解析早该切了但用户还在打老地址」，误判为 GTM 故障，浪费半天。改进：`www` 记录 **TTL 60**；演练报告里区分「GTM 池切换时间」与「客户端恢复时间」两个指标，**对外承诺用后者**（§8.1）。
 - **坑｜配额 API 不带 region 维度**：后果：拿到 cn-hangzhou 数值做容量决策，马尼拉实际不足，D2 建集群才爆。改进：本卡命令模板已固化 `--Dimensions.1.Key regionId`，评审时检查所有配额截图/脚本是否带维度。
 
 ---
@@ -461,11 +461,11 @@ dig SOA likha.com +short          # 改记录后期望 SOA 序列号递增
 ☐ nat-mnl-prod 状态「可用」，eip-mnl-upstream-01..04 全部绑定，12 次出口探测只命中 4 个池内 IP
 ☐ nat-sg-prod + eip-sg-upstream-01..04 同上（8 次探测）；8 个 EIP 同列一张台账（RDS 白名单/供应商加白双身份已标注）
 ☐ 禁止 DNAT 已确认；节点池不分配公网 IP 已写入任务 10 交底
-☐ 证书 *.likha.com 状态「已签发」，notAfter ≥ 今+30 天；私钥在 KMS new-api/prod/tls-wildcard；到期告警已建；部署模板备好未执行
+☐ 证书 *.likha.hk 状态「已签发」，notAfter ≥ 今+30 天；私钥在 KMS new-api/prod/tls-wildcard；到期告警已建；部署模板备好未执行
 ☐ ACR 双地域企业版 RUNNING、VPC 端点已关联、同步规则（SG→MNL）生效、两地域 VPC 域名 kubectl 拉取均输出 ok
 ☐ 镜像 tag=git sha 且 CI 拒绝 latest；credential-helper 覆盖 new-api namespace
 ☐ G0 表全部通过（含配额：马尼拉 vCPU=64、新加坡=96，Status=Agree）；机型统一 ecs.g9i.2xlarge
-☐ likha.com NS 指向阿里云；api/ops/static 三条记录已预建，api TTL=60
+☐ likha.hk NS 指向阿里云；www/ops/static 三条记录已预建，www TTL=60
 ```
 
 > 泳道 B（数据与存储：任务 4/7/8/9 等）出口项见分片 `part1a.md`，两线并绿才算 D1 完成（M1 前半）。

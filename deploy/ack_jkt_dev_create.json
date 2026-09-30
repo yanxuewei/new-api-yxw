@@ -1,0 +1,36 @@
+{
+  "name": "ack-newapi-jkt-dev",
+  "cluster_type": "ManagedKubernetes",
+  "cluster_spec": "ack.standard",
+  "kubernetes_version": "1.35.7-aliyun.1",
+  "region_id": "ap-southeast-5",
+  "vpcid": "vpc-k1ano67avx98nr3n1bg5d",
+  "vswitch_ids": [
+    "vsw-k1agmhxtf974bmzbjlnkp",
+    "vsw-k1aoupd0er378rku728d3",
+    "vsw-k1an7x32b5qjtsmklelkt"
+  ],
+  "pod_vswitch_ids": [
+    "vsw-k1agmhxtf974bmzbjlnkp",
+    "vsw-k1aoupd0er378rku728d3",
+    "vsw-k1an7x32b5qjtsmklelkt"
+  ],
+  "service_cidr": "172.23.0.0/20",
+  "proxy_mode": "ipvs",
+  "ip_stack": "ipv4",
+  "snat_entry": false,
+  "endpoint_public_access": false,
+  "deletion_protection": true,
+  "cluster_domain": "cluster.local",
+  "timezone": "UTC",
+  "resource_group_id": "rg-aek4hk3prqgqjcy",
+  "security_group_id": "sg-k1ag5j7s6xbuyjkv3j8c",
+  "addons": [
+    { "name": "terway-eniip" }
+  ],
+  "tags": [
+    { "key": "env", "value": "dev" },
+    { "key": "project", "value": "new-api" },
+    { "key": "isolation", "value": "structural-vpc" }
+  ]
+}
