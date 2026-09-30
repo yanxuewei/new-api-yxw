@@ -211,8 +211,8 @@ c4_oss() {
 # 5/8 ClickHouse 实例 + 接线状态（实例存在 ≠ 日志库可用）
 # =============================================================================
 c5_clickhouse() {
-  hr; echo "5/8  ClickHouse 实例  ·  clickhouse DescribeDBInstances --RegionId $REGION"
-  local n id ips accts verdict
+  hr; echo "5/8  ClickHouse 实例+接线  ·  clickhouse DescribeDBInstances / DescribeSecurityIPList / DescribeAccounts / DescribeDBInstanceDataSources --RegionId $REGION"
+  local n id st ips accts dbs verdict
   if ! ali c5_ck clickhouse DescribeDBInstances --RegionId "$REGION" >/dev/null; then
     bad "调用失败：$(errline c5_ck)"
     info "        若报 is not a valid api → API 名写成了 DescribeDBClusters（不存在）"
@@ -234,6 +234,16 @@ c5_clickhouse() {
     warn "拿不到 DBInstanceId → 无法复核接线，本项记 WARN"; rec warn; return
   fi
   verdict=pass
+  # 就绪态：ACTIVATION 是唯一已实测的"可用"字面值；INSTALL_EXTENSIONS（2026-09-30 实测：开通
+  # ClickObserve/Langfuse 扩展时进入）是过渡态，此时接线判据不能算通过。
+  st="$(jq -r '.Data.DBInstances[0].Status // empty' "$OUTDIR/c5_ck.json" 2>/dev/null)"
+  if [[ "$st" == "ACTIVATION" ]]; then
+    echo "       Status = ACTIVATION（就绪）"
+  else
+    warn "Status = ${st:-空}（非 ACTIVATION）→ 实例处于过渡/异常态，本项记 WARN"
+    info "        已观测到的过渡态：INSTALL_EXTENSIONS（扩展安装中，配 ClickObserveServiceStatus=creating）"
+    verdict=warn
+  fi
   if ali c5_ck_ip clickhouse DescribeSecurityIPList --RegionId "$REGION" --DBInstanceId "$id" >/dev/null \
      && ips="$(jqget c5_ck_ip '[.Data.GroupItems[].SecurityIPList] | join(",")')" && [[ -n "$ips" ]]; then
     if [[ "$ips" == "127.0.0.1" ]]; then
@@ -256,8 +266,20 @@ c5_clickhouse() {
   else
     warn "DescribeAccounts 调用失败或取数为空（空集不判通过）：$(errline c5_ck_ac)"; verdict=warn
   fi
+  # S-3：库。DescribeDBInstanceDataSources 不带 --DBName 时回该实例的 schema 列表（JSON 字符串数组）。
+  if ali c5_ck_db clickhouse DescribeDBInstanceDataSources --RegionId "$REGION" --DBInstanceId "$id" >/dev/null \
+     && dbs="$(jq -r '[.Data.Schemas[]? | (fromjson | .schemaName)] | join(",")' "$OUTDIR/c5_ck_db.json" 2>/dev/null)"; then
+    if [[ "$dbs" == *newapi_logs* ]]; then
+      echo "       库：$dbs"
+    else
+      warn "库列表不含 newapi_logs（现在=${dbs:-空}）→ 任务 29 的 S-3 未做"; verdict=warn
+    fi
+  else
+    warn "DescribeDBInstanceDataSources 调用失败或取数为空（空集不判通过）：$(errline c5_ck_db)"; verdict=warn
+  fi
   if [[ "$verdict" == pass ]]; then
-    ok "实例已创建且已接线（白名单 + 账号齐）—— 仍需用 LOG_SQL_DSN 与 SELECT version() 端到端复验"
+    ok "实例 ACTIVATION 且 API 可见的接线三件套齐（白名单 + 账号 + 库）—— S-4 的 LOG_SQL_DSN 与 SELECT version() 端到端仍需应用侧/VPC 内复验"
+    info "        三件套齐 ⇒ 只差 S-4（把保管的 DSN 注入任务 17 的 ConfigMap/Secret）；应用首启时 LOG_SQL_DSN 指向 CK，I-1 才可按 CK 分支（1840 ≤ 2000）记账"
   else
     info "        本项汇总判 WARN：CK 只完成了「建实例」，未完成「可用」。销账前勿把任务 41 的 I-1 记到 CK 分支。"
   fi

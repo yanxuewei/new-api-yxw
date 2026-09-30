@@ -59,8 +59,11 @@
 - 备站→CK 跨区写路径未裁定（无公网端点：`CreateEndpoint` 开公网 vs 备站落 PG vs CEN）。
 
 ## 当前状态与阻塞
-- **账户余额 0.00 USD** —— 硬阻塞。**第一道墙是风控不是欠费**：ACK 服务开通报 `RISK.RISK_CONTROL_REJECTION`（文案不明说余额）；但 **RDS 下单不被拦**（可用 `--AutoPay false` 出未支付订单当零成本试单）。
-- 未支付订单 `518158947970481`（RDS，应付 10594.13 USD，预分配 `pgm-5ts8mee1iiw13m89`）。
+- **五项裁定（2026-09-30 15:29）**：① **KMS 实例不买**（价格过贵）→ 凭据走手工 Secret 注入，已落地（见下）② **CK 计算资源包不买**（B3 关闭，CK 走按量）③ **备站→CK 走 CreateEndpoint 公网**（已落地）④ **ALB 现在买**（待执行）⑤ **GTM 挂起**（域名未到位）。
+- **任务 17 Secret 已注入（2026-09-30）**：两地 `new-api-secrets`（马尼拉 6 键 / 新加坡 3 键）+ ConfigMap `LOG_SQL_CLICKHOUSE_TTL_DAYS=90`；工具 `deploy/task17_secret_inject.sh`。DSN 已能进集群 ⇒ 任务 41 I-1 可切 CK 分支。待补：PAYMENT_PRIVATE_KEY、TLS_WILDCARD（用户提供）；SG REDIS（SG Tair 未建）。
+- **凭据保管新格局**：`/root/.deploy_secrets/`（root 600）= RDS 三账号新口令（09-30 轮换，原密码无保管记录）+ CK 两个 DSN + SESSION_SECRET×2；Tair 密码在 `deploy/.env`（gitignored，任务 17 后期统一收进保管目录）。`newapi_ops` 在 `/home/fanyan/.newapi_rds_ops_password`。
+- **CK 公网端点已开**（备站跨区写实测通过）：`…-public.clickhouseserver…`（43.118.97.47）；⚠ DescribeEndpoints 回读 `NetType="PUBLIC"` 大写。CK 白名单组：`mnl_app`（主站两段）+ `sg_eip`（SG 4 出口 EIP）。
+- **账户余额 0.00 USD**；未支付订单 `518158947970481`（RDS，10594.13 USD，预分配 `pgm-5ts8mee1iiw13m89`）。
 - **既有实例实况**：RDS `pgm-5tstdhko64x2c01w`（`rds-mnl-newapi`，`pg.n4.2c.2m`，主 6b / 备 6a，Prepaid，**到期 2026-10-28**）；Tair `r-5tsf1fe16543e274`（`tair-mnl-newapi`，**企业版 amber 1G/2DB/6proxy**、仅 6a、**只买 1 个月**）—— 两者周期/规格与指南口径不符，**待用户裁定**。
 - **CK 实例已建成并接线**（`cc-5tsv2o51s1360b0pr`，2026-09-30，见任务 9 段）⇒ 任务 41 I-1 的 PG 分支连接数窗口关闭。
 - **集群侧已落地（09-30）**：`new-api` namespace/SA/ResourceQuota/ConfigMap 两地 · RRSA 角色 `new-api-rrsa-kms-mnl/-sg` + 注入链路实测通 · 节点 SG 补 kubelet 10250 · 通道 `deploy/ack_remote.sh`。
