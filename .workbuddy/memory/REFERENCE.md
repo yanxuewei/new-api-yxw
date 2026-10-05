@@ -159,3 +159,85 @@
 - 其它：双 AZ 账户下**企业版多可用区部署无额外成本**（存算分离），但马尼拉不提供多 AZ；社区版集群默认挂 CLB 并计费，**企业版是否挂 CLB/ARMS 尚未实测**。
 - 脚本 `deploy/task9_ck_decision.sh`（`verify|probe|cost|create --yes|check|all`，探针末尾强制复核 `TotalCount` 未变）。
 
+
+## ALB / 任务 19（2026-10-05 只读复核）
+
+- **现状（09-30 落地）**：ALB `alb-1riqckb1h8ezm0y7s9`（`alb-newapi-mnl`，Active/Internet/Standard，`2026-09-30T10:23:46Z`）· 双 AZ 6b `vsw-5ts1dygyh2x0daspwny2r` + 6a `vsw-5ts9tgdq1xz3picjgoqyu` · 访问日志 `sls-newapi-mnl/alb_access` · AlbConfig `mnl-alb`（`10:23:40Z`，仅声明 80=Redirect）· IngressClass `alb` · `Service/new-api-master`(0 ep) + `Ingress/new-api-verify`(host `ph-verify.internal.likha.hk`) · SLR `AliyunServiceRoleForAlb`（09-30T08:50:51Z）。
+- **❌ 未完成**：V1b 超时（实测 idle=15/req=60，非 60/600）· 301 跳转（`DefaultActions[0].Type=ForwardGroup → sgp-fm7kdwz99wtzbffkfx` = `kube-system-fake-svc-80`，ServerCount=0，`HealthCheckEnabled=false`）· V2 健康检查（无 ServerGroup 承载 Ingress 注解）· V3/V4 443+TLS（无证书）。
+- **⚠ 阻断：ALB Ingress Controller 集群内已无实例**（`get pods -A` 全量 48 个 + `get deploy/sts/ds -A` 均无 alb；仅剩 headless `Service/alb-ingress-controller` 与陈旧 `EndpointSlice alb-ingress-controller-2vr6n`，IP `7.8.75.74`/`7.8.167.212` 无对应 Pod）。**云端 `ListClusterAddonInstances` 仍报 `alb-ingress-controller active v3.1.1` ⇒ addon 元数据不可信，必须用集群内 Pod 实况校验组件**。重装前注意：ACK 组件卸载会级联清理 AlbConfig 及由其托管的 ALB（AlbConfig 带 finalizer `ingress.k8s.alibaba/resources`）。
+- **CLI 口径（2026-10-05 实测）**：`alb` 无 `GetServerGroupAttribute`/`GetLoadBalancerAttribute` 之外的读接口时用 `ListServerGroups --ServerGroupIds.1 <sgp>`（`--LoadBalancerIds.1` **不合法**）；`ListRules` 参数是 `--ListenerIds`；`GetListenerAttribute`/`ListListeners` 用 `--ListenerId` / `--LoadBalancerIds.1`。
+- **`aliyun cas` 必带 `--region`**：裸调默认取当前地域（ap-southeast-6）→ `unknown endpoint for region ap-southeast-6`（CAS 该地域无端点）。国际站查证书用 `--region ap-southeast-1`。`likha.hk` 2026-10-05 `dig NS` = **NXDOMAIN**（新域公网不存在）。
+- 报告：`deploy/Day2任务19_ALB_执行报告.md`。
+
+## 执行通道 `ack_remote.sh`（跨宿主注意）
+
+- **`base64` 不是可移植的**：GNU 支持 `base64 -w0 <file>`；**BSD/macOS 只认 `base64 -i <file>`（无 `-w`）** → 在 macOS 上 `base64 -w0 file` 报 `invalid argument` 并**静默产出空 Body**（远端只回 `BODY START/END` 而无内容，极易误判为"远端没输出"）。已统一改 **python3 编码 + 空值校验**（`ack_remote.sh` / `task19_alb_mnl.sh` 的 `run_cloud_assistant`；`task46_jumphost.sh`、`task11_nodepool_mnl.sh` 的 `base64 -w0` 若要跑在 macOS 宿主需同样处理）。
+- `ack_remote.sh <site> <body.sh> [node_id] [loops]`；kubeconfig 缓存在 `/tmp/ackctl-<site>/`（已缓存则不再签发，切集群须清缓存）；输出靠轮询 `DescribeInvocationResults`，长任务把 `loops` 调大（500s 级用 100+）。
+
+## 日志库 DSN 注入口径（任务 17 · 2026-10-05 复核）
+
+- **两地 `Secret/new-api-secrets` 已含 `LOG_SQL_DSN`**（mnl 6 键 / sg 3 键）；ConfigMap `LOG_SQL_CLICKHOUSE_TTL_DAYS=90`。核验脚本 `deploy/task17_dsn_verify.sh [mnl|sg|both]`（只读；含端点口径断言 + 端到端鉴权，日志 `deploy/logs/task17_verify_<ts>/`）。
+- **端点口径（关键，别写错）**：**mnl 走 VPC** `cc-5tsv2o51s1360b0pr-clickhouse.clickhouseserver.ap-southeast-6.rds.aliyuncs.com:9000`（同区私网、不走 NAT）；**sg 走 PUBLIC** `cc-5tsv2o51s1360b0pr-public.clickhouseserver.ap-southeast-6.rds.aliyuncs.com:9000`（跨区，09-30 裁定③；公网 IP `43.118.97.47`，白名单组 `sg_eip`）。**sg 若误填私网端点 → 跨区 TCP 9000 超时，备站日志必失败**（10-05 实测并修正）。
+- 鉴权自检（节点内、口令不外泄）：`curl -fsS -m 10 -o f --user "$U:$P" "http://<host>:8123/?database=newapi_logs" --data-binary 'SELECT 1'` → `1`；`SHOW TABLES` → `logs`。CK HTTP 接口 8123 在 VPC 与 public 端点**均已开放**。
+- 改 Secret：`kubectl -n new-api patch secret new-api-secrets --type merge --patch-file <json>`，json 用 `{"stringData":{"LOG_SQL_DSN":"..."}}`（免手工 base64；`--patch-file` 避免口令出现在 `ps`）。
+- ⚠ **项目铁律重申**：**VPC 端点两端皆偶发抖动**（mnl 8123 实测同秒一次超时、一次成功）⇒ 一切 VPC 端点探活必须带重试。
+
+## `ack_remote.sh` 写 body 的硬性纪律（血泪，2026-10-05）
+
+- body 由 **不带引号的 heredoc** 组装 → 正文里：
+  - **禁止反引号**（会被本地 shell 当命令替换执行，报 `-w: command not found` 之类）；
+  - **禁止裸 `$1`/`$2`/`$VAR`**（本地 `set -u` 下报 `unbound variable`，且值会提前展开）→ 一律写 `\$1`/`\$VAR`。
+  - 注释里写 `$1`/`-w '...'` 同样会中招（本次连环踩两次）。
+- 远端 `curl -w '%{http_code}'` 在该环境**可能不回显**（得空串，假阴性）⇒ 用 `curl -fsS -m N -o file` + 退出码 + 响应体判定。
+- 长任务：第 4 参 `loops` 调大（默认 24×5s=120s 会超时）。
+
+## ACR / 任务 16（2026-10-05 只读复核）
+
+- **实例**：`acr-newapi-mnl` / `cri-avfqy9xkqi5bj8ee` / `RUNNING` / `Enterprise_Basic`（ap-southeast-6）；新加坡 `ListInstance --RegionId ap-southeast-1` → **0**（单地域口径成立）。端点：公网 `acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com` / VPC `acr-newapi-mnl-registry-vpc.ap-southeast-6.cr.aliyuncs.com`。
+- **2b 未闭环**：`GetInstanceVpcEndpoint` → **`LinkedVpcs=[]`**（09-28 空、10-05 仍空）。后果实测：集群内 `getent hosts …-vpc…` **无输出**；`kubectl run` 用 `-vpc` 域名 → `ImagePullBackOff`，报 `dial tcp: lookup …-vpc…ap-southeast-6.cr.aliyuncs.com on 100.100.2.136:53: no such host`。**公网域名可用**（`ptest-pub` → `Succeeded` / `PULL_OK`）。修复：`cr CreateInstanceVpcEndpointLinkedVpc --InstanceId <id> --VpcId vpc-5tst1tgeessxn1azwasg2 --VswitchId vsw-5tswpyzfa8od6je95tdh`（**卡内明示属需负责人确认的写操作**）。
+- **命名空间/仓库**：`newapi-prod|pre|test|dev`，`AutoCreateRepo=false` 全部；仅 `newapi-prod` 有仓：`newapi-master`(PUBLIC) / `newapi-slave`(PRIVATE) / `newapi-pg-bouncer`(PRIVATE)。RepoId：`newapi-master`=`crr-eo15b1p46wt8yeek`、`newapi-slave`=`crr-nnn8d8k0qmiwjx6d`、`newapi-pg-bouncer`=`crr-y00cmmfgut2nkdho`。
+- **CLI 口径（实测坑）**：`cr ListRepoTag` 的唯一请求参数是 **`--RepoId`**（必需，配 `--InstanceId`）；`--RepoNamespaceName/--RepoName` **不合法**（报 `is not a valid parameter`）。取 RepoId 走 `cr GetRepository --RepoNamespaceName <ns> --RepoName <repo>` → `.RepoId`。
+- **`cs DescribeClustersV1`**：**不带 `--RegionId` 返回跨地域全量集群**（实测一次列出 jkt-dev `ap-southeast-5` / sg / mnl 三个）；带 `--RegionId ap-southeast-6` 反而**返回空**（国际站该接口对 region 参数不敏感）⇒ **判集群一律用不带 region 的全量列表**。三集群真值：mnl `cd57e40ce9a634c1698c2f5c5e09bd93c` · **sg `ca75829e3492d491d9d434de087913798`** · jkt-dev `cb0abf5bc06034f7bbdb991752f6f3e62`。⚠ 旧记的 sg `ca75829e…` 后缀缩写不足以调用 API。
+- **集群内 helper / 免密**：mnl addon `managed-aliyun-acr-credential-helper` **active v24.01.29.1-5318af4-aliyun**；**SG 集群 addon 全量列表无任何 acr/credential 组件**（卡片要求"新加坡集群同样要装"未做）。聚合 Secret `acr-credential-secret-aggregation`（`kubernetes.io/dockerconfigjson`）**只挂到 `SA/new-api-app`**，`SA/default` 无（调试 Pod 必须 `--overrides` 指定 `serviceAccountName`）。
+- **`new-api` ns 有 ResourceQuota `new-api-quota`**：`kubectl run` 不显式给 `requests/limits` 的 cpu+memory 会被直接拒（`Forbidden: failed quota`）。**调试 Pod 标准写法**：`kubectl run <n> --image=<img> --restart=Never --overrides='{"spec":{"serviceAccountName":"new-api-app","containers":[{"name":"<n>","image":"<img>","command":["sh","-c","echo PULL_OK"],"resources":{"requests":{"cpu":"10m","memory":"16Mi"},"limits":{"cpu":"100m","memory":"64Mi"}}}]}}'`。
+- 报告：`deploy/Day1任务16_ACR_执行报告.md`。
+
+## 阿里云 CLI 可执行路径（macOS 宿主）
+
+- 本项目脚本在 **macOS/zsh** 下 `aliyun` **不在 PATH**（`command not found`）→ 用全路径 `/Users/yanxuewei/.workbuddy/binaries/aliyun-cli/aliyun`（3.5.1）。脚本内的 PATH 自愈 `case` 判断的是 `.workbuddy/binaries/aliyun-cli` 目录在 PATH 与否，macOS 上需显式导出该目录。
+
+## ACR 任务 16 闭环（2026-10-05 18:15–18:25，写操作）
+
+> ⚠ 本节覆盖上文「ACR / 任务 16」节里的 **2b 未闭环 / SG 无 helper / PUBLIC** 三项结论 —— 均已于 10-05 18:25 前修复。
+
+- **2b 已关联**：`cr CreateInstanceVpcEndpointLinkedVpc --region ap-southeast-6 --InstanceId cri-avfqy9xkqi5bj8ee --VpcId vpc-5tst1tgeessxn1azwasg2 --VswitchId vsw-5tswpyzfa8od6je95td1h --ModuleName Registry` → `{"IsSuccess":true}`；回读 `[{Status:RUNNING, VpcId, VswitchId, Ip:10.0.22.220, DefaultAccess:true, Issue:NO_PRIVATE_ZONE_AUTHORIZED}]`。**`Issue=NO_PRIVATE_ZONE_AUTHORIZED` 不影响解析**（未开 `EnableCreateDNSRecordInPvzt`，但集群内 `getent hosts …-vpc…` 已返回 `10.0.22.220`）。
+- **⚠ vSwitch ID 易错**：正确 `vsw-5tswpyzfa8od6je95td1h`（末端 `td1h`）。少写一个 `1`（`…tdh`）→ `VSWITCH_NOT_EXIST / VSwitch is not exist.`，**看起来像偶发抖动，实为 ID 打错**。判 vSwitch 真值用 `vpc DescribeVSwitches --RegionId ap-southeast-6 --VpcId <vpc>`。
+- **SG helper 已装**：`cs InstallClusterAddons --ClusterId ca75829e3492d491d9d434de087913798 --region ap-southeast-1 --header "Content-Type=application/json" --body '[{"name":"managed-aliyun-acr-credential-helper","config":"<json 字符串>"}]'` → `task_id T-6ac37991fa7b0a01090030fb`，30s 后 `state=active`。**⚠ 必须带 `--header "Content-Type=application/json"`**，否则 400 `FAILED_TO_READ_REQUEST`；`--body.1.name=` 点式写法同样 400。config 与 mnl 一致即可。
+- **`cr UpdateRepository` 参数**：`InstanceId` / `RepoId` / **`RepoType`** / **`Summary`（必填！）**，`RepoName`/`Detail` 可选。改 PRIVATE：`--RepoId crr-eo15b1p46wt8yeek --RepoType PRIVATE --Summary "master模块"` → `{"IsSuccess":true}`，回读 `RepoType=PRIVATE`。
+- **实测耗时（§11 RTO 输入）**：mnl VPC 域名拉取 `ptest-vpc2` **5s**；SG 公网跨区拉 `ptest-sg` **11s**（78 MB 镜像，含调度+拉取+启动）⇒ 未触发「SG 补建 ACR + 同步规则」回退。
+- **调试 Pod 标准写法**（`new-api` ns 有 ResourceQuota `new-api-quota`，缺 resources 直接 `Forbidden: failed quota`）：`kubectl run <n> --image=<img> --restart=Never --overrides='{"spec":{"serviceAccountName":"new-api-app","containers":[{"name":"<n>","image":"<img>","command":["sh","-c","echo OK"],"resources":{"requests":{"cpu":"10m","memory":"16Mi"},"limits":{"cpu":"100m","memory":"64Mi"}}}]}}'`。
+- **§12 门禁判据（可复用）**：同镜像同 tag 双 SA 对照 —— `new-api-app` → 通、`default` → `ImagePullBackOff`，即门禁成立。
+
+## 任务 30 · 备站→马尼拉 RDS 公网读写 + RTT 实测（2026-10-05 实做）
+
+**判据 vs 实测（SG 侧一次性探针 Pod 内）**
+
+| 判据 | 期望 | 实测 | 判定 |
+|---|---|---|---|
+| TCP RTT SG→MNL RDS | ≤45 ms | 建连 p50 **37** / p95 40 / max 41 ms；ICMP avg **35.54** ms | ✅ |
+| `pgbench` 单连接 TPS | ≥20 | c1 **30.46**（lat 32.8 ms）；c16 **455.34** | ✅ |
+| TLS 握手成功率 | 100% | 50/50 + 20/20 + 10/10（TLSv1.3 / AES256-GCM） | ✅ |
+| 建连平均（含 TLS） | ≤200 ms | p50 **276**（复测 280） | ❌ 超 38% |
+| `sslmode=verify-full` | 卡口径 | SG 实为 `require`；verify-full 因缺根 CA 失败 | ❌ |
+| V1 读的是马尼拉主库 | — | `inet_server_addr()` **非 superuser 回 NULL** ⇒ 用 db/user/version/`pg_postmaster_start_time` 等价证据 | ⚠ |
+| V2 主站写→备站读 | — | ✅ 写入后 51 s 读到同条，表结构一致 | ✅ |
+| V3 连接预算 | — | `newapi_sg` idle 15 + active 1（探针残留） | ⚠ |
+| V4 拔线自愈 | — | 未做（需改白名单，云写） | ❌ |
+
+**★ 建连成本拆解（定位根因，全部 Pod 内实测）**：`psql --version` 纯进程启动 **19 ms** · 经池 6432 建连 **280 ms** · **直连 5432 建连 279 ms** · 单进程 20 次串行查询（1 次建连）**300 ms** · `pgbench -C`（每事务新建连接）latency **250.95 ms / 3.98 TPS** vs 复用连接 **35.45 ms / 28.21 TPS**。⇒ **池不增成本**（甲乙两路无差异）；~250 ms ≈ 19 + RTT 35 ms × 约 7 次往返（SSLRequest + TLS1.3 1-RTT + SCRAM 2-RTT + 后端 fork + 首查询）⇒ **200 ms 判据在该 RTT 下不可达**，改判据（≤300 ms）或强制连接复用（35 ms/查询）。
+
+**★ `verify-full` 前提缺口**：5432 链 **2 张**（leaf `CN=…-pub…`，SAN 含域名、`checkhost` MATCH、2026-09-29→2027-09-29；中间 CA `CN=ApsaraDB ap-southeast-6 region CA`），**无根 CA**。`sslrootcert=system` → `certificate verify failed`（**RDS 非公有 CA 签**）；拿 leaf 当 rootcert 打 5432/6432 **都失败**。⇒ 必须另取阿里云 RDS 根 CA，或退 `verify-ca`。**5432 与 6432 同一张 leaf**（卡内「池复用同证书」成立）。
+
+**★ 探针方法坑**：**`openssl s_client` 判不了 PgBouncer(6432) 的 TLS** —— 直打 6432 **10/10 失败**，但 `psql`（require）**50/50 成功**、`ssl=on`。PG/PgBouncer 的 TLS 需先 `SSLRequest` 协议协商，`openssl s_client` 直接起 TLS 对不上；而同手法打 **5432 却 OK**（RDS 代理层容忍）⇒ 极易误判「6432 链路坏了」。**判 PG 侧 TLS 一律用 `psql`；`openssl s_client` 只用来取证书链。**
+
+**执行位口径**：SG `new-api` 命名面**零工作负载** ⇒ `deploy/new-api-ph-standby` 不在位，本卡只能靠一次性探针 Pod。Pod 模板（`new-api` ns 有 `ResourceQuota new-api-quota`，**必须显式给 resources**）：`postgres:17` + `serviceAccountName: new-api-app` + `env.valueFrom.secretKeyRef`（口令不进命令行）。body 脚本 `deploy/task30_bodies/03..10-*.sh`。**`ack_remote.sh` 单窗口约 5 min（`loops×5s`）⇒ 测量脚本必须拆段**（原 `02-sg-net.sh` 50×TCP+20×TLS 整体超时即反例）。证据 `deploy/logs/task30_drill_20261005-211909/`。

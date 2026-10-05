@@ -33,8 +33,12 @@
 # 前置（2026-09-29 CLI 实测）：
 #   ✅ ACK mnl cd57e40ce9a634c1698c2f5c5e09bd93c running / 1.35.7 / Terway / 4×worker 跨 6a·6b
 #   ✅ vsw-mnl-pub-a vsw-5ts9tgdq1xz3picjgoqyu (6a, free=251) / pub-b vsw-5ts1dygyh2x0daspwny2r (6b, free=252)
-#   ✅ alb-ingress-controller 已装且 active（v3.1.1）→ 指南步骤 1 已完成，脚本仅复核
-#   ✅ AlbConfig/ALB CRD 就绪；无既有 AlbConfig / ALB 实例 / ServerGroup（干净）
+#   ✅ alb-ingress-controller 曾于 2026-09-30 运行并成功建出 ALB；⚠ **2026-10-05 复测：集群内已无任何
+#      alb Pod/Deployment（云端 addon 元数据仍报 active v3.1.1，实际未运行）→ 本卡执行前须先修复组件**，
+#      否则 443 监听/健康检查注解无人 reconcile（详见 deploy/Day2任务19_ALB_执行报告.md §三③）
+#   ✅ AlbConfig/ALB CRD 就绪；⚠ 09-30 已建出 AlbConfig `mnl-alb` + ALB `alb-1riqckb1h8ezm0y7s9`
+#      （Active，双 AZ，访问日志 sls-newapi-mnl/alb_access）+ IngressClass `alb` + 占位 svc/ingress
+#      ⇒ **非干净底座**：脚本 apply 会就地更新既有 AlbConfig（幂等），勿当成"全新建"
 #   ✅ sls-newapi-mnl 项目与 alb_access Logstore 已存在（⚠ webhook 强制 logstore 名以 alb_ 开头；旧 alb-access 不合规，2026-09-30 已建 alb_access）
 #   ❌ 任务 46 跳板机未交付 → EXEC_MODE=ssh 无法执行（本脚本默认模式，退出码 4）
 #   ❌ AliyunServiceRoleForAlb 服务关联角色不存在（建 ALB 前需先建）
@@ -201,7 +205,9 @@ exec_sh() {
 # run_cloud_assistant <name> <script> —— 经 ECS 云助手在**跳板机**执行（应急通道）
 run_cloud_assistant() {
   local name="$1" script="$2" b64 inv st i
-  b64=$(printf '%s' "$script" | base64 -w0)
+  # ⚠ base64 可移植性：GNU 支持 `base64 -w0`，BSD/macOS 不支持（会静默产出空 Body）
+  b64=$(printf '%s' "$script" | python3 -c "import base64,sys;sys.stdout.write(base64.b64encode(sys.stdin.buffer.read()).decode())")
+  [ -n "$b64" ] || { say "  !! base64 编码为空，终止"; return 1; }
   printf '+ [cloud-assistant %s] %s …\n' "$JUMP_INSTANCE_ID" "$name" >&3
   inv=$(api "$OUTDIR/$name.invoke.json" aliyun ecs RunCommand --RegionId "$REGION" \
           --Type RunShellScript --InstanceId.1 "$JUMP_INSTANCE_ID" \

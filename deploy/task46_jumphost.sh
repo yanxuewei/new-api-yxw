@@ -86,7 +86,8 @@ api() {
 # node_sh <name> <script> —— 经云助手在跳板机执行；输出解码落 $OUTDIR/<name>.out
 node_sh() {
   local name="$1" script="$2" b64 inv st i
-  b64=$(printf '%s' "$script" | base64 -w0)
+  # ⚠ base64 可移植性：BSD/macOS 不支持 `-w0`（会报 invalid argument 并静默产出空内容）→ 走 python3
+  b64=$(printf '%s' "$script" | python3 -c "import base64,sys;sys.stdout.write(base64.b64encode(sys.stdin.buffer.read()).decode())")
   printf '+ [cloud-assistant %s] %s …\n' "$JUMP_ID" "$name" >&3
   if [[ "$DRY_RUN" == "1" ]]; then printf '(dry-run)\n' > "$OUTDIR/$name.out"; return 0; fi
   inv=$(api "$OUTDIR/$name.invoke.json" aliyun ecs RunCommand --RegionId "$REGION" \
