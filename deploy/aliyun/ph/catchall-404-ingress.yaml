@@ -1,0 +1,26 @@
+# 兜底规则：未匹配任何 host 的请求 → 固定 404（不落业务后端）
+# 背景（任务 47，2026-10-06）：加固前 ALB :80 默认动作 ForwardGroup → kube-system/fake-svc
+#   → 节点 NodePort 32656 → 业务 200；任意伪造 Host（含 IP Host）可直接打到业务。
+# 优先级：order 数值越小优先级越高（默认 10）——
+#   host 规则（new-api-verify）须设 order=1（高优先），本兜底设 order=100（最低）。
+# 应用：kubectl -n new-api apply -f catchall-404-ingress.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: new-api-catchall-404
+  namespace: new-api
+  annotations:
+    alb.ingress.kubernetes.io/actions.reject: '[{"type":"FixedResponse","fixedResponseConfig":{"httpCode":"404","contentType":"text/plain","content":"Not Found"}}]'
+    alb.ingress.kubernetes.io/order: "100"
+spec:
+  ingressClassName: alb
+  rules:
+  - http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: reject
+            port:
+              name: use-annotation

@@ -1,0 +1,23 @@
+# 任务 25 · 新加坡（备站）IngressClass
+# 集群：ca75829e3492d491d9d434de087913798（ap-southeast-1）
+# 对应：AlbConfig `sg-alb`（config.name = alb-newapi-sg）
+#
+# 要点：
+#   ① IngressClass 是**集群级**资源（无 namespace）；
+#   ② 两集群各自独立，马尼拉的 `alb` 与此互不相干（各自指向自己的 AlbConfig）；
+#   ③ Ingress 通过 `spec.ingressClassName: alb` 选中本类；
+#   ④ 与马尼拉 `aliyun/ph/albconfig.rendered.yaml` 的同构件保持字段一致，只换 parameters.name。
+apiVersion: networking.k8s.io/v1
+kind: IngressClass
+metadata:
+  name: alb
+  labels:
+    project: new-api
+    site: ph-sg
+    env: prod
+spec:
+  controller: ingress.k8s.alibabacloud/alb
+  parameters:
+    apiGroup: alibabacloud.com
+    kind: AlbConfig
+    name: sg-alb

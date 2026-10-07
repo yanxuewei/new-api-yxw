@@ -21,6 +21,15 @@ case "$SITE" in
 esac
 
 KCDIR="${ACKCTL_DIR:-/tmp/ackctl-$SITE}"
+# ⚠ 并发竞态（2026-10-06 实测）：ACKCTL_DIR 是固定路径，两个会话同时调用会互相覆盖
+#   remote_body.sh / remote_cmd.sh，而节点侧又都写到 /tmp/ackctl/remote.sh。任务 23 的
+#   drain 就是这么被另一会话的 body 顶掉的（kubectl drain 已生效，后续取证 + uncordon 丢失）。
+#   ⇒ 执行期文件（body/cmd）与节点侧目录一律按 RUN_ID 唯一；kubeconfig 仍复用 KCDIR 缓存。
+RUN_ID="$(date +%s)-$$-${RANDOM}"
+RW="${KCDIR}/remote_body.${RUN_ID}.sh"      # 本地：注入 kubeconfig 后的完整 body
+CMD="${KCDIR}/remote_cmd.${RUN_ID}.sh"       # 本地：外层解压器
+RTMP="/tmp/ackctl-${RUN_ID}"                 # 节点侧目录
+trap 'rm -f "$RW" "$CMD" "${KCDIR}/kc.${RUN_ID}.json" "${KCDIR}/run.${RUN_ID}.err" "${KCDIR}/ir.${RUN_ID}.json" 2>/dev/null' EXIT
 # aliyun CLI 由 ~/.zshrc 追加到 PATH，非交互 shell 不source .zshrc ⇒ 命令找不到，
 # 之前的空 InvokeId 假成功就是这么来的。这里显式补一次。
 [ -d "$HOME/.workbuddy/binaries/aliyun-cli" ] && \
@@ -32,13 +41,13 @@ mkdir -p "$KCDIR"
 # 1) admin 私网 kubeconfig（缓存）
 if [ ! -s "$KCDIR/kubeconfig" ]; then
   aliyun cs DescribeClusterUserKubeconfig --ClusterId "$CID" --region "$REGION" \
-    --PrivateIpAddress true > "$KCDIR/kc.json" 2>&1
+    --PrivateIpAddress true > "${KCDIR}/kc.${RUN_ID}.json" 2>&1
   if ! python3 -c "
 import json,sys
-d=json.load(open('$KCDIR/kc.json'))
+d=json.load(open('$KCDIR/kc.${RUN_ID}.json'))
 open('$KCDIR/kubeconfig','w').write(d['config'])
 " 2>/dev/null; then
-    echo "[!] kubeconfig 拉取失败："; head -5 "$KCDIR/kc.json"; exit 1
+    echo "[!] kubeconfig 拉取失败："; head -5 "${KCDIR}/kc.${RUN_ID}.json"; exit 1
   fi
   echo "[i] kubeconfig -> $KCDIR/kubeconfig (server=$(grep -m1 server: "$KCDIR/kubeconfig" | tr -d '\r'))"
 fi
@@ -59,7 +68,7 @@ if [ -z "${NODE_ARG:-}" ]; then echo "[!] 未能确定节点 ID"; exit 1; fi
 echo "[i] site=$SITE region=$REGION cluster=$CID node=$NODE_ARG"
 
 # 3) 组装远端脚本：注入证书 + kubeconfig + 用户 body
-python3 - "$BODY" "$KCDIR/kubeconfig" <<'PY'
+python3 - "$BODY" "$KCDIR/kubeconfig" "$RW" <<'PY'
 import sys, os
 body = open(sys.argv[1], encoding='utf-8').read().replace('\r\n', '\n')
 kc   = open(sys.argv[2], encoding='utf-8').read().replace('\r\n', '\n')
@@ -82,7 +91,7 @@ fi
 command -v kubectl >/dev/null 2>&1 && echo "[bootstrap] kubectl $(kubectl version --client -o json 2>/dev/null | head -c 0; kubectl version --client 2>/dev/null | head -1)" || echo "[bootstrap] kubectl 不可用"
 echo "================= BODY START ================="
 """ % kc
-open(os.path.dirname(sys.argv[2]) + '/remote_body.sh', 'w').write(pre + body)
+open(sys.argv[3], 'w').write(pre + body)
 PY
 
 # 4) 下发
@@ -96,25 +105,24 @@ PAY=$(python3 -c "
 import base64, gzip, sys
 raw = open(sys.argv[1], 'rb').read()
 sys.stdout.write(base64.b64encode(gzip.compress(raw, 9)).decode())
-" "$KCDIR/remote_body.sh") || { echo "[!] gzip/base64 编码失败"; exit 1; }
+" "$RW") || { echo "[!] gzip/base64 编码失败"; exit 1; }
 [ -n "$PAY" ] || { echo "[!] 编码结果为空，终止"; exit 1; }
 
-CMD="$KCDIR/remote_cmd.sh"
 {
-  printf 'set -e\nmkdir -p /tmp/ackctl\n'
+  printf 'set -e\nmkdir -p %s\n' "$RTMP"
   printf 'command -v gzip >/dev/null 2>&1 || { echo "[bootstrap] 节点缺 gzip，无法解压下发内容"; exit 3; }\n'
-  printf "cat <<'ZPAY' | base64 -d | gzip -dc > /tmp/ackctl/remote.sh\n%s\nZPAY\n" "$PAY"
-  printf 'chmod 700 /tmp/ackctl/remote.sh\nexec bash /tmp/ackctl/remote.sh\n'
+  printf "cat <<'ZPAY' | base64 -d | gzip -dc > %s/remote.sh\n%s\nZPAY\n" "$RTMP" "$PAY"
+  printf 'chmod 700 %s/remote.sh\ntrap "rm -rf %s" EXIT\nexec bash %s/remote.sh\n' "$RTMP" "$RTMP" "$RTMP"
 } > "$CMD"
 
 B64=$(python3 -c "import base64,sys;sys.stdout.write(base64.b64encode(open(sys.argv[1],'rb').read()).decode())" "$CMD" 2>/dev/null) \
-  || { echo "[!] base64 编码失败（remote_cmd.sh 不存在？）"; exit 1; }
+  || { echo "[!] base64 编码失败（cmd 文件不存在？）"; exit 1; }
 [ -n "$B64" ] || { echo "[!] base64 编码结果为空，终止"; exit 1; }
-echo "[i] 体积 raw=$(wc -c < "$KCDIR/remote_body.sh" | tr -d ' ')B → gzip+b64=$(printf %s "$PAY" | wc -c | tr -d ' ')B → 外层命令 b64=$(printf %s "$B64" | wc -c | tr -d ' ')B"
+echo "[i] run=$RUN_ID node_tmp=$RTMP 体积 raw=$(wc -c < "$RW" | tr -d ' ')B → gzip+b64=$(printf %s "$PAY" | wc -c | tr -d ' ')B → 外层命令 b64=$(printf %s "$B64" | wc -c | tr -d ' ')B"
 
 INV=$(aliyun ecs RunCommand --RegionId "$REGION" --region "$REGION" --Type RunShellScript \
   --InstanceId.1 "$NODE_ARG" --ContentEncoding Base64 --Name "ackctl-$SITE" --Timeout 900 \
-  --CommandContent "$B64" 2>"$KCDIR/run.err" | python3 -c "
+  --CommandContent "$B64" 2>"${KCDIR}/run.${RUN_ID}.err" | python3 -c "
 import sys,json
 try: print(json.load(sys.stdin).get('InvokeId',''))
 except Exception: print('FAIL')")
@@ -124,7 +132,7 @@ echo "[i] InvokeId=$INV"
 # DescribeInvocationResults --InvokeId '' 会返回「上一次调用」的结果（假成功，实测 2026-10-05）。
 if [ "$INV" = "FAIL" ] || [ -z "$INV" ]; then
   echo "[!] 下发失败（InvokeId 为空）。RunCommand 原始响应："
-  cat "$KCDIR/run.err" 2>/dev/null | head -c 1000
+  cat "${KCDIR}/run.${RUN_ID}.err" 2>/dev/null | head -c 1000
   exit 1
 fi
 
@@ -132,8 +140,8 @@ fi
 for i in $(seq 1 "$LOOPS"); do
   sleep 5
   aliyun ecs DescribeInvocationResults --RegionId "$REGION" --region "$REGION" \
-    --InvokeId "$INV" > "$KCDIR/ir.json" 2>&1
-  R=$(python3 - "$KCDIR/ir.json" <<'PY'
+    --InvokeId "$INV" > "${KCDIR}/ir.${RUN_ID}.json" 2>&1
+  R=$(python3 - "${KCDIR}/ir.${RUN_ID}.json" <<'PY'
 import json,base64,sys
 try: d=json.load(open(sys.argv[1]))
 except Exception: print('PARSE|'); raise SystemExit

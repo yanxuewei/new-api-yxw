@@ -50,6 +50,12 @@
 - **`ListQuotaApplications` 地域字段是 `Dimension`（单数）**，`ListProductQuotas` 才是 `Dimensions` —— 取错 → 幂等失效重复提单。
 - 脚本 `quota_apply.sh`（`check|apply|verify|probe|all`）· `quota_probe.py`。现值：ALB 60/地域 · EIP 20（账号级）· NAT 5/VPC · ACK Pro 100 · OSS 100/region · VPC 10 · vSwitch 150/VPC。
 
+## ★ 付费方式裁定（2026-10-06 · 节点池 = 按量）
+- **ECS 节点池维持按量 `PostPaid`**（用户裁定，**不转包年包月**）——实查 `DescribeClusterNodePools`：`np-mnl-app` / `np-sg-ph-standby` 的 `scaling_group.instance_charge_type=PostPaid`、`period=0`、`period_unit=""`、`auto_renew=false`；`DescribeInstances` 6 台 worker 全 `PostPaid`、`ExpiredTime=2099-12-31`（**无到期时间 = 反证非包年包月**）。
+- **配额核量改按量口径** `q_ecs_enterprise_postpay_c`（mnl **64** / sg **96**，工单 `b140e263-…`/`e117bf2b-…` `Agree`）⇒ ⚠ **`max_size` 顶满即零余量**（8×8=64；12×8=96），**扩节点前须提额**（`--QuotaActionCode q_ecs_enterprise_postpay_c --DesireValue …`）。包年包月 `prepay_c`=100/100 仅作对照。
+- **仍为包年包月**：Tair（`ChargeType: PrePaid`）· RDS PG（`PayType: Prepaid`）。唯一实况 `PrePaid` 的 ECS = 跳板机 `i-5tsil3ca5dfkus9zpj7u`（`newapi-ops-mnl`，`ExpiredTime=2026-10-29`）。
+- 全文口径 → 指南 v2.0 **F13** + 任务 11 卡（坑 7/7b 已反转）。改前备份 `deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md.bak-20261006-paytype`。
+
 ## 询价
 - ECS：`ecs DescribePrice --RegionId <r> --ResourceType instance --InstanceType <t> --PriceUnit Hour|Month --Amount 1 --InstanceNetworkType vpc --SystemDisk.Category cloud_essd --SystemDisk.Size 100`。**系统盘参数必填**；**本 CLI 无 `InstanceChargeType`** → 取不到包年包月价，`Month` 是月度档价 **≠ Hour×720**。
 - 磁盘 `--ResourceType disk --DataDisk.1.*`（**只支持 Hour**，参数带序号）。Tair：`r-kvstore DescribePrice … --ChargeType PostPaid --OrderType BUY`（**OrderType 必填**）。**报价可查 ≠ 可下单**（`g8i.2xlarge` 有价无库存：`DescribeAvailableResource` 为空）。
@@ -160,14 +166,213 @@
 - 脚本 `deploy/task9_ck_decision.sh`（`verify|probe|cost|create --yes|check|all`，探针末尾强制复核 `TotalCount` 未变）。
 
 
+## 域名与 DNS（likha.hk · 阿里云云解析）
+
+- **权威 NS**：`ns7.alidns.com` / `ns8.alidns.com`（**2026-10-06 已生效**，终结 10-05 的 NXDOMAIN）。域名 `DomainId 3b4321ce86d3436aa46e3a8ba96a6133`，`rg-acfnssmgwnsb5oa`，免费版（TTL 下限 **600s**）。
+- **CLI 可管**：`aliyun alidns DescribeDomains` 能列出 likha.hk ⇒ 当前 AK 与域名同账号（DNS 服务全局，与 `--region` 无关；**alidns 无需 `--region`**）。
+- **现行记录**：
+
+| RR | Type | Value | 目标 AZ | TTL | RecordId |
+|---|---|---|---|---|---|
+| `@`（根域） | A | `8.212.161.49` | ap-southeast-6a | 600 | `2107459130738276352` |
+| `@`（根域） | A | `8.212.183.7` | ap-southeast-6b | 600 | `2107459138178953216` |
+| `www` | A | `8.212.161.49` | ap-southeast-6a | 600 | `2107455274482150400` |
+| `www` | A | `8.212.183.7` | ap-southeast-6b | 600 | `2107455278295137280` |
+
+- **★ 负缓存坑（2026-10-06 实测）**：改记录后**权威 + 公共递归（223.5.5.5 / 119.29.29.29 / 8.8.8.8）秒级生效**，但**本地递归（家用路由器）可能仍回空**——因域名此前是 NXDOMAIN，负缓存按 **SOA minimum TTL = 600s** 缓存（实测 `likha.hk` SOA `… 86400 600`）。症状 = `dig @<router>` 空 / `curl` 回 **000**；判**必须逐层对比上游**，别误判成"配置没生效"。解法：等 ≤600s，或重启路由器 / `sudo dscacheutil -flushcache; sudo killall -HUP mDNSResponder`（macOS）。
+
+- **A 双记录 vs CNAME**：ALB 官方名 `alb-1riqckb1h8ezm0y7s9.ap-southeast-6.alb.aliyuncsslbintl.com` dig 解出的**正是这两个 IP**（⇒ 两方案等价）。选 A 双记录的理由：可做 IPv4 健康检查分流；CNAME 的优势是 IP 变化自动跟随但无法做 A 级健康检查。**根域不能用 CNAME，`www` 可以。**
+- **★ `likha.hk` / `www.likha.hk` 当前都靠「无 Host 兜底规则」命中主站**（`rule-b1t5tod05rdsfdua8n` → `sgp-j4qrgy3f7bcv1r67na`）。⚠ **ALB 上没有 `Host=www.likha.hk`（或 `likha.hk`）规则** ⇒ 证书到位加 443 时**必须补 Host 规则**（HTTPS 客户端必带 SNI/Host，兜底规则不构成合规的域名入口）。
+- **未配**：`ops.likha.hk`、`*.likha.hk`。**443 不存在**（`https://` 不可用）。
+- **脚本**：`deploy/manifests/dns-likha-hk.sh`（`status|add|del|verify`；`RR`/`IPS`/`TTL`/`LINE` 环境变量可覆盖；`add` 幂等）。
+- **★ 规则 ID / 服务器组 ID 会漂移**：Controller 重建后 `rule-80-1/2` → `rule-0f7ru4csbcn41ygmb4` / `rule-b1t5tod05rdsfdua8n`，Prio1 后端由 `sgp-tqgwt413t19mum8oa9` 变 `sgp-j4qrgy3f7bcv1r67na`。**判路由一律实时查 API，勿引用历史 ID。**
+
 ## ALB / 任务 19（2026-10-05 只读复核）
 
 - **现状（09-30 落地）**：ALB `alb-1riqckb1h8ezm0y7s9`（`alb-newapi-mnl`，Active/Internet/Standard，`2026-09-30T10:23:46Z`）· 双 AZ 6b `vsw-5ts1dygyh2x0daspwny2r` + 6a `vsw-5ts9tgdq1xz3picjgoqyu` · 访问日志 `sls-newapi-mnl/alb_access` · AlbConfig `mnl-alb`（`10:23:40Z`，仅声明 80=Redirect）· IngressClass `alb` · `Service/new-api-master`(0 ep) + `Ingress/new-api-verify`(host `ph-verify.internal.likha.hk`) · SLR `AliyunServiceRoleForAlb`（09-30T08:50:51Z）。
 - **❌ 未完成**：V1b 超时（实测 idle=15/req=60，非 60/600）· 301 跳转（`DefaultActions[0].Type=ForwardGroup → sgp-fm7kdwz99wtzbffkfx` = `kube-system-fake-svc-80`，ServerCount=0，`HealthCheckEnabled=false`）· V2 健康检查（无 ServerGroup 承载 Ingress 注解）· V3/V4 443+TLS（无证书）。
 - **⚠ 阻断：ALB Ingress Controller 集群内已无实例**（`get pods -A` 全量 48 个 + `get deploy/sts/ds -A` 均无 alb；仅剩 headless `Service/alb-ingress-controller` 与陈旧 `EndpointSlice alb-ingress-controller-2vr6n`，IP `7.8.75.74`/`7.8.167.212` 无对应 Pod）。**云端 `ListClusterAddonInstances` 仍报 `alb-ingress-controller active v3.1.1` ⇒ addon 元数据不可信，必须用集群内 Pod 实况校验组件**。重装前注意：ACK 组件卸载会级联清理 AlbConfig 及由其托管的 ALB（AlbConfig 带 finalizer `ingress.k8s.alibaba/resources`）。
 - **CLI 口径（2026-10-05 实测）**：`alb` 无 `GetServerGroupAttribute`/`GetLoadBalancerAttribute` 之外的读接口时用 `ListServerGroups --ServerGroupIds.1 <sgp>`（`--LoadBalancerIds.1` **不合法**）；`ListRules` 参数是 `--ListenerIds`；`GetListenerAttribute`/`ListListeners` 用 `--ListenerId` / `--LoadBalancerIds.1`。
-- **`aliyun cas` 必带 `--region`**：裸调默认取当前地域（ap-southeast-6）→ `unknown endpoint for region ap-southeast-6`（CAS 该地域无端点）。国际站查证书用 `--region ap-southeast-1`。`likha.hk` 2026-10-05 `dig NS` = **NXDOMAIN**（新域公网不存在）。
+- **`aliyun cas` 必带 `--region`**：裸调默认取当前地域（ap-southeast-6）→ `unknown endpoint for region ap-southeast-6`（CAS 该地域无端点）。国际站查证书用 `--region ap-southeast-1`。~~`likha.hk` 2026-10-05 `dig NS` = NXDOMAIN~~ → **2026-10-06 20:55 已生效**：`NS = ns7/ns8.alidns.com`；云解析 `DomainId 3b4321ce86d3436aa46e3a8ba96a6133`（同账号，CLI 可管）。`www` 已配双 A → 见「域名与 DNS（likha.hk）」节。
 - 报告：`deploy/Day2任务19_ALB_执行报告.md`。
+
+### 任务 19 补：ALB 公网 IP 无证书直连（2026-10-06 实做，✅ 已通）
+
+- **可用网址**：`http://8.212.161.49` / `http://8.212.183.7`（**仅 80**；443/8080 无监听器）。链路：ALB → `lsn-ihrgkty2sjdy8s5p4h`:80 → `sgp-fm7kdwz99wtzbffkfx`（**4 节点 Ecs:32656，健康检查关闭**）→ NodePort `newapi-np`(80:32656, Cluster) → Pod stable×4。实测两 IP `/api/status` 各 6 次 200、`/` = `<title>New API</title>`。
+  - ⚠ **上述链路已作废（2026-10-06 20:00 任务 19 收口）**：现无 Host → `rule-80-2` → **Eni 组 `sgp-j4qrgy3f7bcv1r67na`**；`sgp-fm7kdwz99wtzbffkfx` 成员已**清空为 0**（不再承载流量）。且 19:20 实测时该直连入口**曾被 `Ingress/new-api-catchall-404` 遮蔽为 404**。详见 ⑨。
+- **⚠ 组名误导**：`sgp-fm7kdwz99wtzbffkfx` 名为 `kube-system-fake-svc-80`，实际承载我方 4 节点 —— 判"当前路由指向"必须以 `GetListenerAttribute.DefaultActions` 为准，勿信组名。
+- **★ 跨节点 NodePort 是 SG 问题，不是 kube-proxy 问题**：`externalTrafficPolicy=Cluster` 下 ALB 落到的节点要二次转发到别的节点 Pod。需三条同时成立（缺一即"部分 200"）：
+  1. **节点 SG ingress 放行来自 ALB SG**（`sg-5tsj1epvcjjv6jkg3zks`）的 32656 —— 规则 `alb-to-nodeport-32656-newapi`（**删了访问即断**）；
+  2. **节点 SG egress 放行到 Pod** —— `intra-vpc-tcp 1/65535 → 10.0.0.0/16`（**命脉**）；
+  3. **Pod SG ingress 放行来自 VPC** —— `intra-vpc-tcp-to-pods 1/65535 from 10.0.0.0/16`（**命脉**）。**Terway Pod 有独立网卡 + 独立 SG**（`sg-5tsaatp5w68vyqszezja`），**节点 SG 放行 ≠ Pod 可达**。
+- **★ Ip 型服务器组天然脆弱，勿用于长期**：`sgp-1zdipho1kpupp43v4m` 成员是 Pod IP，Pod 重建即失效（实测 4 个中 2 个变陈旧）⇒ 只有 NodePort/Ecs 型与 Pod 生命周期解耦。
+- **★ Pod 东西向流量不受 Pod SG 约束**：删掉 Pod SG 的 `intra-vpc-udp 1/65535` 后，CoreDNS 仍持续收到**跨节点**（10.0.43.211 → 10.0.22.194 节点上的 coredns）UDP 53 查询并 NOERROR ⇒ 集群内 Pod↔Pod/DNS 不走该 SG。**故 Pod SG 无需为东西向开洞。**
+- **★ nodePort 必须固化，且 ALB 不会跟随 Service 端口变化（2026-10-06 已固化）**：`newapi-np` 的 `nodePort=32656` 原为 k8s 从默认 **30000–32767 随机分配**，而 ALB 服务器组 `sgp-fm7kdwz99wtzbffkfx` 后端是**写死的「节点 IP:32656」** ⇒ 一旦 Service 删除后重建，极可能换号 → **4 个后端全部失效，ALB 侧却看不出异常（静默 502/超时）**。已显式声明 `nodePort: 32656`：权威副本 `deploy/manifests/newapi-np.yaml`、创建脚本 `task_alb_url_bodies/06-create-nodeport.sh`（带 `!=32656` 断言）。**若确需改端口，必须同时改服务器组后端**，只改 Service 必断。
+- **★ 无证书直连的边界**：仅 HTTP 明文，**仅供内部验收，不得称上线**。⚠ 「ALB Ingress Controller 仍缺位 ⇒ 属临时手段」这句**已作废** —— Controller 是 ACK 托管形态、一直活着（见下方「更正：已挂是误判」）。
+- **★★ 「没证书只能走 NodePort」是伪命题（2026-10-06 澄清）**：**证书只管 443，与后端类型无关**，ENI 型在 80 明文下完全可用。当时走 NodePort 的真实原因是两条：① **Ingress `new-api-verify` 把 `host` 写死** `ph-verify.internal.likha.hk` ⇒ Controller 只生成一条 Host 规则 `rule-80-1`，IP 直访 Host 不匹配 → 落 default，**ENI 组压根没机会被命中**；② **`AlbConfig mnl-alb` 声明 80 default = Redirect `www.likha.hk:443`**（域名 NS NXDOMAIN）⇒ 把 ENI 组设成 default 会被 reconcile 打回，且跳转目标是死路。
+- **★ ENI 型 vs ECS/NodePort 型选型要点**：两组同为 `ServerGroupType=Instance`，差别在后端 `ServerType`（`Eni` vs `Ecs`）。**ENI**：端口=容器 3000、一跳直连、Controller watch EndpointSlice **自动增删**（HPA 友好）、**健康检查必须开**、`ConnectionDrain 120s` 已开、**Controller 独家管理（手工改会被覆盖）**、要求 Terway ENI 模式。**ECS/NodePort**：端口=32656、经节点二次转发、后端生命周期与 Pod 解耦、健康检查可关（当前 **false**）、手工可控、任意 CNI。**⚠ 常见误解**：ALB 是七层，**HTTP 监听下两型客户端 IP 都靠 `X-Forwarded-For`**（`XForwardedForEnabled` 默认开、不可关），**不存在「ENI 才有真实源 IP」** —— 那是四层 CLB/NLB 语境。⇒ 选型别拿"源IP"当 ENI 优势。**最佳场景**：ENI = 生产主路径（域名+Ingress+HPA）；ECS/NodePort = 兜底/应急/Controller 不可用/混合后端/网络诊断；**混合分流** = Host 规则走 ENI、default 走 NodePort（ALB **规则优先于 default**，故能并存，即当前架构）。
+- **★ 想让 IP 直连走 ENI 型的正确做法**：**新增一个不带 `spec.rules[].host` 的 Ingress** ⇒ Controller 生成**无 Host 条件的 Path-only 规则**（优先级在 Host 规则后、default 前）⇒ IP 直访命中 ENI 组，且**不受 default action 被 reconcile 改回 Redirect 的影响**。⚠ 副作用：Path-only 规则会吃掉所有未被 Host 规则命中的流量。**不推荐**把 ENI 组直接设成 default（与 AlbConfig 声明冲突）。
+- **★★ AlbConfig 两个反直觉坑（2026-10-06 调研，官方依据）**：
+  1. **ListenerSpec 的 default action 字段官方名是 `defaultActions`**，本集群写的是 **`httpDefaultActions`**（ALB OpenAPI 风格名）—— 而 **`AlbConfig` CRD 是 `x-kubernetes-preserve-unknown-fields: true`（无 schema 校验）**，字段名写错**静默忽略、不报错** ⇒ 该声明**极可能从未生效**；反过来 **`defaultActions` 一旦被"修正"就会立刻生效** ⇒ 属**定时炸弹**，动它前必须先验证。
+  2. **ALB Ingress Controller v2.11.0+ 不自动创建监听器**（本集群 v3.1.1），监听器**必须**在 AlbConfig 显式声明；且官方规定**「删除监听前必须移除该监听下全部 Ingress，否则报错」** ⇒ **删 `spec.listeners` 段是危险动作**（监听器会被删/报错，通道与路由一起断），且 `idleTimeout`/`requestTimeout` **只能**在 ListenerSpec 里配，删了就没地方配超时。
+  ⇒ **修 AlbConfig 声明冲突的正确方案是「不碰 AlbConfig，加无 host Ingress」**（ALB **规则优先于 default**），而非删 `listeners` 或改 default 为 ForwardGroup（后者需引用 Controller 派生组，有悬空风险）。详见 `deploy/ALB后端类型选型_Eni-vs-NodePort型.md` §六之二。
+- **★ 改这两个 YAML 的入口与坑（2026-10-06）**：
+  - **AlbConfig 是 Cluster-scoped**（实测 `spec.scope=Cluster`）⇒ 命令**别带 `-n`**（带上不报错但误导）。用法：`kubectl get|edit|apply albconfig mnl-alb`。
+  - **Ingress `new-api-verify` 的 `last-applied-configuration` 与实际 spec 漂移**：注解里记的 backend 是 **`new-api-master`**（0 endpoint），实际 spec 是 **`new-api-stable`** ⇒ 说明后来是 `patch/edit` 改的、**没回写文件**。**谁拿旧 yaml `kubectl apply` 一次，backend 立刻被打回 `new-api-master` → 规则 `rule-80-1` 全 502**。改前必须先把现状导出成唯一权威副本（`-o yaml > deploy/manifests/…`）再编辑。
+  - **AlbConfig 有 finalizer** `ingress.k8s.alibaba/resources` ⇒ `kubectl delete albconfig mnl-alb` 会**级联删云上 ALB 实例**。可改，不可删。
+
+### ★★★ AlbConfig 字段有效性 —— SG 侧实测定论（2026-10-06 任务 25，零风险实验）
+
+**背景**：马尼拉 `mnl-alb` 的 80 监听器违和现象（声明 Redirect、实际 ForwardGroup；超时 15/60 未达 60/600）此前只能推测。**SG 侧全新建 `sg-alb` 得到干净的因果隔离**，结论如下（全部有云端回读证据）：
+
+| 字段 | 有效性 | 证据 |
+|---|---|---|
+| `port` / `protocol` | ✅ | 建成 `lsn-qmi1hpyr3j83tq3z8j` :80 HTTP |
+| **`idleTimeout` / `requestTimeout`** | ✅ **有效** | 写入 `60`/`600` → 回读 `IdleTimeout=60, RequestTimeout=600` |
+| **`defaultActions`**（官方名） | ❌ **不生效** | 写入 `[{type: FixedResponse, fixedResponseConfig:{httpCode:"404"}}]` → k8s spec 保留，但云端 `DefaultActions` **仍是** `ForwardGroup → 占位组` |
+| **`httpDefaultActions`**（马尼拉现用名） | ❌ 不生效 | 同上的另一形态；**不写的效果与写了一样** |
+| `accessLogConfig.logStore` | ⚠️ **webhook 强制 `alb_` 前缀** | 见下 |
+
+**① Controller 一律用自己的 ForwardGroup 覆盖 AlbConfig 的 default action**，指向它派生的占位服务器组 `{ns}-fake-svc-{port}`（tags `ingress_name={albconfig}-listener-{port}`、`service_name=fake-svc`、`service_ns=kube-system`）。**与字段名对错无关**。
+⇒ **推论修正**：马尼拉那颗「谁把 `httpDefaultActions` 改成 `defaultActions` 就会激活 Redirect、当场打断直连 IP 通道」的**定时炸弹不存在** —— 正确名同样不生效。马尼拉 80=ForwardGroup 是**稳定态**；残余风险仅剩"有人直接在 ALB 控制台手改"。
+⇒ 备站/主站想让 default 兜底某后端，**只能靠 Ingress 规则**（规则优先于 default），不能靠 AlbConfig。
+
+**② 超时参数必须显式写，Controller 默认 `15`/`60`**。SG 写 60/600 → 生效。**马尼拉 V1b 未达标的根因 = 马尼拉 AlbConfig 从未写过这两项**（其 listeners 仅 port/protocol/httpDefaultActions）⇒ **不是"ALB 不支持"**，补一条 apply 即可。**✅ 马尼拉已于 2026-10-06 20:00 补齐**（`deploy/manifests/albconfig-mnl.yaml` → 云端回读 `IdleTimeout=60` / `RequestTimeout=600`，**V1b 由 ❌ 转 ✅**）；同时删除了 `httpDefaultActions`（三态漂移：last-applied=`Redirect→www.likha.hk`／live=`FixedResponse 404`／云端=`ForwardGroup`）—— 该字段既无效又制造"声明≠现实"的审计噪音。详见 ⑨。
+
+**③ `logStore` 必须 `alb_` 前缀 —— admission webhook 硬校验**：
+```
+admission webhook "albconfig.alb.validate.k8s.io" denied:
+  logstore name should start with alb_
+```
+⇒ `alb-access`（连字符）**不合规**。`sls-newapi-sg` 原本只有连字符版，已补建 `alb_access`（ttl=30 / shardCount=2 / standard，与 `sls-newapi-mnl/alb_access` 同参数）。这也解释了马尼拉项目里 `alb-access` 与 `alb_access` 并存。
+
+**④ Controller 会自动创建监听器，命名 `ingress-auto-listener-{port}`**；AlbConfig 零 Ingress 时会建占位组并挂到 default，事件 `AlbconfigZeroIngress`（**预期，非故障**）。⇒ 先前记的"v2.11.0+ 不自动创建监听器"**证据不足，以实测为准**。
+
+**⑤ 备站 SG ALB 落地实况（任务 25）**：`alb-amdwm60xmznh7s1nae`（`alb-newapi-sg`，Internet/Standard/PostPay/删除保护开）· 公网 `43.98.186.238`(1a) + `47.237.68.142`(1b) · 监听器 `:80` idle60/req600 · Ingress `new-api-ph-standby`(host `sg-standby.internal.likha.hk`) → 服务器组 `sgp-rlxs1mqishcxcfkx7u`（**Eni 型**，2 Pod IP:3000，健康检查 GET /api/status 6s/3s，drain 120s）→ Service `new-api-ph-standby`。**实测带 Host 200 / 无 Host 503，两 IP×6 全 200**。库内副本：`deploy/manifests/{ingressclass-sg,albconfig-sg,ingress-sg-standby}.yaml`；报告 `deploy/Day2任务25_新加坡ALB_执行报告.md`。
+**⑥ ★ 无 Host 的 Ingress = 「IP 直访」的声明式解（2026-10-06 实做，✅ 已通）**
+
+想让公网 IP 直接访问（浏览器输 IP / curl 不带 Host）——**不能靠 AlbConfig 的 default action**（⑤ 已证），**只能靠 Ingress 规则**：
+
+```yaml
+# rules[0] 故意不写 host
+- http:
+    paths: [{path: /, pathType: Prefix, backend: {service: {name: <svc>, port: {number: 80}}}}]
+```
+
+SG 实测（`new-api-ph-standby` + 追加件 `new-api-ph-standby-ip`）：
+
+| 规则 | 优先级 | 条件 | 目标组 |
+|---|---|---|---|
+| `rule-80-1` | **1** | Host `sg-standby.internal.likha.hk` + Path `/*` | `sgp-rlxs1mqishcxcfkx7u` |
+| `rule-80-2` | **2** | **仅 Path `/*`（无 Host）** | `sgp-8m8eknlyw0z1busl6r` |
+
+⇒ **有 Host 的规则优先于无 Host 规则**（Priority 数字更小者优先），两者天然共存。实测无 Host 两 IP ×6 = **12/12 200**、带 Host 回归 **12/12 200**、`/v1/models` 401（鉴权正常）。
+⚠ **副作用**：无 Host 规则会**吃掉所有未被 Host 规则命中的流量**。当前该 ALB 只此一个域名 ⇒ 无冲突；**将来加第二个域名必须重新评估**。
+⚠ 多 Ingress 指向同一 Service 会产生**多个内容重复的服务器组**（本例 2 组、各挂同样 2 个 Pod）——冗余但非错误。
+库内副本：`deploy/manifests/ingress-sg-standby-noHost.yaml`、`deploy/manifests/hosts-sg-standby.sh`（hosts 加/删，支持 `HOSTS_FILE` 覆盖自测）。
+
+**⑦ ★★ 更正：马尼拉「IP 直连」的 drift 点搞错了**
+
+旧表述「手工把 80 default 改成 ForwardGroup」**不准确**。真相：马尼拉 `DefaultActions → sgp-fm7kdwz99wtzbffkfx`，该组名为 **`kube-system-fake-svc-80`**、tags `service_name=fake-svc` / `ingress_name=mnl-alb-listener-80` ⇒ **它本就是 Controller 派生的占位组**（与 SG 侧 `sgp-p1qg1z0rqgbovj3yqd` 同类）。
+⇒ default action **从未被手工改过**，一直是 Controller 的 ForwardGroup（**稳定态**）。
+⇒ **真正的 drift 点是「手工往这个占位组里塞了 4 个节点 Ecs:32656 后端」** —— 成员是手工加的，Controller 某次 reconcile 可能把它清空 ⇒ 那才是直连通道失效的真实路径。**判风险要盯成员，不是盯 default action。**
+
+**⑧ ★ `alb ListRules` 取「条件/动作」的字段名**
+
+返回项是扁平结构，条件与动作为**复数数组**：
+
+```
+RuleConditions[] : { Type: "Host"|"Path"|..., HostConfig: { Values: [...] }, PathConfig: { Values: [...] } }
+RuleActions[]    : { Order, Type: "ForwardGroup", ForwardGroupConfig: { ServerGroupTuples: [{ServerGroupId, Weight}] } }
+```
+
+❌ 用 `RuleCondition` / `RuleAction`（单数）取 ⇒ **恒空 `{}`，静默无报错**（本次踩过）。
+❌ 传 `RuleIds.N` 过滤 ⇒ 回 `TotalCount: 0`（该参数在本版本不生效）⇒ **只能全量 `ListRules` 后本地筛**。
+❌ `GetRuleAttribute` **不是有效 API**（CLI 回 `"is not a valid api"`）。
+✅ 正解：`alb ListRules --region … --version 2020-06-16 ListenerIds.1=<lsn-…> MaxResults=100`，本地按 `Priority` 排序读 `RuleConditions`/`RuleActions`。
+
+- **★ ActionTrail 在本账号不可用**：`actiontrail LookupEvents`（ap-southeast-6）**任意时间窗均返回 0 事件** ⇒ 未开通/未投递，**不能作为变更取证手段**。
+
+### ★★ 更正：「ALB Ingress Controller 已挂」是误判（2026-10-06 实证）
+
+**旧结论**（2026-10-05 只读复核）：集群内无 alb Pod/Deploy ⇒ 组件已挂、元数据不可信。**该结论错误。**
+
+**真相**：`alb-ingress-controller v3.1.1` 是 **ACK 托管形态** —— webhook 与 reconcile 跑在**托管平面**，**不以 Pod 形式出现在用户集群**，集群内无 Pod 属正常。
+
+**判活方法（节点的 TCP 探针会误判！）**：
+| 方法 | 结论 | 说明 |
+|---|---|---|
+| ❌ 节点侧 `TCP connect 7.8.229.211:9443` | TCP-FAIL | **误导**。`7.8.x` 是托管平面地址，只有 **apiserver** 可达，节点不可达 |
+| ❌ `kubectl get pods -A \| grep alb` | 空 | **误导**。托管形态本就没有 Pod |
+| ✅ **server-side dry-run** | **活** | `kubectl -n new-api annotate ingress new-api-verify x=1 --dry-run=server --overwrite` → `annotated (server dry run)`；AlbConfig 同理。**apiserver 真调到了 webhook** |
+| ✅ 托管资源 createtime | **活** | 组 `sgp-tqgwt413t19mum8oa9` CreateTime `2026-10-06T00:20:16Z`（北京 08:20，晚于最后一批 Pod 00:10:22Z） |
+| ✅ 监听器/规则描述 | **活** | `ListenerDescription="ingress-auto-listener-80"` + `rule-80-1` 均为 Controller 自动创建 |
+
+**⇒ 判 ACK 托管组件的死活，一律用 server-side dry-run，不要用「集群内有无 Pod」或「节点侧 TCP 探针」。**
+
+### ★★ Gateway 双路径（2026-10-06 实测，同一 ALB 80 端口）
+
+监听器 `lsn-ihrgkty2sjdy8s5p4h`（80，**`IdleTimeout=60` / `RequestTimeout=600` ✅** —— 2026-10-06 20:00 补齐）有**两条并存的出口**：
+
+| 入口条件 | 目标服务器组 | 类型 | 与 Pod IP 的关系 | HPA 扩缩容 |
+|---|---|---|---|---|
+| 规则 `rule-80-1`：Host = `ph-verify.internal.likha.hk` + Path `/*` | `sgp-tqgwt413t19mum8oa9`（`new-api-new-api-stable-80`） | **Eni（Pod IP）** | 直接绑 Pod | **✅ 由 Controller 自动同步** |
+| 其他 / 无 Host → `DefaultActions` | `sgp-fm7kdwz99wtzbffkfx`（`kube-system-fake-svc-80`） | **Ecs（节点 :32656）** | 解耦 | 无需同步（天然免疫） |
+
+- **`sgp-tqgwt413t19mum8oa9` 的同步机制**：Controller 依据 **Ingress `new-api-verify` → backend `new-api-stable:80`**，watch Service `new-api-stable` 的 EndpointSlice（`new-api-stable-sbwkk`）→ Pod 增减即 `AddServers/RemoveServers`。组当前 4 成员 = EndpointSlice 4 个 ready IP。
+- **摘除保护已开**：`ConnectionDrainConfig{Enabled=true, Timeout=120}`（缩容时先 drain 120s 再摘）。
+- **健康检查**：`HealthCheckEnabled=true`、HTTP GET `/api/status`、interval 6s、healthy 2 / unhealthy 3 ⇒ 新 Pod 未就绪不转发。
+- **✅ 已实测（2026-10-06 20:05 意外取证）**：「Pod 变 → 组变」由 Controller **自动完成**。当天 `new-api-stable` 发生滚动更新（ReplicaSet `7f96d6ff48` 4→3 逐渐被 `86d6ff48d7` 替换），两个 Eni 组（`sgp-tqgwt413t19mum8oa9` 与 `sgp-j4qrgy3f7bcv1r67na`）的成员**同步换成了新 Pod IP**（`10.0.43.214` / `10.0.43.217` / `10.0.22.219` / `10.0.43.206`），期间 **24/24 请求全 200，零中断** ⇒ 无需人工干预，也无需再跑 `scale --replicas=5` 验证法。
+- **⚠ AlbConfig 声明与现实不一致（✅ 已收口 · 2026-10-06 20:00）**：此前 `AlbConfig mnl-alb` 声明 `listeners[0].port=80 → httpDefaultActions=Redirect to www.likha.hk:443`，实际 default 是 ForwardGroup；后 live 又漂成 `FixedResponse 404`。**SG 侧零风险实验已证：Controller 一律忽略 AlbConfig 的 default action 声明**（见下方 ★★★ 节 ①）⇒ **「会被 reconcile 改回 Redirect」的风险不存在**；本次已**直接删除该字段**，声明与云端（ForwardGroup）一致。
+  ⇒ 另一处真实风险：default 指向的 `sgp-fm7kdwz99wtzbffkfx`（`kube-system-fake-svc-80`）是 Controller 派生的**占位组**，其 4 个 `Ecs:32656` 后端是**手工加**的 ⇒ **已按 ⑨ 清空为 0 成员**，隐患解除。**判风险盯成员，不盯 default action。**
+
+### ⑨ ★★ 任务 19 收口：马尼拉对齐新加坡（2026-10-06 20:00，✅ 三项全部实做）
+
+**触发**：用户「把菲律宾马尼拉的 alb 也类似配置」（对照同日完成的任务 25 新加坡 ALB）。
+
+| # | 动作 | 结果 |
+|---|---|---|
+| 1 | `kubectl apply` 新 `AlbConfig mnl-alb`（listeners = `port`/`protocol` + `idleTimeout: 60` + `requestTimeout: 600`，**删 `httpDefaultActions`**） | 云端回读 **60/600 ✅**；generation 2→3；**改前改后各测全 200，无断流** |
+| 2 | 新增 `Ingress/new-api-stable-ip`（**无 host**，`order: "50"`）→ `new-api-stable:80` | 生成 `rule-80-2` → 新 Eni 组 **`sgp-j4qrgy3f7bcv1r67na`**（`new-api-new-api-stable-80`，HC True）；**IP 直访 404 → 200** |
+| 3 | `RemoveServersFromServerGroup` 摘除 `sgp-fm7kdwz99wtzbffkfx` 的 4 个 `Ecs:32656` | 成员 **4 → 0**（异步 `JobId c9d0c1c3-…`，先 `Removing` 后清空）。**零流量影响**（该组已被规则遮蔽） |
+
+**规则终态（`order` 语义实测有效：1 < 50 < 100 ⇒ Prio 1/2/3）**：
+
+| Prio | 条件 | 动作 | 来源 Ingress |
+|---|---|---|---|
+| 1 | Host=`ph-verify.internal.likha.hk` **AND** Path `/*` | ForwardGroup → `sgp-tqgwt413t19mum8oa9` | `new-api-verify`（order 1） |
+| 2 | Path `/*`（**无 Host**） | ForwardGroup → **`sgp-j4qrgy3f7bcv1r67na`** | **`new-api-stable-ip`（order 50）← 本次** |
+| 3 | Path `/*`（**无 Host**） | FixedResponse **404** | `new-api-catchall-404`（order 100，**沉底**） |
+| — | default | ForwardGroup → `sgp-fm7kdwz99wtzbffkfx`（**现为空组**） | Controller 自管 |
+
+**实测**：无 Host 两 IP ×6 = **12/12 200**；带 Host 两 IP ×6 = **12/12 200**（合计 24/24）；`curl --resolve ph-verify.internal.likha.hk:80:<IP>` = 200 / 2579B；路径覆盖 `/` 1047B · `/api/status` 2579B · `/healthz` 1047B · `/v1/models` **401** —— **与新加坡逐项一致**。
+
+**★ 新知识**：
+
+1. **`aliyun alb ListRules` 的参数是 `--ListenerIds.N`（复数）**。用 `--ListenerId`（单数）回 `"--ListenerId" is not a valid parameter or flag`，且 CLI 同时给 `did_you_mean: ["--ListenerIds"]` ⇒ 与 `RuleConditions`/`RuleActions` 复数坑同源。**遇 CLI 说参数名非法，先信 CLI。**
+2. **`Ingress/new-api-catchall-404` 曾把裸 IP 也变成 404**（order 100、Path `/*` 无 Host）。实测 19:20 `http://8.212.161.49/api/status` = **404 / 9B "Not Found"** ⇒ 任务 19 报告 §七「IP 直连可用」当时已失效。**结论：同一 listener 上「无 Host 的 Path `/*`」只能有一条语义**（兜底 404 或转发业务），靠 `order` 决定优先级；本次业务放 order 50、404 沉到 order 100。
+3. **`RemoveServersFromServerGroup --DryRun true`** = ALB 写操作的低成本校验器：回 `DryRunOperation` 即参数与资源校验全过、**零变更**。建议所有 ALB 写操作先干跑。
+4. **⚠ 主站裸 IP 的代价（须知晓）**：`rule-80-2` 无 Host 条件 ⇒ **任意 Host**（含他人把自有域名解析到 `8.212.161.49`）都命中主站（实测陌生域 → **200**）。新加坡侧同构存在但备站无流量；**主站建议后续加 `SourceIp` 白名单**收紧（Ingress 注解 `alb.ingress.kubernetes.io/conditions.<svc>`）。
+
+**交付**：`deploy/manifests/{albconfig-mnl.yaml, ingress-mnl-stable-ip.yaml, hosts-mnl.sh}` · `deploy/task19b_bodies/{00-recon,01-albconfig-timeout,02-nohost-ingress}.sh` · 报告 `deploy/Day2任务19_ALB对齐新加坡配置_执行报告.md`。
+
+**回滚**：`kubectl -n new-api delete ingress new-api-stable-ip`（恢复 Prio 3 的 404 兜底）；drift 成员可用 `AddServersToServerGroup` 加回（4 节点清单见报告）。
+
+**⚠ 遗留**：`newapi-np`（NodePort `32656`）**未动** —— 清 drift 后已无 ALB 侧引用，按任务卡保留至证书到位再退役。
+
+### ★ ECS 安全组 API 参数形态（2026-10-06 血泪）
+
+- **`RevokeSecurityGroup` / `AuthorizeSecurityGroup` 在国际站 ap-southeast-6 用「扁平参数」**，**不是** `SecurityGroupRule.N.*` 数组：
+  ```
+  aliyun ecs RevokeSecurityGroup --region ap-southeast-6 \
+    --SecurityGroupId sg-xxx --IpProtocol TCP --PortRange 32656/32656 \
+    --SourceCidrIp 10.0.0.0/16 --NicType intranet --Policy Accept --Priority 1
+  aliyun ecs RevokeSecurityGroupEgress ... --DestCidrIp 10.0.0.0/16   # 出站用 Egress
+  ```
+- **误用数组参数的报错极具误导性**：传 `SecurityGroupRule.1.IpProtocol=TCP` → 回 **`InvalidIpProtocol.ValueNotSupported`**（"must be specified with case insensitive TCP..."），**看起来像值写错，实际是参数名不被识别**（服务端读到空值）。且 `aliyun_rpc.py --dry` 打印的请求参数**完全正确**，签名也通过（有 RequestId）⇒ **不能靠"参数打印正确 + 签名通过"判定参数名有效**。
+- **CLI 直接暴露线索**：`--SecurityGroupRule.1.Direction` → `"is not a valid parameter or flag"`（CLI metadata 里该 API 无此参数）。**遇到 CLI 说参数名非法，先信 CLI**。
+- **`RevokeSecurityGroupIngress` 在本地域不存在**（`is not a valid api`），只有 `RevokeSecurityGroup` / `RevokeSecurityGroupEgress`。
+- **零风险探针**：用真实 SG + **不存在的规则**（如 `PortRange=19999/19999 --SourceCidrIp=10.99.0.0/16`）→ 回 `InvalidSecurityGroupRule.RuleNotExist` 即证明参数层已过，不会误删任何东西。
 
 ## 执行通道 `ack_remote.sh`（跨宿主注意）
 
@@ -227,12 +432,12 @@
 | TCP RTT SG→MNL RDS | ≤45 ms | 建连 p50 **37** / p95 40 / max 41 ms；ICMP avg **35.54** ms | ✅ |
 | `pgbench` 单连接 TPS | ≥20 | c1 **30.46**（lat 32.8 ms）；c16 **455.34** | ✅ |
 | TLS 握手成功率 | 100% | 50/50 + 20/20 + 10/10（TLSv1.3 / AES256-GCM） | ✅ |
-| 建连平均（含 TLS） | ≤200 ms | p50 **276**（复测 280） | ❌ 超 38% |
-| `sslmode=verify-full` | 卡口径 | SG 实为 `require`；verify-full 因缺根 CA 失败 | ❌ |
+| 建连平均（含 TLS） | ≤200 ms → **≤300 ms** | p50 **276**（复测 280） | ⚠ **判据已修订（2026-10-05），修订后达标** |
+| `sslmode=verify-full` | 卡口径 | SG 已切 `verify-full&sslrootcert=/etc/ssl/rds/ca.crt`；正例 3/3、负例 3/3 | ✅ **2026-10-05 闭环** |
 | V1 读的是马尼拉主库 | — | `inet_server_addr()` **非 superuser 回 NULL** ⇒ 用 db/user/version/`pg_postmaster_start_time` 等价证据 | ⚠ |
 | V2 主站写→备站读 | — | ✅ 写入后 51 s 读到同条，表结构一致 | ✅ |
-| V3 连接预算 | — | `newapi_sg` idle 15 + active 1（探针残留） | ⚠ |
-| V4 拔线自愈 | — | 未做（需改白名单，云写） | ❌ |
+| V3 连接预算 | — | 复测 `newapi_sg` **=1（探针自身）**，`idle 15` 已被托管池回收 | ✅ **2026-10-05 闭环** |
+| V4 拔线自愈 | — | N=100 三段 **100% → 69.0% → 100%** | ✅ **2026-10-05 闭环** |
 
 **★ 建连成本拆解（定位根因，全部 Pod 内实测）**：`psql --version` 纯进程启动 **19 ms** · 经池 6432 建连 **280 ms** · **直连 5432 建连 279 ms** · 单进程 20 次串行查询（1 次建连）**300 ms** · `pgbench -C`（每事务新建连接）latency **250.95 ms / 3.98 TPS** vs 复用连接 **35.45 ms / 28.21 TPS**。⇒ **池不增成本**（甲乙两路无差异）；~250 ms ≈ 19 + RTT 35 ms × 约 7 次往返（SSLRequest + TLS1.3 1-RTT + SCRAM 2-RTT + 后端 fork + 首查询）⇒ **200 ms 判据在该 RTT 下不可达**，改判据（≤300 ms）或强制连接复用（35 ms/查询）。
 
@@ -241,3 +446,60 @@
 **★ 探针方法坑**：**`openssl s_client` 判不了 PgBouncer(6432) 的 TLS** —— 直打 6432 **10/10 失败**，但 `psql`（require）**50/50 成功**、`ssl=on`。PG/PgBouncer 的 TLS 需先 `SSLRequest` 协议协商，`openssl s_client` 直接起 TLS 对不上；而同手法打 **5432 却 OK**（RDS 代理层容忍）⇒ 极易误判「6432 链路坏了」。**判 PG 侧 TLS 一律用 `psql`；`openssl s_client` 只用来取证书链。**
 
 **执行位口径**：SG `new-api` 命名面**零工作负载** ⇒ `deploy/new-api-ph-standby` 不在位，本卡只能靠一次性探针 Pod。Pod 模板（`new-api` ns 有 `ResourceQuota new-api-quota`，**必须显式给 resources**）：`postgres:17` + `serviceAccountName: new-api-app` + `env.valueFrom.secretKeyRef`（口令不进命令行）。body 脚本 `deploy/task30_bodies/03..10-*.sh`。**`ack_remote.sh` 单窗口约 5 min（`loops×5s`）⇒ 测量脚本必须拆段**（原 `02-sg-net.sh` 50×TCP+20×TLS 整体超时即反例）。证据 `deploy/logs/task30_drill_20261005-211909/`。
+
+
+## RDS TLS 根 CA + 白名单拔线（任务 30 闭环，2026-10-05 21:45–22:07）
+
+**根 CA 从哪来（不用控制台）**：`aliyun rds DescribeDBInstanceSSL --RegionId ap-southeast-6 --DBInstanceId <id>` 返回 `ServerCAUrl` = `https://apsaradb-public.oss-ap-southeast-1.aliyuncs.com/ApsaraDB-CA-Chain.zip`（**注意是 sg 的 OSS，全球通用包**）。`curl --noproxy '*'` 直连可下（191 KB），解压得 `ApsaraDB-CA-Chain.pem`（**69 张证书**）。
+
+**★★ 坑：包内有 2 张同名 `CN=ApsaraDB Root CA`**
+- `cert_001`：SKI `3C:30:27:8B:…`，2016-05-05 → 2036-04-30（**旧根，用它会 `error 20 unable to get local issuer certificate`**）
+- `cert_027`：SKI `7F:D6:ED:5C:…`，2019-01-30 → **2039-01-25**，SHA256 `29:54:2B:04:…:04:B9`（**正确根**）
+- 判据：leaf 的中间 CA（`CN=ApsaraDB ap-southeast-6 region CA`）的 **AKI = `7F:D6:ED:5C:…`** ⇒ 选 `cert_027`。
+- **⚠ 假通过陷阱**：`openssl verify -CAfile 全包.pem -untrusted 全包.pem leaf.pem` 会返回 **OK**——因为 openssl 把中间 CA 直接当信任锚。**必须用「根作 -CAfile、中间作 -untrusted」严格验证**。
+- 拆包法：`awk '/BEGIN CERTIFICATE/{n++} {print > sprintf("cert_%03d.pem", n)}' 全包.pem` 再逐张 `openssl x509 -noout -subject -issuer` 建索引。
+
+**落地产物**：`deploy/certs/rds-apse6-ca.crt` = 根(cert_027) + 6 区中间(cert_058)，**4127 B**。
+**Secret 口径**：`kubectl -n new-api create secret generic rds-ca-apse6 --from-file=ca.crt=<file> --dry-run=client -o yaml | kubectl apply -f -`；Pod 挂到 **`/etc/ssl/rds`**。
+**DSN 口径**：`…?sslmode=verify-full&sslrootcert=/etc/ssl/rds/ca.crt`（`sslrootcert` 是**路径**，不支持内联；改 DSN 与挂 Secret **必须同批**）。
+**patch 姿势**：`printf '{"stringData":{"SQL_DSN":%s}}' "$NEWJ" > /tmp/p.json && kubectl patch secret new-api-secrets --type merge --patch-file /tmp/p.json`（口令走文件，不进 `ps`）。
+**负例可复现**：无 `sslrootcert` → `root certificate file "/root/.postgresql/root.crt" does not exist`；`sslrootcert=system` → `SSL error: certificate verify failed`（RDS 非公有 CA 签）。
+
+**★ 白名单拔线自愈方法（可复用于任何 RDS 白名单验证）**
+1. 探针：SG 节点内 `timeout 3 bash -c "exec 3<>/dev/tcp/<pub-host>/6432"` × N=100（**每连接独立 → 逼出 SNAT per-flow 哈希轮换**）。
+2. 改白名单：`aliyun rds ModifySecurityIps --RegionId ap-southeast-6 --DBInstanceId <id> --DBInstanceIPArrayName sg_standby_eip --SecurityIps "<3个/32>" --ModifyMode Cover`（**必须 `--ModifyMode Cover`，否则是追加**）。
+3. 观察 → 恢复（4 个 /32 全回）→ 复验。
+4. 实测：**100% → 69.0% → 100%**（失败率 31% ≈ 理论 25%）。
+5. **失败形态 = 3001 ms 超时（DROP，非 RST）** ⇒ 应用要有 `connect_timeout` + 重试；**ICMP 全程 0% 丢包 ⇒ ping 发现不了白名单问题**，必须 TCP 层拨测。
+6. **白名单恢复即时自愈**（恢复后第 1 次探测即 OK，无残留）。
+7. ⚠ 全程**不影响主站**（主站走 `mnl_vpc` 内网组），但**属云写，须授权**；改完必须回读 `DescribeDBInstanceIPArrayList` 比对四组。
+
+**可复用 body**：`deploy/task30_bodies/11-sg-verifyfull.sh`（CA 落地+正负例）· `12-sg-dsn-verifyfull.sh`（DSN 切换+复验）· `13-sg-conn-probe.sh`（拔线三段，`sed` 注入 `TAG=`）· `14-sg-v3-conncount.sh`（连接账目）。
+**V3 审计小技巧**：`pg_stat_activity` 对**非特权账号**也可见其他会话的 `usename`/`state`（敏感列隐藏）⇒ 查连接账目不需要 superuser。
+
+**证据**：`deploy/logs/task30_v4_verifyfull_20261005-220047/`（12 文件含 `summary.json`）；报告 `deploy/Day1任务30_备站公网读写_RTT实测_执行报告.md` §七。
+
+## golang-migrate 版本化迁移（任务 54 · 2026-10-05 实做）
+
+**工具到位**：节点（mnl `i-5ts9wk588cliiweawind`）可直连 GitHub ⇒ `curl -fL .../v4.19.1/migrate.linux-amd64.tar.gz`（17,394,526 B；二进制 sha256 `2205d19c3f17a762d58ff63b64572c23b2d6d10f9366be4d04938a09d630df12`）；节点无 `psql`/`jq` ⇒ SQL 客户端用 `python3 -m pip install pg8000`（1.26.0，Python 3.6.8 可装）。
+
+**★★★ 四条硬规则（踩过才懂）**
+
+1. **`-- +migrate NoTransaction` 在 golang-migrate 里不存在**。那是 goose 的 `-- +goose NO TRANSACTION`；golang-migrate 的 `source/parse.go` / `source/migration.go` / `database/driver.go` **均无此符号**。写了会报 `CREATE INDEX CONCURRENTLY cannot run inside a transaction block in line 0: -- +migrate NoTransaction`，并把库钉在 `version N (dirty)` ⇒ 之后所有 `up` 都被 `Dirty database version N. Fix and force version.` 拒绝。恢复：`migrate force <上一个成功版本>`（只改 `schema_migrations`，不执行 DDL；**禁止手改表**）。
+2. **`CREATE INDEX CONCURRENTLY` 必须独占一个迁移文件**。默认 `x-multi-statement=false` 时 postgres 驱动把**整个文件**作为**一条** statement 交给 `Exec`；多条语句挤进一次 `Exec` = 隐式事务块 ⇒ 文件里多一条语句就失败。`x-multi-statement=true` **不是**关事务开关（它把多语句显式拆开，事务语义更难推理）。官方 README 原话："put CREATE INDEX CONCURRENTLY in its own migration"。⇒ **加列（事务内）与建索引（事务外）必须是两个版本号**。
+3. **★ 停在 `idle in transaction` 的连接会挂死 CIC**（CIC 要等所有并发事务结束才能取快照）。pg8000 / psycopg 默认每条 `execute` 后事务保持打开 ⇒ **观测/调试连接会让被观测的迁移自己卡住**（本卡实测：云助手任务停在 `Running`，只能 `StopInvocation` 强杀，`pg_stat_activity` 留下 `state=idle in transaction`）。修复：观测连接一律 **`autocommit=True`** + `statement_timeout` + daemon 线程 + 硬超时兜底。**生产同理**：连接池泄漏 / 挂在事务里的 DBA session 会让线上 CONCURRENTLY 迁移无限等待。
+4. **迁移工作目录每轮清空**：migrate 对 `-path` 目录**全量扫描**（不看时间戳），残留旧 `000003_*.sql` 与新写同名版本号 ⇒ `duplicate migration file` 直接拒绝启动。
+
+**dirty 诊断三步**：`migrate version` 看 dirty → `select pid,usename,state,query from pg_stat_activity where datname=current_database() and state='idle in transaction'`（→ `pg_terminate_backend`）→ `migrate force <上一个成功版本>`。
+
+**锁观测方法（可复用）**：并发 writer（pg8000，`autocommit=True`，每条 `UPDATE` 计时）× N + 采样线程每 200ms 取 `count(*) from pg_stat_activity where wait_event_type='Lock'`；主线程 `subprocess` 跑 `migrate down K` + `migrate up`。判据：`lock_events=0` + writer p50 与无迁移时持平。**实测**：expand(加列 + CIC) / backfill(2000 行) / contract(删列) 全程 `lock_events=0`、`max_lock_wait=0`，写 p50 **6.33 ms** / p95 6.53 / max 7.34 ms。
+
+**Python 3.6 坑（节点）**：`subprocess.run(capture_output=True, text=True)` 是 **3.7+** ⇒ 用 `stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True`；另 `select <单个表达式> … order by 1,2` 报 `ORDER BY position 2 is not in select list`（PG 42P10）。
+
+**产物**：`migrations/`（`000001` 基线标记 · `000002` 加列 · `000003` CONCURRENTLY 独占 · `000004` 分批回填 500 行 + 10ms sleep + `FOR UPDATE SKIP LOCKED` · `000005` Contract 删列；+ `README.md`）· `deploy/task54_migrate_version.sh`（生成自包含 body → `ack_remote.sh` 下发）· `deploy/ci_check_migrate_versioned.sh`（5 项断言：up/down 配对 · 版本连续 · CONCURRENTLY 独占文件 · 不可逆标注 · AutoMigrate 关闭态）· `deploy/aliyun/ph/migrate-job.yaml`（`backoffLimit:0` + `newapi_migrate` DSN + ConfigMap 挂载；镜像 `migrate/migrate:v4.19.1`，节点可拉 docker.io）。
+
+**载体注意**：卡片写的 `$DSN_PERF` 不存在 ⇒ 用同实例独立库 **`newapi_stage`**（`newapi_migrate`=ALL，零成本、不承载业务）。
+**★ 去留裁定（2026-10-06 07:35，用户）：暂时保留、不 DROP** —— 转为**常驻演练载体**（每周 `up→down 1→up` 回归台 + 迁移 PR 预演；RDS 按实例计费、库不单独收费 ⇒ 零额外成本）。
+**三条硬约束（防误用）**：① 生产 `SQL_DSN`/`SQL_DSN_MIGRATE` **永不得指向 `newapi_stage`**（现均指向 `newapi`，保持）；② 任何 CI/定时任务连它**只用 `newapi_migrate`** 账号（`newapi` 对该库无授权，RDS 侧 `GrantAccountPrivilege` 会被 `InvalidDBInfo.Malformed` 拒绝）；③ 与任务 45「同实例独立库=软隔离不达标」**不冲突但必须在案** —— 它是工具链演练库，不是生产环境。雅加达独立 RDS 就绪后载体迁走再评估。
+
+**证据**：`deploy/logs/task54_migrate_20261005-151349/`（`10-run-full.out` 全量输出 + `summary.json` + 两次失败尝试 + 诊断 + `migrations.snapshot/`）；报告 `deploy/Day2任务54_迁移版本化_执行报告.md`。

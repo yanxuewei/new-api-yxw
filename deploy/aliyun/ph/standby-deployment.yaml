@@ -1,0 +1,201 @@
+# Day 2 · 任务 28｜新加坡 PH 备 Deployment + Service —— 新加坡（ap-southeast-1）
+#
+# 权威卡片：deploy/阿里云国际站菲律宾部署-v2.0.md 见指南 3606-3688 行
+# 执行器：  deploy/task28_standby.sh（--precheck / --dryrun / --apply / --verify / --status / --cleanup）
+# 通道：    deploy/ack_remote.sh sg（SG 集群 endpoint_public_access=false，本机无 kubeconfig，
+#           全部 kubectl 经云助手在 VPC 节点内执行）
+#
+# ─── 与卡片 YAML 的差异共 5 处，每处都有本轮实测依据（取证见 deploy/logs/task28_recon*_20261006-*/）───
+#
+#   ① 镜像域名用**公网端点** `…-registry.ap-southeast-6…`，不是马尼拉那套 `-vpc`。
+#      实测（节点侧，SG 集群）：
+#        pub /v2/ → http=401 connect=0.039s   （401 = 路径通、待鉴权，鉴权由 helper 补）
+#        vpc /v2/ → http=000                  （跨区解析不到马尼拉 VPC 端点）
+#      任务 16 §六③ 已用同镜像在 SG 冷拉成功（11 s），且 §六④ 把仓库改 PRIVATE 后
+#      匿名路径不复存在 ⇒ 必须走 SA `new-api-app` + helper 聚合 Secret（实测已挂，见差异⑤）。
+#
+#   ② **补 `envFrom.secretRef: new-api-secrets`**。卡片步骤 1 的 YAML 只写了 `configMapRef`，
+#      而步骤 2 与 V2/V3 都依赖容器内的 `$SQL_DSN`；照卡片写 ⇒ Pod 起来但一条凭据都没有，
+#      应用直接连不上库。实测 sg `new-api-secrets` 现有 3 键（SQL_DSN / LOG_SQL_DSN / SESSION_SECRET）。
+#
+#   ③ **补 `rds-ca-apse6` 挂载到 `/etc/ssl/rds`**。sg 的 SQL_DSN 实测是
+#      `…?sslmode=verify-full&sslrootcert=/etc/ssl/rds/ca.crt`（任务 30 于 10-05 22:00 升级）。
+#      卡片 YAML 没有这个 volume ⇒ 不挂载则 `sslrootcert` 文件不存在，**建连直接失败**，
+#      表现为"Pod 起来但 readiness 不过"，而卡片「不通过时修复」第一条会把人引向白名单/TLS，
+#      排查半天。CA 由 Secret 提供，实测 sg ns 已有 `rds-ca-apse6`（1 键 ca.crt）。
+#
+#   ④ **补 `GOMAXPROCS=4`**，与马尼拉 stable 同因（任务 23 坑 2）：limits.cpu=4 而节点是
+#      8C 机型（sg 两台实测 `ecs.g9ae.2xlarge` / `ecs.g8ine.2xlarge`），容器内按宿主机核数
+#      起 8 个 worker 会被 CFS throttle。
+#
+#   ⑤ **补 `startupProbe`**（卡片只有 readiness/liveness）。备站冷启动含跨区公网拉镜像
+#      （实测 11 s 级）+ 首次连马尼拉主库（RTT 实测见任务 30），卡片的
+#      `livenessProbe.initialDelaySeconds: 40` 在拉取慢时仍可能把冷 Pod 杀掉重启，
+#      形成"启动即被 liveness 打断"的经典事故。给 150 s 启动窗口；readiness/liveness
+#      参数保持卡片原值不动。
+#
+# ─── 红线核对（逐条）───
+#   * `NODE_TYPE=slave`：卡片红线"备地域固定 slave"。cm/new-api-config 实测已是 slave，
+#     容器 env 再显式写一次（`common/init.go:89` 是 `!= "slave"` 字符串判断，留空即 master
+#     ⇒ 备站会去改 schema，任务 28「不通过时修复」第 4 条列为最高优先级事故）。
+#   * DDL 面：slave 启动在 `model/main.go` 主库/日志库两处 `if !common.IsMasterNode { return nil }`
+#     提前返回 ⇒ 备站不发 DDL，V2 的 `permission denied` 是第二道防线（§5.5 权限已强制）。
+#   * 连接预算：容器 env 显式 `SQL_MAX_OPEN_CONNS=10` / `SQL_MAX_IDLE_CONNS=5`（卡片裁定② 2026-09-29），
+#     **覆盖** cm 里的 100/50 —— K8s 语义：`env` 优先于 `envFrom`。接管态 24（现按 F12/F14 口径 23）
+#     副本 × 10 = 230~240 客户端槽位，计入任务 41 I-1（上限 2000）。
+#   * 副本分布：`topology.kubernetes.io/zone` + `DoNotSchedule`（卡片坑 2），sg 实测
+#     2 节点分属 **1a / 1b**（`ap-southeast-1.10.1.19.103`=1a g9ae，`…10.1.38.113`=1b g8ine）
+#     ⇒ 2 副本各 1 台可放置；节点不足时宁可 Pending 也不单 AZ 全灭。
+#   * 不进主站 ALB 后端（卡片坑 5）：本卡只建 ClusterIP Service，挂 GTM 备地址池属任务 25。
+#   * 无 Redis：sg 侧未建 Tair，`new-api-secrets` 实测无 `REDIS_CONN_STRING`，而 cm
+#     `MEMORY_CACHE_ENABLED=false`。代码事实：`common/redis.go:25` 空串即
+#     `RedisEnabled=false` + 一条日志、`return nil`，**不报错不退出**；限流退化为单 Pod 内存态
+#     （`middleware/rate-limit.go:148`）。⇒ 零流量备站可接受，**属已知降级，不是本卡遗漏**；
+#     要恢复跨副本一致性需 SG Tair（成本项，另卡裁定）。
+#   * 配额：实测 sg `new-api-quota` hard = requests.cpu 48 / limits.cpu 64 /
+#     requests.memory 96Gi / limits.memory 128Gi，当前 **used 全 0**（ns 无业务负载）
+#     ⇒ 2 副本 requests 4C/8Gi、limits 8C/16Gi，宽裕。
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: new-api-ph-standby
+  namespace: new-api
+  labels:
+    app: new-api
+    project: new-api
+    site: ph
+    track: standby
+    env: prod
+  annotations:
+    config-version: "1"
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: new-api
+      site: ph
+      track: standby
+  template:
+    metadata:
+      labels:
+        app: new-api
+        project: new-api
+        site: ph
+        track: standby
+        env: prod
+    spec:
+      serviceAccountName: new-api-app
+      # 卡片值 45（马尼拉 stable 用 60）：preStop 15s + SSE drain 必须 < grace period（卡片坑 4）
+      terminationGracePeriodSeconds: 45
+      topologySpreadConstraints:
+        # 卡片坑 2：必须 DoNotSchedule，默认 ScheduleAnyway 会让 2 副本同 AZ ⇒ 备站全灭
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app: new-api
+      containers:
+        - name: new-api
+          # 差异①：SG 跨区走公网域名；与主站**同仓同 tag**（任务 28 坑 1，禁 latest）
+          image: acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com/newapi-prod/newapi-master:20260928-26ac63233
+          imagePullPolicy: IfNotPresent
+          # 差异⑥（2026-10-06）：app-file 纠正版，文件日志显式落 /data/logs（CLI `-log-dir`，无 LOG_DIR env）
+          args:
+            - "-log-dir=/data/logs"
+          ports:
+            - name: http
+              containerPort: 3000
+          env:
+            - name: NODE_TYPE
+              value: "slave"
+            - name: GOMAXPROCS
+              value: "4"
+            # 卡片裁定②（2026-09-29）：经托管池公网串 6432，显式小值覆盖 cm 的 100/50
+            - name: SQL_MAX_OPEN_CONNS
+              value: "10"
+            - name: SQL_MAX_IDLE_CONNS
+              value: "5"
+          envFrom:
+            # 差异②：卡片漏 secretRef，凭据全在这里
+            - configMapRef:
+                name: new-api-config
+            - secretRef:
+                name: new-api-secrets
+          # 差异③：sslrootcert=/etc/ssl/rds/ca.crt 的文件来源
+          volumeMounts:
+            - name: rds-ca
+              mountPath: /etc/ssl/rds
+              readOnly: true
+            # 差异⑥：app-file 文件日志卷
+            - name: app-logs
+              mountPath: /data/logs
+          startupProbe:
+            # 差异⑤：跨区拉镜像 + 首连主库的启动窗口（150 s）
+            httpGet: {path: /api/status, port: http}
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            httpGet: {path: /api/status, port: http}
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            # 卡片坑 3：探针绑 DB ⇒ 主库抖动可能全 Pod 被 kill，保底 5×5s；根治靠 G8 的 /healthz
+            httpGet: {path: /api/status, port: http}
+            initialDelaySeconds: 40
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 5
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sh", "-c", "sleep 15"]
+          resources:
+            requests:
+              cpu: "2"
+              memory: 4Gi
+            limits:
+              cpu: "4"
+              memory: 8Gi
+      volumes:
+        # 差异⑥：app-file 文件日志卷（1Gi 上限）
+        - name: app-logs
+          emptyDir:
+            sizeLimit: 1Gi
+        - name: rds-ca
+          secret:
+            secretName: rds-ca-apse6
+            defaultMode: 0644
+            items:
+              - key: ca.crt
+                path: ca.crt
+---
+# Service：ClusterIP，供任务 25 的 SG Ingress 后端引用（卡片步骤 3）
+apiVersion: v1
+kind: Service
+metadata:
+  name: new-api-ph-standby
+  namespace: new-api
+  labels:
+    app: new-api
+    site: ph
+    track: standby
+spec:
+  type: ClusterIP
+  selector:
+    app: new-api
+    site: ph
+    track: standby
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

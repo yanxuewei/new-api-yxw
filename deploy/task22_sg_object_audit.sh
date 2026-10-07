@@ -25,6 +25,12 @@
 #   业务 5 组（sg-mnl-alb/app/db、sg-sg-alb/app）零命中；
 #   `sg-mnl-alb` 的 80/443 因端口白名单被正确排除。
 #
+# 基线更新（2026-10-06 实测）：任务 19 直连调试新增 ALB 后，命中增至 7 条 =
+#   2 条集群级 ICMP（保留）+ **5 条 `ALB_SYSTEM_SECURITY_GROUP-alb-*` 的
+#   `ALL -1/-1 ← 0.0.0.0/0`（`alb_system_policy`）**。后者是 **ALB 服务自管**的
+#   系统安全组：手工改/删会被 ALB 重建，且是 ALB 后端健康检查与转发通道所需 ⇒
+#   归入「云产品自管」例外（本脚本已固化判定，不再报"待裁定"）。
+#
 # 退出码：0 = 命中项全部为集群级例外（与基线一致）；1 = 出现需人工裁定的命中项
 # ==============================================================================
 set -uo pipefail
@@ -63,9 +69,19 @@ scan_region() {
     while IFS=$'\t' read -r sgid sgname proto port nic desc; do
       [ -z "$sgid" ] && continue
       clu=$(echo "$CLUSTER_MAP" | awk -F'\t' -v s="$sgid" '$1==s{print $2; exit}')
+      # 云产品自管安全组：改/删会被云产品重建，命中即挂例外（2026-10-06 新增）
+      managed=""
+      case "$sgname" in
+        ALB_SYSTEM_SECURITY_GROUP-*)                 managed="云产品自管: ALB 系统安全组(alb_system_policy)";;
+        alicloud-cms-auto-created-security-group-*)  managed="云产品自管: CMS";;
+        created_by_rds)                              managed="云产品自管: RDS";;
+      esac
       if [ -n "$clu" ]; then
         printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t保留(集群级 security_group_id, cluster=%s)\n' \
           "$R" "$sgid" "$sgname" "$proto" "$port" "$nic" "$desc" "$clu" >> "$HIT_FILE"
+      elif [ -n "$managed" ]; then
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t保留(%s)\n' \
+          "$R" "$sgid" "$sgname" "$proto" "$port" "$nic" "$desc" "$managed" >> "$HIT_FILE"
       else
         printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t待裁定(非集群级 → 删除或收紧源 CIDR)\n' \
           "$R" "$sgid" "$sgname" "$proto" "$port" "$nic" "$desc" >> "$HIT_FILE"
@@ -83,12 +99,13 @@ scan_region() {
 for R in "${REGIONS[@]}"; do scan_region "$R"; done
 
 RESERVED=$(grep -c '保留(集群级' "$HIT_FILE" 2>/dev/null || true)
+MANAGED=$(grep -c '保留(云产品自管' "$HIT_FILE" 2>/dev/null || true)
 REVIEW=$(grep -c '待裁定' "$HIT_FILE" 2>/dev/null || true)
-TOTAL=$((RESERVED + REVIEW))
+TOTAL=$((RESERVED + MANAGED + REVIEW))
 
 if [ "$JSON" = "1" ]; then
-  jq -Rn --argjson reserved "$RESERVED" --argjson review "$REVIEW" --rawfile hits "$HIT_FILE" \
-    '{reserved_cluster_level:$reserved, need_review:$review,
+  jq -Rn --argjson reserved "$RESERVED" --argjson managed "$MANAGED" --argjson review "$REVIEW" --rawfile hits "$HIT_FILE" \
+    '{reserved_cluster_level:$reserved, reserved_cloud_managed:$managed, need_review:$review,
       hits: ($hits | rtrimstr("\n") | if length==0 then [] else
              (split("\n") | map(split("\t") | {region:.[0],sg_id:.[1],sg_name:.[2],
                protocol:.[3],port:.[4],nic_type:.[5],description:.[6],verdict:.[7]})) end)}'
@@ -100,7 +117,7 @@ else
     | column -t -s $'\t' 2>/dev/null || cat "$HIT_FILE"
   fi
   echo
-  echo "命中总数：$TOTAL　集群级例外：$RESERVED　需人工裁定：$REVIEW"
+  echo "命中总数：${TOTAL}　集群级例外：${RESERVED}　云产品自管例外：$((TOTAL - RESERVED - REVIEW))　需人工裁定：${REVIEW}"
   if [ "$REVIEW" -gt 0 ]; then
     echo "⚠️ 需裁定清单（按任务 22 步骤 3 处理，处理完重跑应回到 0）："
     awk -F'\t' '$8 ~ /待裁定/{print "  "$1"  "$2"  "$3}' "$HIT_FILE" | sort -u

@@ -96,8 +96,9 @@ do_verify() {
   hr; say "STEP verify｜任务 11 Step 1 · 机型可用性 + 配额复核"
   local tmp; tmp="$(mktemp -d)"
 
+  # 2026-10-06 裁定：节点池为按量 ⇒ 库存查询用 PostPaid（包年包月/按量可售池不共享）
   aliyun ecs DescribeAvailableResource --RegionId "$REGION" --DestinationResource InstanceType \
-    --InstanceChargeType PrePaid --IoOptimized optimized --NetworkCategory vpc --ResourceType instance \
+    --InstanceChargeType PostPaid --IoOptimized optimized --NetworkCategory vpc --ResourceType instance \
     > "$tmp/avail.json" 2>"$tmp/avail.err" || die "DescribeAvailableResource failed: $(cat "$tmp/avail.err")"
 
   jq -r '.AvailableZones.AvailableZone[]
@@ -114,7 +115,7 @@ do_verify() {
   [ "$n" -ge 2 ] || die "g9i.2xlarge 未在双可用区可售（命中 $n 个 AZ）→ 换 g8ine.2xlarge 并重算 request/limit"
   say "OK  g9i.2xlarge 双 AZ 可售（命中 $n 个 AZ）"
 
-  say "vCPU 配额（包年包月 q_ecs_enterprise_prepay_c 须 ≥64；postpay_c 仅对照，两者分别计量）："
+  say "vCPU 配额（按量 q_ecs_enterprise_postpay_c 须 ≥64 —— 2026-10-06 裁定后的核量口径，⚠ max 顶满即零余量；prepay_c 仅对照，两者分别计量）："
   aliyun quotas ListProductQuotas --ProductCode ecs-spec --QuotaCategory CommonQuota \
     --Dimensions.1.Key regionId --Dimensions.1.Value "$REGION" \
     | jq -r '.Quotas[]|select(.QuotaActionCode|test("enterprise_(pre|post)pay_c"))|[.QuotaActionCode,(.TotalQuota|tostring)]|@tsv'
@@ -254,8 +255,8 @@ do_nodepool() {
         system_disk_category: "cloud_essd", system_disk_size: $syssz, system_disk_performance_level: "PL1",
         data_disks: [{category:"cloud_essd", size:$ddsz, performance_level:"PL1", disk_name:"data-1"}],
         desired_size: $des, min_size: $mn, max_size: $mx,
-        instance_charge_type: "PrePaid", period_unit: "Month", period: 12,
-        auto_renew: true, auto_renew_period: 1,
+        # 2026-10-06 裁定：节点池维持按量（原 PrePaid + period_unit/period/auto_renew 作废）
+        instance_charge_type: "PostPaid",
         internet_max_bandwidth_out: 0,
         multi_az_policy: "BALANCE",
         key_pair: $kp, login_password: "",

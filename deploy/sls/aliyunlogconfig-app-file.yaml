@@ -1,0 +1,34 @@
+# 任务 26 步骤 2（纠正版，2026-10-06）：new-api 容器**文件日志**采集
+#
+# 与卡内原始写法的差异（卡内三处不成立，取证见 Day3任务26_SLS与可观测_执行报告.md §一）：
+#   ① 路径：卡内 `/app/logs` 不存在 ⇒ 实际 `/data/logs`（镜像 WORKDIR=/data）
+#   ② 开关：卡内 `LOG_DIR` env 不存在 ⇒ 代码只认 CLI `-log-dir`（common/init.go:22），
+#      已在 stable/standby 两个 Deployment 加 `args: ["-log-dir=/data/logs"]` + emptyDir 挂载
+#   ③ 落点：卡内 `project: sls-newapi-mnl` 不被 CRD 支持（**CRD 无 project 字段**，项目由 logtail
+#      附加组件绑定）⇒ 实际写入 `k8s-log-<clusterId>`，故 `app-file` Logstore 已在
+#      `k8s-log-cd57…` / `k8s-log-ca75…` 内建好（脚本 `deploy/sls/provision_app_file_sink.sh`）
+#   ④ 格式：日志为纯文本（`[LEVEL] … | id | msg` 与 `[GIN] …`），**非 JSON** ⇒ 用 `common_reg_log`
+#      （每行一条），查询走全文索引；卡内 `logType: json_log` 口径作废
+#
+# 注意：文件内容 = stdout 子集（logger.go MultiWriter）⇒ 本配置为**冗余留存**，
+#       价值仅在"文件侧可按文件/轮转边界查询"，stdout 主路（aliyunlogconfig-app-stdout.yaml）不可省。
+apiVersion: log.alibabacloud.com/v1alpha1
+kind: AliyunLogConfig
+metadata:
+  name: new-api-app-file
+  namespace: new-api
+spec:
+  logstore: app-file
+  logtailConfig:
+    configName: new-api-app-file
+    inputType: file
+    inputDetail:
+      logType: common_reg_log
+      logPath: /data/logs
+      filePattern: "*.log"
+      # ⚠ 容器路径映射的**正确字段是 `dockerFile`**（ACK 沿用旧名）：实测置 true 后
+      #   logtail 生成的 pipeline 才出现 `EnableContainerDiscovery: true`；
+      #   写成 `containerFile: true` 会被翻译丢弃 ⇒ logPath 当**宿主机**路径解析 ⇒ 0 采集。
+      dockerFile: true
+      # 只扫 /data/logs 一层（不递归子目录）
+      maxDepth: 1

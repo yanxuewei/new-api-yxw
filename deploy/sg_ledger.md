@@ -17,7 +17,7 @@
 
 其余在册 SG：`sg-5tshna0oeautlmbvgefd`（`created_by_rds`，RDS 托管，勿动）。
 
-## 2. 已落地规则（共 17 条，全部带用途 Description）
+## 2. 已落地规则（**2026-09-29 基线，17 条**，全部带用途 Description；2026-10-06 收口后现为 **24 条**，增删明细见 §7）
 
 ### `sg-mnl-alb`（2 条，全入向）
 
@@ -94,3 +94,53 @@
 2. **错误检测只认 JSON `"Code"`**：aliyun CLI 失败输出是 `ERROR: SDK.ServerError` + 文本 `ErrorCode: xxx`，非 JSON → 把失败当成功。
 3. **`2>/dev/null` 吞异常**：查询报错被当成"安全组不存在" → 重复建了一个 `sg-mnl-app`（`sg-5tsaatp5w68vyeysqnol`，已撤销引用并删除）。
 4. **`IFS=$'\t' read` 拆 TSV 不可用**：tab 属 IFS 空白字符，连续 tab（空字段）会被折叠 → 列错位；改为让 jq 直接 `join("|")` 拼出整条 key。
+
+---
+
+## 7. 2026-10-06 收口（任务 22 出口）——现网 = 24 条规则
+
+> 完整报告：`deploy/Day3任务22_安全组_执行报告.md`；证据：`deploy/logs/task22_20261006-134417/`
+
+### 7.1 本次新增（3 条，补卡内"5432 与 6432"缺口）
+
+| SG | 方向 | 端口 | 目标 | 用途 |
+| --- | --- | --- | --- | --- |
+| `sg-mnl-app` | out | 6432 | 10.0.64.0/20 | `to-rds-pg-pool` |
+| `sg-mnl-app` | out | 6432 | 10.0.48.0/20 | `to-rds-pg-pool-az-a` |
+| `sg-mnl-db` | in | 6432 | ← `sg-mnl-app`（组引用） | `from-app-pool-6432` |
+
+### 7.2 复核登记（09-29 之后由任务 19 调试加入的规则，本次一并入账）
+
+- `sg-mnl-app`：in `32656 ← sg-mnl-alb`（`alb-to-nodeport-32656-newapi`）；in `10250 ← 10.0.0.0/16`；out `1/65535 → 10.0.0.0/16`（`intra-vpc-tcp`）
+- `sg-sg-app`：in `10250 ← 10.1.0.0/16`
+- 集群级 SG（mnl `sg-5tsaatp5w68vyqszezja`）：`TCP 3000 ← sg-mnl-alb`、`TCP 1/65535 ← 10.0.0.0/16`、`TCP 6443 ← 10.0.0.0/16`、`ICMP ← 0.0.0.0/0`（后两条为保留项）
+
+### 7.3 现网规则计数（业务 5 组 = 24 条）
+
+| SG | 规则数 | 备注 |
+| --- | --- | --- |
+| `sg-mnl-alb` | 2 | in 80/443 ← 0.0.0.0/0（**ALB 实际未绑定本组**，`SecurityGroupIds=null`；预留） |
+| `sg-mnl-app` | 11 | in 3（3000←alb / 32656←alb / 10250←VPC）+ out 8（5432×2 / 6432×2 / 6379×2 / 443 / 1-65535→VPC） |
+| `sg-mnl-db` | 6 | in 5432←app、6432←app、5432←4×SG EIP（**未绑定 RDS 实例**，白名单为实际生效层） |
+| `sg-sg-alb` | 2 | in 80/443 ← 0.0.0.0/0 |
+| `sg-sg-app` | 3 | in 3000←alb、10250←VPC + out 443（`normal` 型出向默认放行） |
+
+### 7.4 例外清单（反例自查保留项，2026-10-06 全账号扫描 = 7 命中，需裁定 0）
+
+1. 集群级 ICMP：mnl `sg-5tsaatp5w68vyqszezja`、sg `sg-t4nevyfflaeo3tdvi510`（坑 7；**禁止删除**）
+2. **云产品自管**：`ALB_SYSTEM_SECURITY_GROUP-alb-1riqckb1h8ezm0y7s9` ×5 条 `ALL -1/-1 ← 0.0.0.0/0`（`alb_system_policy`，ALB 服务维护）——审计脚本已固化该判定（`task22_sg_object_audit.sh`，云产品自管不再报"待裁定"；同时修掉 `$TOTAL` 全角空格导致的 `set -u` 崩溃）
+
+### 7.5 回收与验证
+
+- `ops-access.sh --gc`：撤销 `sg-mnl-alb-edge` 2 条**过期临时 SSH**（`temp-ssh-exp=1790686620`，fanyan，09-29 到期）→ 现 0 条 ✅
+- V1 ✅ 4 节点无公网 IP ｜ V3 ✅ 跳板机→RDS 5432/6432/6379 全 BLOCKED ｜ V4 ✅ 跨节点 22/网关 22/5432 blocked，10250 open（规则内）｜ V5 ✅ 业务组零命中
+- V2 ✅（HTTP:80，随任务 19 ALB 切流销项；443 待 G5）
+- 附注（非缺口）：同节点内 pod→节点 primary IP:22 可连（同实例 ENI 间不受 SG 约束）；跨实例一律不可达
+
+### 7.6 仍未决（不阻塞出口）
+
+1. 办公出口 CIDR → `sg-mnl-alb-edge` 长期 22/443；`sg-mnl-ack-api`（6443）复核为**暂不需要**（私网端点 + 集群级 6443←VPC 已就位）
+2. GTM 探测源 IP 段 → 任务 21 后同步
+3. DCDN 回源段 → 不适用（WAF 云原生接入，坑 1）
+4. `sg-sg-app` out 5432/6432 → 判定无需（normal 出向默认放行）
+5. RDS 绑定安全组维持现状（`EcsSecurityGroupRelation=[]`，白名单两层不变）

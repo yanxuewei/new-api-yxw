@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 NS=new-api
 echo "### DSN 口令指纹（只输出 sha256 前 12 位与长度，绝不输出值）"
-for k in SQL_DSN SQL_DSN_MIGRATE REDIS_CONN_STRING LOG_SQL_DSN SESSION_SECRET; do
+for k in SQL_DSN SQL_DSN_MIGRATE REDIS_CONN_STRING LOG_SQL_DSN SESSION_SECRET SESSION_SECRET_OLD; do
   raw=$(kubectl -n $NS get secret new-api-secrets -o jsonpath="{.data.$k}" 2>/dev/null)
   if [ -z "$raw" ]; then echo "  $k = (键不存在)"; continue; fi
   printf %s "$raw" | base64 -d | python3 -c "

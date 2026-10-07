@@ -99,3 +99,95 @@
 
 > 探针 Pod 标准写法（`new-api` ns 有 `ResourceQuota new-api-quota`，缺 resources 直接 `Forbidden: failed quota`）：见 05 号脚本 YAML 段。
 > `ack_remote.sh` 单次窗口约 5 分钟（`loops×5s`），**测量脚本必须拆段**——本次 `02-sg-net.sh`（50×TCP + 20×TLS）整体超时失败，即为反例。
+
+---
+
+## 七、缺口闭环（2026-10-05 21:45–22:01，四项全部解除）
+
+证据目录：`deploy/logs/task30_v4_verifyfull_20261005-220047/`（8 文件 + `summary.json`）
+
+### 7.1 缺口② `verify-full` —— ✅ 已闭环
+
+**根因确认**：`DescribeDBInstanceSSL` 的 `ServerCAUrl` 字段直接给出官方 CA 链下载地址（`https://apsaradb-public.oss-ap-southeast-1.aliyuncs.com/ApsaraDB-CA-Chain.zip`）⇒ 不需要走控制台手工下载。
+
+| 步骤 | 实测 |
+| --- | --- |
+| CA 链下载 | `ApsaraDB-CA-Chain.zip` 191,207 B → 内含 `ApsaraDB-CA-Chain.pem`（**69 张证书**：1 自签根 + 各 region 中间 CA） |
+| **★ 坑：同名根有两张** | 包里存在 **2 张 `CN=ApsaraDB Root CA`**：`cert_001`（SKI `3C:30:27:8B:…`，2016-05-05→2036-04-30）与 `cert_027`（SKI `7F:D6:ED:5C:…`，2019-01-30→**2039-01-25**）。leaf 的中间 CA `CN=ApsaraDB ap-southeast-6 region CA` 的 **AKI = `7F:D6:ED:5C:…` ⇒ 必须选 `cert_027`**。用 `cert_001` 时 `openssl verify` 报 `error 20 unable to get local issuer certificate`；而**若把整个 pem 同时当 `-CAfile` 和 `-untrusted`，openssl 会把中间 CA 直接当信任锚 → 得到「OK」的假通过**（本报告第一版即踩此坑）。 |
+| 链验证（严格口径） | `openssl verify -CAfile cert_027.pem -untrusted cert_058.pem leaf.pem` → **`leaf.pem: OK`** |
+| 落地产物 | `deploy/certs/rds-apse6-ca.crt`（4,127 B = 根 + ap-southeast-6 中间），根 SHA256 = `29:54:2B:04:…:04:B9` |
+| 集群 Secret | SG `new-api` ns `rds-ca-apse6`（key `ca.crt`，回读 2 张证书）；挂载点 `/etc/ssl/rds` |
+| SG DSN 变更 | `…?sslmode=require` → **`…?sslmode=verify-full&sslrootcert=/etc/ssl/rds/ca.crt`**（`kubectl patch --type merge --patch-file`，口令不进 `ps`） |
+| 端到端复验（直接用 Secret 新值） | `rc=0`，`newapi_sg\|newapi\|true/TLSv1.3/TLS_AES_256_GCM_SHA384`；`public` schema 37 张表可读 |
+
+**正/负例矩阵（探针 Pod 内 `psql`）**：
+
+| 例 | DSN | 期望 | 实测 |
+| --- | --- | --- | --- |
+| A | `verify-full&sslrootcert=/etc/ssl/rds/ca.crt` @6432 | 成功 | **rc=0** TLSv1.3 ✅ |
+| B | 同上 @5432 直连 | 成功 | **rc=0** TLSv1.3 ✅ |
+| C | `sslmode=require` @6432（对照） | 成功 | rc=0 ✅ |
+| D | `verify-full` **无** `sslrootcert` | 失败 | `root certificate file "/root/.postgresql/root.crt" does not exist` ✅ |
+| E | `verify-full&sslrootcert=system` | 失败 | `SSL error: certificate verify failed`（⇒ RDS 非公有 CA 签，与 §三② 一致） ✅ |
+| F | `verify-full&sslrootcert=<不存在的路径>` | 失败 | `root certificate file "…leaf-nothere.crt" does not exist` ✅ |
+
+> ⚠ **副作用（必须写进备站部署清单）**：`sslrootcert` 是**路径**，备站 Deployment 部署时**必须**把 `rds-ca-apse6` 挂到 `/etc/ssl/rds`，否则连接直接失败。
+> **回滚**：`sed -i 's/sslmode=verify-full&sslrootcert=[^&]*/sslmode=require/'` 后重新 `patch secret`。
+
+### 7.2 缺口③ 建连判据 —— ✅ 已重定为 ≤300 ms
+
+指南任务 30 卡判据表与 §12 已同步修订（详见指南「判据修订」引言块）：跨区 RTT 35 ms × 约 7 次往返 ≈ 250 ms 属物理下限，`≤200 ms` 仅同区可达。**对冲动作** = 连接复用 + 池预热，二者至少落一条（任务 36/49 接管演练时验证）。
+
+### 7.3 缺口① V4 拔线自愈 —— ✅ 已闭环
+
+**方法**：SG 节点（VPC 内经 NAT，SNAT 出口 = 4 个 `sg_standby_eip` per-flow 哈希轮换）对 RDS 公网串 `:6432` 做 **N=100 次独立 TCP 建连**，三段对照；同时 ping 作区分证据。
+
+| 段 | 白名单 `sg_standby_eip` | TCP 成功率 | ICMP | 证据 |
+| --- | --- | --- | --- | --- |
+| baseline | 4×/32（含 `47.84.126.214`） | **100/100 = 100.0%** | 0% 丢包（36.16 ms） | `probe_baseline.out` |
+| **broken**（移除 `47.84.126.214/32`，TaskId `100248840`） | 3×/32 | **69/100 = 69.0%** | **0% 丢包**（36.18 ms） | `probe_broken.out` |
+| recovered（恢复 4×/32，TaskId `100248841`） | 4×/32 | **100/100 = 100.0%** | 0% 丢包（39.29 ms） | `probe_recovered.out` |
+
+**结论与可复用事实**：
+1. **失败率 31% ≈ 理论 25%（4 选 1）** ⇒ SNAT 出口**确实按连接轮换**，验证了任务 30 坑 6 的推论：「只放当前看到的那一个 IP 必然间歇断连」。
+2. **失败形态 = 3001 ms 超时（DROP，非 RST）** ⇒ 故障现象是「卡住等超时」而不是「快速 connection refused」。对应用意味着：**必须有连接超时（`connect_timeout`）与重试**，否则线程会被长时间占用。
+3. **ICMP 全程 0% 丢包** ⇒ 网络层健康，**只靠 ping 无法发现白名单问题**，必须做 TCP 层拨测（§11.3 的「连接失败率」告警设计由此得到实测支撑）。
+4. **白名单恢复即自愈**：恢复后第一次探测（14:00:19 #1）即 OK，**无残留**；且 broken 段出口回显里明确出现被移除的 `47.84.126.214`，因果链闭合。
+5. **口径说明**：本次证的是**链路层自愈**（白名单→连接恢复）。**应用层自愈**（连接池重建/重试）因备站 `new-api` ns 零工作负载**无法实测**，须在任务 35/36 备站部署后补测，**不得记为已闭环**。
+
+### 7.4 缺口④ §12 接管 SLA 口径表 —— ✅ 已回填
+
+指南 §12「SLA 99.95% 判定口径」已新增「跨区数据面基线（任务 30 实测回填）」一行：RTT p50 37 / TPS 30.46 / TLS 100% / 建连 276 ms / 复用 35 ms，并标注为「接管期 P95 首字 ≤1500 ms」的唯一量化输入。
+
+### 7.5 缺口⑤（新）V3 连接账目 —— ✅ 本次一并闭环
+
+探针 Pod 删除后复测（`t30-v3` 一次性 Pod，`SQL_DSN` 走 Secret 且挂载 CA）：
+
+| usename | state | 会话数 |
+| --- | --- | --- |
+| `aurora` | — | 8（RDS 内部托管） |
+| （usename 对非特权账号隐藏） | — | 5 |
+| `alicloud_rds_admin` | — | 3（RDS 运维） |
+| `newapi_migrate` | — | 2（主站迁移账号，内网） |
+| `replicator` | — | 1 |
+| **`newapi_sg`** | **active** | **1（本次探针自身）** |
+
+⇒ **此前 `idle 15` 已被托管 PgBouncer 回收**（`server_lifetime` 到期），备站 `newapi_sg` 会话 = 探针自身，删除后归 0；SG `new-api` ns 工作负载（deploy/sts/ds）**全空**。**判据 `≤ 10 × 备站副本数` 成立**（备站 0 副本 ⇒ 0，实测 1 且为探针）。
+> ⚠ 附带事实：`pg_stat_activity` 中**非特权账号也能看到其他会话的 `usename`/`state`**（敏感列被隐藏）⇒ 连接账目审计不需要 superuser，这是可复用方法。
+
+### 7.6 新增可复用产物
+
+| 文件 | 用途 |
+| --- | --- |
+| `deploy/certs/rds-apse6-ca.crt` | RDS 马尼拉根 CA（根 + 6 区中间），可直接被 `sslrootcert` 使用 |
+| `deploy/task30_bodies/11-sg-verifyfull.sh` | 落地 CA Secret + 探针 Pod 跑正/负例矩阵（模板，`__CA_B64__` 需注入） |
+| `deploy/task30_bodies/12-sg-dsn-verifyfull.sh` | DSN 切 `verify-full` + 用 Secret 原值端到端复验（幂等） |
+| `deploy/task30_bodies/13-sg-conn-probe.sh` | 拔线自愈三段探测（`sed` 注入 `TAG=baseline/broken/recovered`） |
+| `deploy/task30_bodies/14-sg-v3-conncount.sh` | V3 连接账目（`pg_stat_activity` 分组，任意业务账号即可） |
+
+### 7.7 本卡状态
+
+**Day 1 · 任务 30 —— ✅ 可销账**：五项判据 **4✅ + 1 已修订（建连 ≤300 ms）**；**V1 ⚠ 等价证据**（`inet_server_addr()` 受 superuser 限制，已用启动时刻 + 库名 + 版本 + V2 交叉佐证，属技术不可得而接受）、**V2 ✅**、**V3 ✅**、**V4 ✅**；§12 已回填。
+**唯一保留项**：**应用层自愈**（连接池侧重建/重试）因备站 `new-api` ns 零工作负载**无法实测**，须在任务 35/36 备站 Deployment 就位后补测——**本报告不将其记为已闭环**。
+
+
