@@ -5,9 +5,11 @@
 # 计费资源（NAT+EIP、ACK 节点池、RDS）需单独授权，见文末「Phase 2 待办」。
 set -euo pipefail
 
+# 结构体已按 2026-09-30「删 7 建 7」偏移对齐后的实际状态回写；
+# 现在重跑 = 只读校验 + 补齐（幂等），不会再创建新资源。
 REGION=ap-southeast-5
 VPC_CIDR=10.2.0.0/16
-VPC_NAME=vpc-jkt-dev
+VPC_NAME=vpc-newapi-jkt-dev
 SG_NAME=sg-jkt-dev-app
 
 # 需要硬隔离的目标（实测坐标见修订文档 E1 / §5.1 A2-3）
@@ -15,12 +17,20 @@ PROD_CIDRS=(10.0.0.0/16 10.1.0.0/16)
 PROD_RDS_PUBLIC_IP=43.118.96.65
 PROD_RDS_PORT=5432
 
-# vSwitch 规划：Terway ENIIP 下 Pod IP 取自节点 vSwitch，故按 AZ 切段
+# vSwitch 规划：与马尼拉/新加坡「逐槽同构」—— pub=.0/.1(/24)、app=16/32(/20)、data=48/64(/20)，
+# 雅加达多出的第 3 可用区（5c）追加在末尾 10.2.80.0/20，不插在中间，避免偏移错位。
+# Terway ENIIP 下 Pod IP 直接取自节点所在 AZ 的 vSwitch（没有独立 Pod 交换机），因此三段统一用 app 角色名。
+# dev RDS 白名单只放 app 三段，pub / data 段不进白名单。
 VSWITCHES=(
-  "10.2.0.0/20|ap-southeast-5a|vsw-jkt-dev-app-5a"
-  "10.2.16.0/20|ap-southeast-5b|vsw-jkt-dev-app-5b"
-  "10.2.32.0/20|ap-southeast-5c|vsw-jkt-dev-app-5c"
+  "10.2.0.0/24|ap-southeast-5a|vsw-jkt-dev-pub-5a"
+  "10.2.1.0/24|ap-southeast-5b|vsw-jkt-dev-pub-5b"
+  "10.2.16.0/20|ap-southeast-5a|vsw-jkt-dev-app-5a"
+  "10.2.32.0/20|ap-southeast-5b|vsw-jkt-dev-app-5b"
+  "10.2.48.0/20|ap-southeast-5a|vsw-jkt-dev-data-5a"
+  "10.2.64.0/20|ap-southeast-5b|vsw-jkt-dev-data-5b"
+  "10.2.80.0/20|ap-southeast-5c|vsw-jkt-dev-app-5c"
 )
+APP_CIDRS=(10.2.16.0/20 10.2.32.0/20 10.2.80.0/20)   # Phase 2 RDS --SecurityIPList 的唯一来源
 
 say() { printf '\n=== %s ===\n' "$*"; }
 
@@ -58,8 +68,24 @@ for spec in "${VSWITCHES[@]}"; do
     sleep 5
   else
     echo "reuse   $NAME $CIDR $AZ -> $FOUND"
+    # CIDR / AZ 不可改（只能删建），此处只做漂移检测，不回写
+    READ=$(aliyun vpc DescribeVSwitches --region "$REGION" --VSwitchId "$FOUND" \
+      | jq -r '.VSwitches.VSwitch[0] | [.CidrBlock, .ZoneId] | join(" ")')
+    if [ "$READ" != "$CIDR $AZ" ]; then
+      echo "DRIFT   $NAME 期望 '$CIDR $AZ' 实际 '$READ' —— 偏移对齐已失效，需重跑 realign_jakarta_dev_cidrs.sh" >&2
+    fi
   fi
   VSW_IDS+=("$FOUND")
+done
+
+# 标签归口（实测：vpc MoveResourceGroup 的 ResourceType 不含 VSwitch，非法参数；成本归口以 tag 为准）
+# 注：云上现网值来自 realign 执行（managed-by=realign_jakarta_dev_cidrs.sh），重跑本脚本会把该值归一为自身。
+for V in "${VSW_IDS[@]}"; do
+  aliyun vpc TagResources --region "$REGION" --RegionId="$REGION" --ResourceType=VSWITCH --ResourceId.1="$V" \
+    --Tag.1.Key=env --Tag.1.Value=dev --Tag.2.Key=project --Tag.2.Value=new-api \
+    --Tag.3.Key=managed-by --Tag.3.Value=provision_jakarta_dev_net.sh \
+    --Tag.4.Key=isolation --Tag.4.Value=structural-vpc >/dev/null \
+    && echo "tagged $V"
 done
 
 say "3. 安全组"
@@ -122,6 +148,12 @@ VPC_ID=$VPC_ID
 VPC_CIDR=$VPC_CIDR
 SG_ID=$SG_ID
 VSWITCH_IDS=${VSW_IDS[*]}
+RDS_SECURITY_IP_LIST=${APP_CIDRS[*]}   # 只放 app 三段；pub / data 段不进白名单
 EOF
 echo
+echo "Phase 2 RDS 零成本预检（DryRun，不产生费用）—— 用 data-5a 的 VSwitchId 替换 <VSW_DATA_A>："
+echo "  aliyun rds CreateDBInstance --region $REGION --DryRun=true --Engine=PostgreSQL --EngineVersion=17.0 \\"
+echo "    --DBInstanceClass=pg.n2.2c.1m --DBInstanceStorage=20 --DBInstanceStorageType=generic \\"
+echo "    --Category=Basic --InstanceNetworkType=VPC --VpcId=$VPC_ID --VSwitchId=<VSW_DATA_A> \\"
+echo "    --SecurityIPList=\"$(IFS=,; echo "${APP_CIDRS[*]}")\" --ZoneId=ap-southeast-5a"
 echo "下一步（计费，需授权）：NAT+EIP → ACK 集群/节点池 → RDS PG 17.0 → 工作负载 → 隔离验收 V1-V11"

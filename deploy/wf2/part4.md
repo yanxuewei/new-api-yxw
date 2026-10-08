@@ -147,7 +147,7 @@ diff <(jq -S 'del(.InstanceId,.RequestId)' /tmp/waf-mnl.json) \
 4. 取证：DNS 生效与切换窗口数据（含 **0–120s DB QPS / P99 曲线**，见任务 49 验收）：
 
 ```bash
-dig +short api.likha.com @8.8.8.8   # 期望：返回新加坡 ALB 地址，记录首个生效时间
+dig +short www.likha.hk @8.8.8.8   # 期望：返回新加坡 ALB 地址，记录首个生效时间
 curl -sG "${PROM_URL}/api/v1/query_range" \
   --data-urlencode 'query=sum(rate(newapi_db_query_seconds{quantile="0.99"}[30s]))' \
   --data-urlencode "start=${T_SWITCH}" --data-urlencode "end=$((T_SWITCH+120))" \
@@ -301,7 +301,7 @@ for i in $(seq 1 400); do
   curl -s -o /dev/null -w '%{http_code}\n' \
     -H "Authorization: Bearer ${RATE_TEST_TOKEN}" -H 'Content-Type: application/json' \
     -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"ping"}]}' \
-    https://api.likha.com/v1/chat/completions
+    https://www.likha.hk/v1/chat/completions
 done | sort | uniq -c
 # 期望：约前 360 个 200/流式成功，其余 429（带 Retry-After）
 ```
@@ -352,7 +352,7 @@ done | sort | uniq -c
 
 ```bash
 # 1) DNS 正式切到 GTM（若之前直连 ALB 做验收）
-dig +short api.likha.com @8.8.8.8
+dig +short www.likha.hk @8.8.8.8
 # 期望：返回 GTM 接入地址（而非直连 ALB DNS 名）
 # 2) 小流量观察（若有灰度开关/白名单用户优先放行）
 # 3) 30/60/120 分钟三次快照：错误率、P95、DB 连接、上游 429、账单速率

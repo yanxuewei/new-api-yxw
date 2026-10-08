@@ -1,0 +1,119 @@
+# Day 2 · 任务 18｜master Deployment（只跑 AutoMigrate，不接流量）
+#
+# 配套：deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md「任务 18」
+#       deploy/task18_master_migrate.sh（--precheck / --apply / --verify / --status / --cleanup）
+#
+# 三份与文档卡片的最小差异，全部有实测依据（详见 deploy/Day2任务18_master迁移幂等_执行报告.md）：
+#   ① 镜像走 **VPC 内网域名** `acr-newapi-mnl-registry-vpc.ap-southeast-6.cr.aliyuncs.com`
+#      （2026-10-05 18:48 零缓存探针实测 → 18:53 `kubectl apply` 生效 → 18:55 节点清缓存后
+#       Deployment 级复测）：GetInstanceVpcEndpoint → LinkedVpcs 已含本站 VPC
+#      `vpc-5tst1tgeessxn1azwasg2` / 端点 IP `10.0.22.220` / vSwitch `vsw-5tswpyzfa8od6je95td1h`
+#      / Status=RUNNING / DefaultAccess=true。4 台 worker 上 getent 该域名**只**返回 10.0.22.220，
+#      `ip route get` 走 eth0 私网 ⇒ 拉取不出 VPC。
+#      ⚠ 返回体里的 `Issue:"NO_PRIVATE_ZONE_AUTHORIZED"` 与全账号 PrivateZone 数=0 都不构成阻塞：
+#      端点用 DefaultAccess 直接下发到 VPC 内置 DNS（100.100.2.136/138），无需 PrivateZone 记录。
+#      仓库实名是 newapi-prod/newapi-master（push.sh 默认目标），不是 §2.1 基线表写的 .../new-api。
+#      公网域名 `acr-newapi-mnl-registry.ap-...`（解析 8.220.143.202）仍保留作应急通道，
+#      同一 tag、同一 digest（sha256:38fd74feac69…），切换不改产物。
+#   ② Pod 标签 app=new-api-migrate（**不是** app=new-api-master）：
+#      任务 19 的占位资源 Service/new-api-master(selector app=new-api-master) +
+#      Ingress/new-api-verify(ALB, host ph-verify.internal.likha.hk) 已经在集群里，
+#      且 Ingress 后端就指向它。master Pod 若命中该 selector，迁移期就会被 ALB 引流
+#      = 本卡「坑 1｜master 也接流量」。占位资源的既定清理时点是任务 23，早于任务 18，
+#      所以这里让 master 避开该 selector，而不是去改任务 19 的资源。
+#      同时不用 app=new-api：任务 23 的 stable topologySpreadConstraints 按 app=new-api 计数，
+#      把单副本 master 算进去会让跨 AZ 均布出现假偏斜。
+#   ③ 不建 PVC：镜像 ENTRYPOINT=/new-api、WORKDIR=/data，SQLite 仅在不配 SQL_DSN 时才用；
+#      本站主库是 PG ⇒ master Pod 无本地持久状态。卡片给的挂载点 /app/data 应用根本不写，
+#      挂到 /data 会盖掉工作目录；且 RWO 云盘是单 AZ 资源，Recreate 时换 AZ 会卡 Multi-Attach
+#      （本卡「坑 3/PVC Multi-Attach」的成因）。
+#   ④ serviceAccountName 必须是 new-api-app（2026-10-05 实测新增）：
+#      任务 16 步骤 7 的免密拉取此前从未落地，本卡 --precheck 实测镜像直接 ImagePullBackOff
+#      （`insufficient_scope: authorization failed`；匿名 token 的 access 声明为空 []，
+#      仓库 RepoType=PUBLIC 也不放行——企业版一律要鉴权）。补装
+#      managed-aliyun-acr-credential-helper（state=active，实例 cri-avfqy9xkqi5bj8ee，
+#      watchNamespace=new-api / serviceAccount=new-api-app）后，helper 在 new-api 生成
+#      acr-credential-secret-aggregation（同时覆盖公网与 -vpc 两个域名）并只挂到该 SA。
+#      ⇒ default SA 依然无凭据：任何要拉本镜像的 Pod（含临时调试 Pod）都必须显式用 new-api-app。
+#      修复后实测：公网域名 1.6s 拉完 78 MB；切 -vpc 后零缓存冷拉 探针 Pod 1.183s、
+#      Deployment 级 1.23s，均 78,074,255 B（digest=sha256:38fd74feac69… 与 ListRepoTag
+#      一致，两个域名同一产物）。
+#      ⇒ 凭据聚合对两个域名都放行，切内网不需要改 SA/Secret。
+#
+# 红线（卡片原文）：NODE_TYPE 留空即 master（common/init.go:89 是 != "slave" 的字符串判断）。
+# 全集群只允许本 Deployment 显式 NODE_TYPE=master，其余一律继承 ConfigMap 的 "slave"。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: new-api-master
+  namespace: new-api
+  labels:
+    app: new-api-migrate
+    project: new-api
+    site: ph-mnl
+    track: master          # 坑 4：巡检/反亲和按 track 识别主节点轨道
+    env: prod
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  strategy:
+    type: Recreate         # 必须 Recreate：两个 master 并发迁移会互相等锁
+  selector:
+    matchLabels:
+      app: new-api-migrate
+      track: master
+  template:
+    metadata:
+      labels:
+        app: new-api-migrate
+        project: new-api
+        site: ph-mnl
+        track: master
+        env: prod
+    spec:
+      serviceAccountName: new-api-app
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: new-api
+          # tag = <日期>-<git 短 SHA>，不可变（该仓库 TagImmutability=true）。
+          # 2026-09-28 之后无 Go 代码变更（git log 26ac63233..HEAD -- '*.go' 为空），
+          # 所以本 tag 与当前 main 的二进制行为一致。发布镜像由 task18_master_migrate.sh 覆盖。
+          image: acr-newapi-mnl-registry-vpc.ap-southeast-6.cr.aliyuncs.com/newapi-prod/newapi-master:20260928-26ac63233
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 3000
+          env:
+            # 只有这里允许 master
+            - name: NODE_TYPE
+              value: "master"
+            # GORM logger 固定 LogLevel=Warn（model/gorm_logger.go:42），默认只打印 >200ms 的语句，
+            # 所以卡片里 grep "ALTER TABLE|CREATE TABLE" 在空库首启通常抓到 0 条 —— 会被误判成"迁移没跑"。
+            # 阈值降到 1ms 后每条 SQL（含全部 DDL）都落日志，日志与 schema 指纹两个口径才能对齐。
+            # 取值不泄露：DebugEnabled=false 时 ParameterizedQueries 已过滤参数（gorm_logger.go:44）。
+            - name: SQL_SLOW_THRESHOLD_MS
+              value: "1"
+            # 迁移账号覆盖：代码里没有 SQL_DSN_MIGRATE 这个环境变量（只有 SQL_DSN），
+            # 而任务 13 的 schema 最小化使 public schema 只有 newapi_migrate 持 CREATE，
+            # DML 账号 newapi 跑 AutoMigrate 必然 permission denied for schema public。
+            # ⇒ master 的 SQL_DSN 必须取 Secret 的 SQL_DSN_MIGRATE（newapi_migrate，5432 直连，
+            #    不经 PgBouncer）。显式 env 优先于 envFrom，stable/canary 仍用 newapi@6432。
+            - name: SQL_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: new-api-secrets
+                  key: SQL_DSN_MIGRATE
+          envFrom:
+            - configMapRef:
+                name: new-api-config      # NODE_TYPE=slave / TZ / 连接池上限 / CK TTL 等
+            - secretRef:
+                name: new-api-secrets     # SESSION_SECRET / REDIS / LOG_SQL_DSN ...
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "1"
+              memory: 2Gi
+          # 探针本卡故意不加：master 不挂 Service、不进 ALB 后端，探针没有消费方；
+          # 迁移失败要看的是 Pod 退出码 + 日志（G8 的 /healthz /readyz 统一在任务 23 给 stable 配）。

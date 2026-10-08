@@ -6,8 +6,8 @@
 
 | 项          | 值 / 状态                                                                          |
 | ---------- | ------------------------------------------------------------------------------- |
-| 证书         | `*.likha.com` 通配符（DigiCert/GlobalSign/Rapid 付费，国际站无免费 DV，P0-7）                  |
-| SAN 必须覆盖   | `api.likha.com`, `ops.likha.com`, `*.likha.com`（裸域另加 SAN 或 301 → api）           |
+| 证书         | `*.likha.hk` 通配符（DigiCert/GlobalSign/Rapid 付费，国际站无免费 DV，P0-7）                  |
+| SAN 必须覆盖   | `www.likha.hk`, `ops.likha.hk`, `*.likha.hk`（裸域另加 SAN 或 301 → api）           |
 | CAS CertId | `${CERT_ID}`（D6 回填）                                                             |
 | 私钥位置       | 仅 CAS/KMS（`new-api/prod/tls-wildcard`），**禁止落 Git/ConfigMap/本地磁盘**；导出仅限轮换窗口并即时销毁 |
 | 有效期        | 2026-02-25 起最长约 199/200 天，1 年订单拆两张 ~6 个月 → **必须开托管自动续期 + 自动部署**                 |
@@ -27,15 +27,15 @@
 
 ```bash
 aliyun cas DescribeUserCertificateDetail --CertId ${CERT_ID} | jq -r '.CommonName, .Sans'
-# 期望 Sans 含 api.likha.com, ops.likha.com, *.likha.com
+# 期望 Sans 含 www.likha.hk, ops.likha.hk, *.likha.hk
 
 # V1 SNI：正确域名返回证书；未知域名必须告警/拒绝
-echo | openssl s_client -connect ${ALB_VIP}:443 -servername api.likha.com 2>/dev/null | openssl x509 -noout -dates -subject
-echo | openssl s_client -connect ${ALB_VIP}:443 -servername nonexistent.likha.com 2>&1 | grep -Ei "alert|error"
+echo | openssl s_client -connect ${ALB_VIP}:443 -servername www.likha.hk 2>/dev/null | openssl x509 -noout -dates -subject
+echo | openssl s_client -connect ${ALB_VIP}:443 -servername nonexistent.likha.hk 2>&1 | grep -Ei "alert|error"
 
 # V2 证书链完整 + 无弱套件
-curl -sSIv https://api.likha.com/api/status 2>&1 | grep -E "SSL certificate|issuer"
-nmap --script ssl-enum-ciphers -p 443 api.likha.com | tail -20    # 期望 grade A
+curl -sSIv https://www.likha.hk/api/status 2>&1 | grep -E "SSL certificate|issuer"
+nmap --script ssl-enum-ciphers -p 443 www.likha.hk | tail -20    # 期望 grade A
 
 # V3 到期与自动续期
 aliyun cas DescribeUserCertificateList --ShowSize 50 | jq -r '.CertificateList[] | [.Name,.Fingerprint,.AfterDate] | @tsv'
@@ -45,5 +45,5 @@ aliyun cas DescribeUserCertificateList --ShowSize 50 | jq -r '.CertificateList[]
 ## 4. 坑（原文照录，执行前重读）
 
 - **只换 CAS 证书、不同步 AlbConfig** → ALB 继续用旧证书。改进：证书部署纳入 GitOps（CertManager + alibabacloud DNS-01 webhook，或同步 Job 调 `UpdateListenerAttribute`）。
-- **通配符不覆盖多级**：`*.likha.com` 不覆盖 `a.b.likha.com`。域名规划统一二级。
+- **通配符不覆盖多级**：`*.likha.hk` 不覆盖 `a.b.likha.hk`。域名规划统一二级。
 - **ALB → Pod 段为 VPC 内明文**（设计决策，见 impl_deploy §7.1.1）；任何 CNAME 回源/DCDN → 源站出 VPC 的段一律强制 HTTPS。

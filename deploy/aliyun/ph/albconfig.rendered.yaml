@@ -7,7 +7,7 @@
 #
 # ⚠️ 未回填项（阻塞执行，见交付说明）：
 #   ${CERT_ID_ALB} = CAS 证书 ID。2026-09-29 实测 `aliyun cas ListUserCertificateOrder`
-#   TotalCount=0（账号内**无任何证书**），且 likha.com 的 NS 仍指向 GoDaddy
+#   TotalCount=0（账号内**无任何证书**），且 likha.hk 的 NS 仍指向 GoDaddy
 #   （ns21/ns22.domaincontrol.com），G4(NS)/G5(证书) 均未闭环 → 443 监听无法按方案创建。
 #   回填方式：`export CERT_ID_ALB=<cas-cert-id>` 后由 deploy/task19_alb_mnl.sh 渲染。
 #
@@ -27,7 +27,7 @@ spec:
       - vSwitchId: vsw-5ts1dygyh2x0daspwny2r   # vsw-mnl-pub-b / ap-southeast-6b / 10.0.1.0/24 / free=252
     accessLogConfig:
       logProject: sls-newapi-mnl               # ✅ 2026-09-29 实测存在
-      logStore: alb-access                     # ✅ 2026-09-29 实测存在（16 个 Logstore 之一）
+      logStore: alb_access                     # ✅ 2026-09-29 实测存在（16 个 Logstore 之一）
     tags:
       - { key: project, value: new-api }
       - { key: site, value: ph-mnl }
@@ -37,7 +37,7 @@ spec:
       protocol: HTTP                           # 仅用于 301 跳转 HTTPS
       httpDefaultActions:
         - type: Redirect
-          redirectConfig: { host: api.likha.com, https: on, port: "443" }
+          redirectConfig: { host: www.likha.hk, https: on, port: "443" }
     # ⚠️ 442/443 监听当前被证书阻塞：CERT_ID_ALB 为空时由脚本整段剔除（见 task19_alb_mnl.sh --without-tls）
     - port: 443
       protocol: HTTPS

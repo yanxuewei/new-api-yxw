@@ -1,0 +1,65 @@
+# 任务 54 · 迁移执行 Job（prod 用；staging 由 deploy/task54_migrate_version.sh 直连执行）
+#
+# 设计口径（卡片步骤 5 + 本仓实测）：
+#   - backoffLimit: 0       迁移失败不重试，人工介入（半途失败 + 自动重试 = 状态更脏）
+#   - SA = new-api-app      任务 16 坑 5：ACR 免密拉取只挂在这个 SA 上，用 default 会 ImagePullBackOff
+#   - DSN 取 Secret 的 SQL_DSN_MIGRATE（5432 直连，不经 PgBouncer）——只有 newapi_migrate 账号持 DDL
+#   - resources 必须显式    ns 有 ResourceQuota(new-api-quota) 且无 LimitRange
+#   - 与 master Deployment 不同时启动：Argo PreSync，或人工先 scale master 到 0 再跑
+#
+# 前置：
+#   kubectl -n new-api create configmap new-api-migrations \
+#     --from-file=migrations/ --dry-run=client -o yaml | kubectl apply -f -
+#
+# 用法：
+#   kubectl -n new-api delete job new-api-migrate --ignore-not-found
+#   kubectl -n new-api apply -f deploy/aliyun/ph/migrate-job.yaml
+#   kubectl -n new-api logs job/new-api-migrate -f
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: new-api-migrate
+  namespace: new-api
+  labels:
+    app: new-api-migrate
+    track: migrate
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app: new-api-migrate
+        track: migrate
+    spec:
+      restartPolicy: Never
+      serviceAccountName: new-api-app
+      containers:
+        - name: migrate
+          image: migrate/migrate:v4.19.1
+          args:
+            - "-path=/migrations"
+            - "-database=$(DSN_MIGRATE)"
+            - "up"
+          env:
+            - name: DSN_MIGRATE
+              valueFrom:
+                secretKeyRef:
+                  name: new-api-secrets
+                  key: SQL_DSN_MIGRATE
+          volumeMounts:
+            - name: migrations
+              mountPath: /migrations
+              readOnly: true
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+      volumes:
+        - name: migrations
+          configMap:
+            name: new-api-migrations

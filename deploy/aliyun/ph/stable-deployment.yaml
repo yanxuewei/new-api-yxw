@@ -1,0 +1,243 @@
+# Day 2 · 任务 23｜stable Deployment（4 副本 + PDB + HPA + 反亲和）—— 马尼拉
+#
+# 权威卡片：deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md:3419-3553
+# 执行器：  deploy/task23_stable.sh（--precheck / --dryrun / --apply / --verify / --status / --wire-alb / --cleanup）
+# 通道：    deploy/ack_remote.sh（两集群 endpoint_public_access=false，本机无 kubeconfig，
+#           全部 kubectl 经云助手在 VPC 节点内执行）
+#
+# 与卡片的差异**只有两处**，都有实测依据（详见 deploy/Day2任务23_stable部署_执行报告.md）：
+#
+#   ① PDB 用 **70%**，不是卡片写的 `minAvailable: 3`。
+#      现网 `pdb-new-api-stable` 早在 2026-09-30 08:54 就按 `70%` 建好，selector 与卡片
+#      逐字相同（app=new-api / track=stable）。4 副本下两者**完全等价**：
+#      ceil(0.7×4)=3 ⇒ disruptionsAllowed=1；改成 3 反而在 HPA 扩到 16 时把要求降到
+#      "最少 3 个"（70% 口径是 12）。所以这里沿用一个**不放松、且随规模自动收紧**的值。
+#
+#   ② `spec.replicas` 写在清单里（卡片步骤 3 建议 GitOps 不要写）。
+#      本仓没有 ArgoCD/Flux，apply 由 task23_stable.sh 直发，且 `--verify` 会把
+#      Deployment.spec.replicas 与 HPA 期望做一次对照；等接上 GitOps 时按卡片加
+#      `ignoreDifferences: [/spec/replicas]`。
+#
+# 其余按卡片逐条实装。红线核对：
+#   - NODE_TYPE：ConfigMap 已是 slave（实测 7 键），容器再显式写一次 slave——
+#     `common/init.go:89` 是 `!= "slave"` 字符串判断，留空即 master（任务 17 坑 1）。
+#   - 权限边界：stable 用 Secret 的 `SQL_DSN`（DML 账号 newapi@6432 经托管池），
+#     **不是** SQL_DSN_MIGRATE。代码上 slave 启动在 `model/main.go:215-217`（主库）与
+#     `:262-264`（日志库）两处 `if !common.IsMasterNode { return nil }` 提前返回 ⇒
+#     stable Pod 对 PG/CK **一条 DDL 都不发**，与任务 13 的 schema 最小化不冲突。
+#   - 镜像：与 master 同仓同 tag（ACR EE 的 -vpc 内网域名）。`git log 26ac63233..HEAD -- '*.go'`
+#     实测 **0 条** ⇒ 该 tag 与当前 main 的二进制行为一致；TagImmutability=true 禁 latest。
+#   - SA 必须 `new-api-app`：免密拉取由 managed-aliyun-acr-credential-helper 只挂到该 SA
+#     （任务 18 坑：default SA 拉本镜像必 ImagePullBackOff）。
+#   - 反亲和的 labelSelector 是 `app=new-api`：master 的 Pod 标签刻意是
+#     `app=new-api-migrate`（任务 18 差异②），所以不会被算进 skew；本清单若改用
+#     `app: new-api` 之外的标签会与任务 19 占位 Service 的 selector 撞车。
+#
+# ⚠ 容量与配额（2026-10-05 实测 / 2026-10-06 API 复核，决定 HPA 能不能真的扩到顶）：
+#   - 节点：4×**ecs.g9ae.2xlarge**（`DescribeInstances` 2026-10-06 逐台确认；节点池多机型列表
+#     `[g9i, g8ine, g9ae]` 顺位取到第三项），单节点 allocatable **7.91 CPU / ~30.2 Gi**，
+#     跨 6a/6b 各 2 台，无 taint。本卡 4 副本 requests 2C ⇒ 每 AZ 放 2 个，
+#     现有空闲（实测已请求 3110m/5000m/3200m/3500m ⇒ 空闲 4.8/2.9/4.7/4.4 核）足够。
+#   - 节点池 auto_scaling：enable=true，min 4 / **max 8**，type=cpu ⇒ 15 副本（30C requests）
+#     需要扩到 ≥6 台（AZ 硬约束要求每 AZ ≥8 Pod ≈ 16C > 单 AZ 现有 15.82C，且单台只能容 3 个 2C 副本），
+#     属任务 42 的自动路径，本卡不预扩。
+#   - ResourceQuota `new-api-quota` hard = requests.cpu 48 / requests.memory 96Gi /
+#     **limits.cpu 64** / limits.memory 128Gi。本卡 4 副本 + master 合计
+#     requests 8.5C/17Gi、limits 17C/34Gi ⇒ 宽裕。
+#     ★ limits 口径（2026-10-06 **实测修正**）：ns 内"其他负载"占 limits.cpu **9.2C**（不是首轮估的 4.6C）
+#       ⇒ 15 副本需 60+9.2 = **69.2 > 64 顶不到配额**，真实天花板 = **13 副本**（52+9.2 = 61.2 ≤ 64）。
+#       **裁定（用户 2026-10-06）：maxReplicas 降回 13**，不抬配额；本清单与现网 HPA 同步为 13。
+#       若日后要恢复 15/16，须同时抬 limits.cpu ≥72 / limits.memory 同比，并把节点池扩到 ≥6 台
+#       （AZ 硬约束 + 单台容 3 个 2C 副本）。
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: new-api-stable
+  namespace: new-api
+  labels:
+    app: new-api
+    project: new-api
+    site: ph-mnl
+    track: stable
+    env: prod
+spec:
+  replicas: 4
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: new-api
+      track: stable
+  template:
+    metadata:
+      labels:
+        app: new-api
+        project: new-api
+        site: ph-mnl
+        track: stable
+        env: prod
+      annotations:
+        # ConfigMap 变更即滚动：占位符由 task23_stable.sh 用集群现值的 sha256 前 12 位渲染
+        # （清单里不写死值，避免每次改 ConfigMap 都要提交镜像无关的 diff）。
+        checksum/config: "__CONFIG_CHECKSUM__"
+        # G8（可观测）落地前无实际抓取方，占位；卡片原样保留
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "3000"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: new-api-app
+      terminationGracePeriodSeconds: 60
+      topologySpreadConstraints:
+        # 跨 AZ 硬约束：6a/6b 差值 ≤1，摆不平就 Pending（宁可 Pending 也不单 AZ 全灭）
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app: new-api
+        # 跨节点软约束：尽力而为，节点不足时不阻塞调度
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: new-api
+      containers:
+        - name: new-api
+          image: acr-newapi-mnl-registry-vpc.ap-southeast-6.cr.aliyuncs.com/newapi-prod/newapi-master:20260928-26ac63233
+          imagePullPolicy: IfNotPresent
+          # app-file 纠正版（2026-10-06）：文件日志显式落 /data/logs（镜像 WORKDIR=/data；
+          # 代码开关是 CLI `-log-dir`（common/init.go:22），**没有 LOG_DIR 环境变量**）。
+          args:
+            - "-log-dir=/data/logs"
+          ports:
+            - name: http
+              containerPort: 3000
+          volumeMounts:
+            # 文件日志卷：重启同 Pod 内保留；容器重建即清（stdout 主路不受影响）
+            - name: app-logs
+              mountPath: /data/logs
+          env:
+            - name: NODE_TYPE
+              value: "slave"
+            # 卡片坑 2：CPU limit 4 而容器内可见核数按宿主机算 ⇒ 起 8 个 worker 被 throttle。
+            # 显式钉成 limit 值，行为与 Go 版本无关。
+            - name: GOMAXPROCS
+              value: "4"
+          envFrom:
+            - configMapRef:
+                name: new-api-config
+            - secretRef:
+                name: new-api-secrets
+          # /api/status 实测 200 + JSON（precheck §8，容器内 wget 取到 status 体）。
+          # ⚠ 卡片坑 5 仍在：该接口不查 DB/Redis ⇒ 冷 Pod 可能"过早 ready"。
+          #   本轮用 startupProbe 兜住启动段（150s 上限）+ maxUnavailable 0/maxSurge 1
+          #   保证滚动期容量不减；/readyz（查 DB+Redis）属 G8 代码项，落地后替换。
+          startupProbe:
+            httpGet: {path: /api/status, port: http}
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            httpGet: {path: /api/status, port: http}
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: {path: /api/status, port: http}
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 5
+          lifecycle:
+            preStop:
+              exec:
+                # 卡片坑 4：ALB 后端摘除是秒级到十秒级，先睡 15s 再收 SIGTERM，
+                # 避免发布期打到已死 Pod（Terway 下 Pod IP 变化由 controller 同步）
+                command: ["sh", "-c", "sleep 15"]
+          resources:
+            requests:
+              cpu: "2"
+              memory: 4Gi
+            limits:
+              cpu: "4"
+              memory: 8Gi
+      volumes:
+        - name: app-logs
+          emptyDir:
+            # 单文件 100 万行轮转（logger maxLogCount）≈130 MB，各副本独立；1Gi 上限防系统盘被日志吃满
+            sizeLimit: 1Gi
+---
+# PDB：沿用现网 2026-09-30 建好的 70%（见文件头差异①）。apply 为无变化即 no-op。
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: pdb-new-api-stable
+  namespace: new-api
+spec:
+  minAvailable: "70%"
+  selector:
+    matchLabels:
+      app: new-api
+      track: stable
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: hpa-new-api-stable
+  namespace: new-api
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: new-api-stable
+  minReplicas: 4
+  # 2026-10-06 裁定（**二次修订**）：卡片原写 16；首轮按"其他负载仅 4.6C"算得 15 可容纳，
+  # 但同日 `--apply` 的配额实测显示 ns 内其他负载已占 limits.cpu **9.2C**
+  # （stable 4 副本 16 + 其他 9.2 = 25.2，hard 64）⇒ 扩到 15 需 **69.2 > 64 顶不到配额**，
+  # 真实天花板 = **13 副本**（13×4 + 9.2 = 61.2 ≤ 64）。用户 2026-10-06 裁定：**maxReplicas 降回 13**，
+  # 不抬配额。若日后要回到 15/16，必须同时把 limits.cpu 抬到 ≥72（并按比例抬 limits.memory）。
+  maxReplicas: 13
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        # ⚠ 卡片坑 1：分母是 **request 2C** 而不是 limit 4C ⇒ 65% 口径下用到 1.3C/Pod 就扩，
+        #   属有意保守（容量可预测优先）。若要按 limit 算，须把 requests 抬成 4（Guaranteed），
+        #   那会同时把节点容量口径从 3 Pod/台 压到 1~2 Pod/台，属另一轮容量裁定。
+        target:
+          type: Utilization
+          averageUtilization: 65
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - {type: Pods, value: 2, periodSeconds: 120}
+    scaleUp:
+      stabilizationWindowSeconds: 30
+      selectPolicy: Max
+      policies:
+        - {type: Percent, value: 100, periodSeconds: 60}
+        - {type: Pods, value: 8, periodSeconds: 60}
+---
+# Service：ALB 后端走 Terway Pod ENI（卡片步骤 2）
+apiVersion: v1
+kind: Service
+metadata:
+  name: new-api-stable
+  namespace: new-api
+  labels:
+    app: new-api
+    track: stable
+spec:
+  type: ClusterIP
+  selector:
+    app: new-api
+    track: stable
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

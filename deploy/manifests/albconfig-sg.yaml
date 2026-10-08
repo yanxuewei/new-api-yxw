@@ -1,0 +1,81 @@
+# 任务 25 · 新加坡（备站）AlbConfig `sg-alb`
+# 集群：ca75829e3492d491d9d434de087913798（ap-southeast-1，2 节点 1.35.7）
+# 对应 IngressClass：`alb`（parameters.name = sg-alb，已建 2026-10-06）
+#
+# ⚠️ 状态：**尚未 apply**（等待两项前置，见文末「阻塞」）。本文件是渲染就绪件。
+#
+# 与马尼拉同构（`deploy/aliyun/ph/albconfig.rendered.yaml`）的三处**有意差异**：
+#   ① config.name = alb-newapi-sg（马尼拉 alb-newapi-mnl）
+#   ② accessLogConfig.logStore = **alb_access**（下划线）。★ 硬约束：ALB Ingress webhook
+#      `albconfig.alb.validate.k8s.io` 会校验 **「logstore name should start with alb_」**
+#      （2026-10-06 实测被拒：`logstore name should start with alb_`）⇒ 必须下划线前缀。
+#      注意 `sls-newapi-sg` 原本只有一个连字符的 `alb-access`（不合规），已补建 `alb_access`
+#      （ttl=30 / shardCount=2 / standard，与马尼拉 `sls-newapi-mnl/alb_access` 同参数）。
+#   ③ tags site = ph-sg
+#
+# 管理红线（任务 19 同规）：只经 AlbConfig/Ingress 声明式管理，禁止控制台改 listener。
+# ⚠️ AlbConfig 是 **Cluster-scoped**（实测 mnl-alb spec.scope=Cluster）⇒ 不写 namespace，命令不带 -n。
+# ⚠️ finalizer `ingress.k8s.alibaba/resources` ⇒ `kubectl delete albconfig sg-alb` 会
+#    **级联删除云上 ALB 实例**。可改，不可删。
+apiVersion: alibabacloud.com/v1
+kind: AlbConfig
+metadata:
+  name: sg-alb
+  labels:
+    project: new-api
+    site: ph-sg
+    env: prod
+spec:
+  config:
+    name: alb-newapi-sg
+    addressType: Internet
+    zoneMappings:
+      - vSwitchId: vsw-t4ncxa4gqgamhl0o8e6yq   # vsw-sg-pub-a / ap-southeast-1a / 10.1.0.0/24
+      - vSwitchId: vsw-t4nhtsfk2z79e1ggvlhdz   # vsw-sg-pub-b / ap-southeast-1b / 10.1.1.0/24
+    accessLogConfig:
+      logProject: sls-newapi-sg
+      logStore: alb_access
+    tags:
+      - { key: project, value: new-api }
+      - { key: site, value: ph-sg }
+      - { key: env, value: prod }
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # listeners（2026-10-06 用户裁定：**先建 ALB，仅 80，无 TLS**）
+  #
+  # 采用**官方最小形态**：只给 port + protocol，**不写 default action**。
+  #   依据：官方《通过 AlbConfig 配置 ALB 实例》创建示例即
+  #     listeners:
+  #       - port: 80
+  #         protocol: HTTP
+  #   监听器的默认动作由 Controller 自管（命名规范 `ingress-auto-listener-{port}`）。
+  #   ⇒ 好处：**零字段名猜测** —— 马尼拉现网写的 `httpDefaultActions` 是否为有效字段名
+  #     至今未验证（CRD 是 x-kubernetes-preserve-unknown-fields，错名静默忽略），
+  #     此处不复制该不确定性。
+  #
+  # ★★ 超时已在本段实配并**实测生效**（`idleTimeout: 60` / `requestTimeout: 600`，
+  #   云端回读一致）⇒ **马尼拉任务 19 的 V1b 未达标，根因就是马尼拉 AlbConfig 里
+  #   从未写过这两项**（其 listeners 只有 port / protocol / httpDefaultActions），
+  #   与「ALB 不支持」无关。补齐即可，但马尼拉侧按用户 13:15 裁定暂不动。
+  #
+  # ★★ 绝不要在这里写 `defaultActions` / `httpDefaultActions`（**实测均无效**）：
+  #   2026-10-06 SG 侧零风险探针 —— 写入 `defaultActions: [{type: FixedResponse,
+  #   fixedResponseConfig: {httpCode: "404"}}]`，k8s 侧 spec 保留该字段，
+  #   但云端 `GetListenerAttribute` 回读 `DefaultActions` **仍是**
+  #   `ForwardGroup → sgp-p1qg1z0rqgbovj3yqd`（Controller 派生的占位组
+  #   `kube-system-fake-svc-80`）。⇒ **Controller 一律用自己的 ForwardGroup 覆盖**
+  #   AlbConfig 的 default action。推论：马尼拉那颗「谁把 httpDefaultActions 改成
+  #   官方名 defaultActions 就会激活 Redirect、打断直连 IP 通道」的定时炸弹
+  #   **不存在** —— 正确字段名同样不生效。
+  #
+  # ⏳ 待补（各自独立，就绪后追加）：
+  #   · 443 + TLS：需 CAS 证书（`CERT_ID_SG`）。实测 `aliyun cas ListUserCertificateOrder
+  #     --region ap-southeast-1` ⇒ **TotalCount=0**，账号内零证书（G5 未闭环）。
+  #   · 后端：备站 Service `new-api-ph-standby` 尚不存在（任务 28 未做，ns 内 0 workload）；
+  #     无 Ingress ⇒ 80 监听器此时无业务转发规则（事件 `AlbconfigZeroIngress` 属预期）。
+  listeners:
+    - port: 80
+      protocol: HTTP
+      idleTimeout: 60          # ✅ SG 侧实测生效（2026-10-06 回读 IdleTimeout=60）
+      requestTimeout: 600      # ✅ SG 侧实测生效（回读 RequestTimeout=600；ALB 硬上限）
+  # ────────────────────────────────────────────────────────────────────────────

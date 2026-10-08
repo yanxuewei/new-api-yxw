@@ -1,0 +1,66 @@
+# 任务 25 追加件 · 新加坡（备站）**无 Host** Ingress `new-api-ph-standby-ip`
+# 集群：ca75829e3492d491d9d434de087913798（ap-southeast-1）
+# 目的：让 **ALB 公网 IP 直访**（浏览器直接输 IP / curl 不带 Host）也能命中备站，
+#       无需 `-H "Host: ..."`、无需改 /etc/hosts。
+#
+# == 原理 ==
+#   ALB 监听器同时挂两条规则：
+#     [1] Host=sg-standby.internal.likha.hk  AND Path=/*   → 主 Ingress 派生组（有 Host 的优先）
+#     [2] Path=/*（无 Host 条件）                            → 本 Ingress 派生组
+#   请求带匹配 Host → 走 [1]；否则落 [2]。均不再落 default → 不再 503。
+#
+# == 已知副作用（接受）==
+#   规则 [2] 会**吃掉所有未被任何 Host 规则命中的流量**。当前备站仅一个域名、
+#   ALB 上无其他 Ingress，无冲突。**将来若加第二个域名到这台 ALB，须重新评估本条。**
+#
+# == 由来 ==
+#   马尼拉侧做到「IP 直访可通」靠的是手工把 80 监听器 default 改成 ForwardGroup，
+#   属于 drift（会被 reconcile 覆盖）。本件改用**声明式规则**，与 Controller 天然兼容。
+#   对照：2026-10-06 实测 AlbConfig 的 `defaultActions` / `httpDefaultActions` 写入均被
+#   Controller 覆盖为 ForwardGroup → 想让 IP 直访可用，**只能靠 Ingress 规则**。
+#
+# == 验证 ==
+#   curl --noproxy '*' http://43.98.186.238/api/status     # 期望 200
+#   curl --noproxy '*' http://47.237.68.142/api/status     # 期望 200
+#   curl -H "Host: sg-standby.internal.likha.hk" http://43.98.186.238/api/status  # 仍 200，不受影响
+#
+# == 退役条件 ==
+#   证书到位（G5）→ 443 + TLS 上线 → 公网 DNS/GTM 就绪后，本件可删
+#   （届时走域名，不需要 IP 直访）。
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: new-api-ph-standby-ip
+  namespace: new-api
+  labels:
+    app: new-api
+    site: ph-sg
+    env: prod
+    purpose: ip-direct-access
+  annotations:
+    alb.ingress.kubernetes.io/backend-protocol: HTTP
+    # 与主 Ingress 一致；证书到位后同步改回 '[{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80}]'
+    alb.ingress.kubernetes.io/healthcheck-enabled: "true"
+    alb.ingress.kubernetes.io/healthcheck-path: /api/status
+    alb.ingress.kubernetes.io/healthcheck-method: GET
+    alb.ingress.kubernetes.io/healthcheck-httpcode: http_2xx
+    alb.ingress.kubernetes.io/healthcheck-interval-seconds: "6"
+    alb.ingress.kubernetes.io/healthcheck-timeout-seconds: "3"
+    alb.ingress.kubernetes.io/healthy-threshold-count: "2"
+    alb.ingress.kubernetes.io/unhealthy-threshold-count: "3"
+    alb.ingress.kubernetes.io/connection-drain-enabled: "true"
+    alb.ingress.kubernetes.io/connection-drain-timeout: "120"
+spec:
+  ingressClassName: alb
+  rules:
+    # ★ 故意不写 host —— Controller 生成无 Host 条件的 Path 规则
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: new-api-ph-standby
+                port:
+                  number: 80

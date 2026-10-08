@@ -42,7 +42,7 @@ nc -vz ${NODE_PUBLIC_IP} 3000     # 期望 refused/timeout
 curl -sS --max-time 5 http://${NODE_PUBLIC_IP}:3000/api/status   # 期望失败
 
 # V2 ALB → Pod 通
-curl -sS https://api.likha.com/api/status | jq -e '.success'
+curl -sS https://www.likha.hk/api/status | jq -e '.success'
 
 # V3 RDS 内网只对 app 组开放（从非 app 网段的 ECS）
 timeout 5 psql "host=${RDS_MNL_PRI} dbname=postgres user=newapi sslmode=require" -c 'select 1'
@@ -193,18 +193,18 @@ kubectl -n new-api describe hpa hpa-new-api-stable | tail -20   # 看有无 Fail
 
 ```bash
 # V1 WAF 已介入（正常请求应带 WAF 注入的响应头 / 或观察拦截计数）
-curl -sSI https://api.likha.com/api/status | grep -Ei "waf|server"
+curl -sSI https://www.likha.hk/api/status | grep -Ei "waf|server"
 
 # V2 攻击特征被拦
-curl -sS -o /dev/null -w "%{http_code}\n" "https://api.likha.com/api/user/login?username=admin%27%20OR%20%271%27%3D%271"
+curl -sS -o /dev/null -w "%{http_code}\n" "https://www.likha.hk/api/user/login?username=admin%27%20OR%20%271%27%3D%271"
 # 期望 405/403（WAF 拦截），而不是 200/401
 
 # V3 CC 触发阈值
-for i in $(seq 1 2000); do curl -s -o /dev/null -w "%{http_code} " https://api.likha.com/api/status; done; echo
+for i in $(seq 1 2000); do curl -s -o /dev/null -w "%{http_code} " https://www.likha.hk/api/status; done; echo
 # 期望尾部出现连续 403/405；验完从白名单移除测试 IP（否则 CI 挂了查不到原因）
 
 # V4 回调不被拦（用真实签名回调或沙箱）
-curl -sS -o /dev/null -w "%{http_code}\n" -X POST https://api.likha.com<notify-path> -d "..."   # 期望非 403
+curl -sS -o /dev/null -w "%{http_code}\n" -X POST https://www.likha.hk<notify-path> -d "..."   # 期望非 403
 ```
 
 #### 坑与注意事项
@@ -243,20 +243,20 @@ sequenceDiagram
 1. GTM（国际站**标准版（Standard）/ 旗舰版（Ultimate）**两档，P1-19）实例 `gtm-newapi-ph`。
 2. **访问池**：主池 `pool-mnl` = 马尼拉 ALB 的 DNS 名称；备池 `pool-sg` **暂不加入**（备 region 未通过 M4 前不得进池）。
 3. 访问策略：就近延迟（用户 → 主池），健康探测 `GET /api/status`，间隔 15s，超时 5s，连续 3 次失败判定不可用，切换 TTL 设 **60s**（`Ttl=60`，越小切换越快但 DNS 查询压力越大）。
-4. 业务域名 `api.likha.com` **CNAME 到 GTM 接入域名**。
+4. 业务域名 `www.likha.hk` **CNAME 到 GTM 接入域名**。
 
 #### 验证方法
 
 ```bash
 # V1 CNAME 链正确
-dig +short CNAME api.likha.com @8.8.8.8 ; dig +short api.likha.com @8.8.8.8
+dig +short CNAME www.likha.hk @8.8.8.8 ; dig +short www.likha.hk @8.8.8.8
 # 期望：先 GTM 接入域名，再解析到 ALB DNS
 
 # V2 TTL 与预期一致
-dig api.likha.com +noall +answer | awk '{print $2}'    # 期望 60
+dig www.likha.hk +noall +answer | awk '{print $2}'    # 期望 60
 
 # V3 健康探测在 GTM 侧全绿（控制台），并用真实探测断言
-curl -sS https://api.likha.com/api/status | jq -e '.success == true and .version != ""'
+curl -sS https://www.likha.hk/api/status | jq -e '.success == true and .version != ""'
 
 # V4 故障切换（演练窗口内）
 kubectl -n new-api scale deploy/new-api-stable 0     # 制造不可用
@@ -303,9 +303,9 @@ export KUBECONFIG=/tmp/kubeconfig-mnl
 kubectl --kubeconfig /tmp/pub.kubeconfig get ns    # 期望 timeout
 
 # V2 RBAC 最小权限（用 readonly 身份）
-kubectl --as-group newapi-viewer --as rd@likha.com -n new-api delete deploy/new-api-stable
+kubectl --as-group newapi-viewer --as rd@likha.hk -n new-api delete deploy/new-api-stable
 # 期望 Forbidden
-kubectl --as-group newapi-deployer --as ci@likha.com -n new-api get secrets
+kubectl --as-group newapi-deployer --as ci@likha.hk -n new-api get secrets
 # 期望按策略：允许 get（部署需要）但不允许 list 全部 namespace
 
 # V3 kubeconfig 60 分钟后失效
@@ -330,7 +330,7 @@ aliyun actiontrail LookupEvents --StartTime ... --EventName GrantPermissions   #
 ☐ WAF 云原生接入 + 攻击特征 403 + 回调路径不被拦
 ☐ GTM 主池健康、TTL 60、CNAME 链正确、备池未加入
 ☐ 运维访问面：私网端点、最小 RBAC、60 分钟 kubeconfig、审计可查
-☐ api.likha.com 已可对外提供服务（仅主站）
+☐ www.likha.hk 已可对外提供服务（仅主站）
 ```
 
 ---
@@ -354,7 +354,7 @@ metadata:
 spec:
   ingressClassName: alb
   rules:
-  - host: sg-standby.internal.likha.com      # 仅用于 SNI 路由与验收，不上公网
+  - host: sg-standby.internal.likha.hk      # 仅用于 SNI 路由与验收，不上公网
     http:
       paths: [{path: /, pathType: Prefix, backend: {service: {name: new-api-ph-standby, port: {number: 80}}}}]
 ```
@@ -362,14 +362,14 @@ spec:
 **验证**：
 
 ```bash
-curl -sS --resolve sg-standby.internal.likha.com:443:${SG_ALB_VIP} \
-  https://sg-standby.internal.likha.com/api/status | jq -e '.success'
+curl -sS --resolve sg-standby.internal.likha.hk:443:${SG_ALB_VIP} \
+  https://sg-standby.internal.likha.hk/api/status | jq -e '.success'
 # 主站 token 打备站业务接口（SESSION_SECRET 一致性复验，§7.4 V4）
 ```
 
 **修复与坑**：
 - `IngressClass is invalid` → SG 集群未装 `alb-ingress-controller` 或未建 `IngressClass alb`（与主站各自独立，两集群都要建）。
-- **坑｜把备站 Ingress host 写成 `api.likha.com`。** 后果：一旦 GTM 或本地 hosts 指错，公网流量进备站，且证书/SNI 与主站混用。改进：备站 host 一律加 `.internal.` 段，并在 CI 里禁止 `api.likha.com` 出现在 SG 集群 manifest。
+- **坑｜把备站 Ingress host 写成 `www.likha.hk`。** 后果：一旦 GTM 或本地 hosts 指错，公网流量进备站，且证书/SNI 与主站混用。改进：备站 host 一律加 `.internal.` 段，并在 CI 里禁止 `www.likha.hk` 出现在 SG 集群 manifest。
 - **坑｜新加坡 ALB 未挂 WAF。** 后果：接管后无 L7 防护。改进：D6 同步给 SG ALB 接 WAF（云原生模式），规则从主站导出模板保持一致 —— 这也是 §1.1#6 提到"规则差异导致切换后行为不一致"的根治。
 
 ### 9.2 任务 26｜日志服务 SLS / 可观测监控 Prometheus 版 / 可观测可视化 Grafana 版 / 云监控站点监控
@@ -480,9 +480,9 @@ alb.ingress.kubernetes.io/canary-by-header-value: "1"
 
 ```bash
 # V1 头流量强制进 canary
-curl -sS -H "x-canary: 1" https://api.likha.com/api/status | jq -r .version
+curl -sS -H "x-canary: 1" https://www.likha.hk/api/status | jq -r .version
 # V2 权重比例统计（1000 次采样，canary 版本占比 ≈5%）
-for i in $(seq 1 1000); do curl -s https://api.likha.com/api/status | jq -r .version; done | sort | uniq -c
+for i in $(seq 1 1000); do curl -s https://www.likha.hk/api/status | jq -r .version; done | sort | uniq -c
 # V3 canary 异常秒级归零
 kubectl -n new-api annotate ingress new-api-canary alb.ingress.kubernetes.io/canary-weight="0" --overwrite
 ```
@@ -605,7 +605,7 @@ secrets := []string{os.Getenv("SESSION_SECRET"), os.Getenv("SESSION_SECRET_OLD")
 
 ```bash
 # V1 重叠窗口：旧 token 在滚动后仍可用
-curl -sS -H "Authorization: Bearer $OLD_TOKEN" https://api.likha.com/api/user/self | jq -e '.success'   # 期望 true
+curl -sS -H "Authorization: Bearer $OLD_TOKEN" https://www.likha.hk/api/user/self | jq -e '.success'   # 期望 true
 # V2 新签发 token 立即可用且被两 Pod 都认
 # V3 轮转后 KMS 旧版本不可读（防止误恢复）
 aliyun kms GetSecretValue --SecretName aone/newapi/prod/SESSION_SECRET --VersionId <old>   # 期望报错或按策略拒绝
@@ -656,7 +656,7 @@ psql "$DSN_MIGRATE" -c "select id,status from orders where out_trade_no='TEST'" 
 ```bash
 # 从数字证书管理服务取证书 ID 并确认覆盖域名
 aliyun cas DescribeUserCertificateDetail --CertId ${CERT_ID} | jq -r '.CommonName, .Sans'
-# 期望 Sans 含 api.likha.com, ops.likha.com, *.likha.com
+# 期望 Sans 含 www.likha.hk, ops.likha.hk, *.likha.hk
 
 # 部署到 ALB 监听（AlbConfig 里声明式管理，见 §6.3；不要在控制台手工挂载）
 # WAF / 全站加速 DCDN 侧在各自控制台或 OpenAPI 绑定同一 CertId
@@ -666,11 +666,11 @@ aliyun cas DescribeUserCertificateDetail --CertId ${CERT_ID} | jq -r '.CommonNam
 
 ```bash
 # V1 SNI 正确（同 IP 多域名场景）
-echo | openssl s_client -connect ${ALB_VIP}:443 -servername api.likha.com 2>/dev/null | openssl x509 -noout -dates -subject
-echo | openssl s_client -connect ${ALB_VIP}:443 -servername nonexistent.likha.com 2>&1 | grep -Ei "alert|error"
+echo | openssl s_client -connect ${ALB_VIP}:443 -servername www.likha.hk 2>/dev/null | openssl x509 -noout -dates -subject
+echo | openssl s_client -connect ${ALB_VIP}:443 -servername nonexistent.likha.hk 2>&1 | grep -Ei "alert|error"
 # V2 证书链完整（Android/老客户端友好）
-curl -sSIv https://api.likha.com/api/status 2>&1 | grep -E "SSL certificate|issuer"
-nmap --script ssl-enum-ciphers -p 443 api.likha.com | tail -20    # 期望 grade A，无 SHA1/弱套件
+curl -sSIv https://www.likha.hk/api/status 2>&1 | grep -E "SSL certificate|issuer"
+nmap --script ssl-enum-ciphers -p 443 www.likha.hk | tail -20    # 期望 grade A，无 SHA1/弱套件
 # V3 到期与自动续期
 aliyun cas DescribeUserCertificateList --ShowSize 50 | jq -r '.CertificateList[] | [.Name,.Fingerprint,.AfterDate] | @tsv'
 # 期望 AfterDate ≥ 今天 + 25 天；<30 天触发告警（P0-7：最长约 199/200 天）
@@ -678,7 +678,7 @@ aliyun cas DescribeUserCertificateList --ShowSize 50 | jq -r '.CertificateList[]
 
 **坑**：
 - **坑 1｜只换数字证书管理服务（CAS）里的证书，没同步 AlbConfig。** 后果：ALB 继续用旧证书，到期日全站 HTTPS 报错。改进：**证书部署纳入 GitOps**（CertManager + `cert-manager-alibabacloud-dns01-webhook`，或 ACM/KMS → 外部同步 Job 调 `UpdateListenerAttribute`）；到期告警必须打到 §10.8 值班通道。
-- **坑 2｜通配符不覆盖多级。** `*.likha.com` **不覆盖** `a.b.likha.com`。若将来用 `cdn.api.likha.com` 会握手失败。改进：域名规划统一二级。
+- **坑 2｜通配符不覆盖多级。** `*.likha.hk` **不覆盖** `a.b.likha.hk`。若将来用 `cdn.www.likha.hk` 会握手失败。改进：域名规划统一二级。
 - **坑 3｜国际站没有免费 DV（P0-7）**，别按国内站经验"等免费证书签发"。改进：付费 DigiCert/GlobalSign 通配符 + 托管自动续期，预算入 §9.9。
 - **坑 4｜证书私钥落盘在本地。** 改进：私钥只在数字证书管理服务/KMS；导出仅限轮换窗口并即时销毁（安全核查 #38 会查）。
 
@@ -849,7 +849,7 @@ psql "$DSN_MIGRATE" -c "select usename,state,count(*) from pg_stat_activity grou
 ```bash
 # 逐步加压找拐点：并发 SSE 数 vs 错误率/延迟/资源
 hey -z 120s -q <rate> -c <conc> -m POST -H "Content-Type: application/json" \
-  -D /tmp/req.json https://api.likha.com/v1/chat/completions
+  -D /tmp/req.json https://www.likha.hk/v1/chat/completions
 ```
 
 记录拐点表（**用 perf 环境，同规格 2C4G request / 4C8G limit**）：
@@ -1067,7 +1067,7 @@ sequenceDiagram
 2. RDS 控制台 →「实例列表」→ 实例详情 →「服务可用性」→「主备切换」（指定 5 分钟内），同时开始打流量：
 
 ```bash
-hey -z 900s -c 100 -m GET https://api.likha.com/api/status &
+hey -z 900s -c 100 -m GET https://www.likha.hk/api/status &
 ```
 
 3. 观察并记录：
@@ -1152,7 +1152,7 @@ flowchart TD
 | P2 | 错误预算快速燃烧、P95 超标 10 分钟、HPA 打满 max、节点池扩容失败 | 群 + 短信 | 30 分钟 |
 | P3 | 单副本重启、慢查询、证书 30 天到期、日志降级计数上升 | 群 | 下个工作日 |
 
-4. 值班表（2 人轮换 + 项目负责人升级路径）；`ops.likha.com` 只对内网/堡垒开放。
+4. 值班表（2 人轮换 + 项目负责人升级路径）；`ops.likha.hk` 只对内网/堡垒开放。
 
 **验证**
 

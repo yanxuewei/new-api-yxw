@@ -1,0 +1,25 @@
+# 任务 26 步骤 2：new-api 容器 stdout 采集（声明式，logtail-ds 消费）
+# 说明：文件日志走**独立配置** `aliyunlogconfig-app-file.yaml`（2026-10-06 纠正版落地）：
+#   落点 `/data/logs/oneapi-*.log`（镜像 WORKDIR=/data；卡内写的 `/app/logs` 不存在），
+#   开关是 CLI `-log-dir`（common/init.go:22，**无 LOG_DIR 环境变量**），
+#   且 logger/logger.go:67-68 `io.MultiWriter(os.Stdout, fd)` ⇒ 文件内容 = stdout 子集。
+#   ⇒ 本配置（stdout）仍是完备主路，文件侧为**冗余留存**（可按文件/轮转边界查询）。
+apiVersion: log.alibabacloud.com/v1alpha1
+kind: AliyunLogConfig
+metadata:
+  name: new-api-app-stdout
+  namespace: new-api
+spec:
+  logstore: app-stdout
+  logtailConfig:
+    configName: new-api-app-stdout
+    inputType: plugin
+    inputDetail:
+      plugin:
+        inputs:
+          - type: service_docker_stdout
+            detail:
+              IncludeLabel:
+                io.kubernetes.container.name: new-api
+              Stderr: true
+              Stdout: true

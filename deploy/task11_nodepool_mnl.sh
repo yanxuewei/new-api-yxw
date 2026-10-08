@@ -186,7 +186,7 @@ fi
 if [[ "$MODE" == "dry-run" ]]; then
   step "1. 渲染建池 body（含 base64 user_data）"
   [[ -f "$USERDATA_SRC" ]] || { fail "缺 user_data 源文件：$USERDATA_SRC"; exit 1; }
-  UD_B64=$(tr -d '\r' < "$USERDATA_SRC" | base64 -w0)
+  UD_B64=$(tr -d '\r' < "$USERDATA_SRC" | python3 -c "import base64,sys;sys.stdout.write(base64.b64encode(sys.stdin.buffer.read()).decode())")
   say "    user_data 源: $USERDATA_SRC  ($(wc -c < "$USERDATA_SRC" | tr -d ' ') B → b64 $(printf '%s' "$UD_B64" | wc -c | tr -d ' ') B)"
   jq -n --arg name "$NODEPOOL_NAME" --arg rg "$RESOURCE_GROUP_ID" \
      --arg vswa "$VSW_APP_A" --arg vswb "$VSW_APP_B" --arg sg "$SG_APP" \
@@ -211,7 +211,7 @@ fi
 if [[ -z "$NPID" ]]; then
   step "1. 渲染建池 body（手动模式，desired_size=$DESIRED）"
   [[ -f "$USERDATA_SRC" ]] || { fail "缺 user_data 源文件：$USERDATA_SRC"; exit 1; }
-  UD_B64=$(tr -d '\r' < "$USERDATA_SRC" | base64 -w0)
+  UD_B64=$(tr -d '\r' < "$USERDATA_SRC" | python3 -c "import base64,sys;sys.stdout.write(base64.b64encode(sys.stdin.buffer.read()).decode())")
   jq -n --arg name "$NODEPOOL_NAME" --arg rg "$RESOURCE_GROUP_ID" \
      --arg vswa "$VSW_APP_A" --arg vswb "$VSW_APP_B" --arg sg "$SG_APP" \
      --arg img "$IMAGE_TYPE" --arg key "$KEY_PAIR" --arg site "$SITE_TAG" \

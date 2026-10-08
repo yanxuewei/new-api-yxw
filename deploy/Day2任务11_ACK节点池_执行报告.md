@@ -133,7 +133,7 @@ ap-southeast-6b	ecs.g9ae.2xlarge
 | B2 | **ACK 服务未开通**（`ErrorNotEnabled: please enable cskpro`） | 建簇 400，任务 10/11 全部停摆 | 余额到位后 `aliyun cs OpenAckService --type propayasgo`（或控制台开通），脚本已内置预检门禁 |
 | B2 | 任务 10 集群未创建 | 任务 11 无 `cluster_id`，无法建池 | 跑 `cluster` 步骤（5–15 min） |
 | B3 | ECS 密钥对为空 | 节点无 SSH 入口 | 脚本 `keypair` 步骤自动创建 `newapi-mnl`，私钥落 `~/.ssh/newapi-mnl.pem` |
-| B4 | ACR VPC 端点未关联马尼拉 VPC（`LinkedVpcs=[]`，任务 16） | 节点拉不动镜像（与建池无关，但阻塞任务 18 部署） | 另卡处理 |
+| B4 | ACR VPC 端点未关联马尼拉 VPC（`LinkedVpcs=[]`，任务 16） | 当时记为「节点拉不动镜像 ⇒ 阻塞任务 18」；**实测未真阻塞**——helper 免密 + 公网域名即可拉起（任务 18 报告 §六-①），只是路径未优化 | 另卡处理 ⇒ **已解除**：任务 16 2b 于 2026-10-05 18:18 关联（Ip `10.0.22.220`），任务 18 消费侧 18:53 起改用 `-vpc` 内网域名拉取（`Day2任务18_master迁移幂等_执行报告.md` §十） |
 
 ---
 

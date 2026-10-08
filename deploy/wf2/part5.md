@@ -87,7 +87,7 @@ kubectl -n new-api annotate ingress new-api-canary alb.ingress.kubernetes.io/can
 ```
 
 - 维护页必须在**上线前就已部署好**并能一键切换（否则故障时来不及做）。
-- DNS 直连兜底：`api.likha.com` 的**低 TTL A 记录**（预置为 ALB IP）作为 GTM 失效逃生通道，并在 Runbook 里标注"这会绕过 GTM，只用于极端场景"。
+- DNS 直连兜底：`www.likha.hk` 的**低 TTL A 记录**（预置为 ALB IP）作为 GTM 失效逃生通道，并在 Runbook 里标注"这会绕过 GTM，只用于极端场景"。
 
 ### 运维通道失效
 

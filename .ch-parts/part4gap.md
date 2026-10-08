@@ -251,7 +251,7 @@ done
 # 期望三份 JSON 都含 "success":true 且 "version" 与镜像 tag 一致
 
 # V2 压测基线
-hey -z 60s -c 200 -m POST -H "Authorization: Bearer $TOKEN" -D body.json https://api.likha.com/v1/chat/completions
+hey -z 60s -c 200 -m POST -H "Authorization: Bearer $TOKEN" -D body.json https://www.likha.hk/v1/chat/completions
 # 记录 p50/p95/p99、错误率、上游 429 次数
 
 # V3 环境隔离

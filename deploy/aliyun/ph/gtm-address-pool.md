@@ -38,8 +38,8 @@
 ## 5. 验证（D5 执行时照抄 §8.4）
 
 ```bash
-dig +short CNAME api.likha.com @8.8.8.8 ; dig +short api.likha.com @8.8.8.8   # 期望先 GTM 域名再 ALB DNS
-dig api.likha.com +noall +answer | awk '{print $2}'                           # 期望 TTL=60
-curl -sS https://api.likha.com/api/status | jq -e '.success == true and .version != ""'
+dig +short CNAME www.likha.hk @8.8.8.8 ; dig +short www.likha.hk @8.8.8.8   # 期望先 GTM 域名再 ALB DNS
+dig www.likha.hk +noall +answer | awk '{print $2}'                           # 期望 TTL=60
+curl -sS https://www.likha.hk/api/status | jq -e '.success == true and .version != ""'
 # 故障发现演练（窗口内）：scale deploy/new-api-stable 0 → 期望 GTM ≤60s 判异常并告警（备池未挂时不切换）→ scale 回 4
 ```

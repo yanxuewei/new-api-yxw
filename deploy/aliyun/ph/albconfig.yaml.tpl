@@ -24,7 +24,7 @@ spec:
       - vSwitchId: ${VSW_MNL_PUB_B}
     accessLogConfig:
       logProject: sls-newapi-mnl      # ⚠ 必须先建 SLS Project/Logstore（§9.2）再配，否则日志静默丢失（坑 5）
-      logStore: alb-access
+      logStore: alb_access
     tags:
       - { key: project, value: new-api }
       - { key: site, value: ph-mnl }

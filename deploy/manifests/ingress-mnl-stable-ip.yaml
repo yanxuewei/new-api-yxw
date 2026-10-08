@@ -1,0 +1,105 @@
+# 任务 19 收口 · 马尼拉（主站）**无 Host** Ingress `new-api-stable-ip`
+# 集群：cd57e40ce9a634c1698c2f5c5e09bd93c（ap-southeast-6）
+# 目的：让 **ALB 公网 IP 直访**（浏览器直接输 IP / curl 不带 Host）命中主站，
+#       无需 `-H "Host: ..."`、无需改 /etc/hosts。与新加坡 `new-api-ph-standby-ip` 同构。
+#
+# == 背景 ==
+#   本件建立前，马尼拉 :80 的规则为：
+#     rule-80-1 (Prio 1)  Host=ph-verify.internal.likha.hk AND Path=/*  → sgp-tqgwt413t19mum8oa9（Eni）
+#     rule-80-2 (Prio 2)  Path=/*（无 Host）                            → FixedResponse 404
+#                         ↑ 来自 Ingress `new-api-catchall-404`（order=100）
+#     因此 `http://8.212.161.49` 当时返回 **404 Not Found**。
+#     （更早的"IP 直连 200"靠的是手工往 Controller 占位组 `sgp-fm7kdwz99wtzbffkfx`
+#      塞 4 个节点后端 —— 属 drift，且**会被 catchall 规则遮蔽**。）
+#
+# == 原理 ==
+#   本 Ingress `order: "50"` 介于 `new-api-verify`(order 1) 与 `new-api-catchall-404`(order 100)
+#   之间，且 `spec.rules[0]` **不写 host** ⇒ Controller 生成的无 Host 规则优先级
+#   高于 catchall ⇒ 未匹配任何 Host 的流量命中主站业务。
+#   catchall-404 保留（Prio 更低），作为"将来 noHost 件被删后"的兜底。
+#
+# == 与 default action 的关系（重要）==
+#   `defaultActions` 只在**所有规则都不命中**时才生效。本件生效后，无 Host 请求被规则
+#   命中，**不再落 default**。因此本件与 default 指向哪个组无关。
+#   （2026-10-06 SG 侧已实证 AlbConfig 的 defaultActions/httpDefaultActions 会被
+#    Controller 覆盖，故不依赖该字段。）
+#
+# == 验证 ==
+#   curl --noproxy '*' http://8.212.161.49/api/status        # 期望 200
+#   curl --noproxy '*' http://8.212.183.7/api/status         # 期望 200
+#   curl -H "Host: ph-verify.internal.likha.hk" http://8.212.161.49/api/status   # 仍 200
+#
+# == ⚠ 副作用（已在报告中明示并经用户确认）==
+#   主站将被**裸 IP 可访问**，绕过域名策略；属于刻意选择，用于免 DNS 验收。
+#
+# == 退役条件 ==
+#   G5 证书到位 → 443+TLS → 公网 DNS/GTM 就绪后，本件可删（届时走域名）。
+#
+# == 2026-10-06 变更②（429 风险处置）==
+#   ① `healthcheck-interval-seconds: 6 → 20`；
+#   ② **合并同质 ServerGroup**：并入原 `Ingress/new-api-verify` 的 host 规则
+#      （`ph-verify.internal.likha.hk`，原指向同一 Service），随后删除该 Ingress。
+#      原因：ALB 按"Inress × Service"建 ServerGroup，两个 Ingress 指向同一 Service ⇒
+#      两个同质组各做一套健康检查（`/api/status`，6s×4 后端×2 组），叠加全局 API 限流
+#      （360/180s per client IP，健康检查源 IP = ALB 两个 ENI）⇒ 实测约半数检查被 429。
+#   回滚：重新 apply `deploy/aliyun/ph/placeholder-svc-ingress.yaml` 并从前述规则中删掉 host 段。
+#   依据：`deploy/风险_ALB健康检查被限流429_2026-10-06.md`
+#
+#   ③ **Host 匹配（用户 2026-10-06 裁定 A：接受）**：本件的**无 Host 规则匹配任意 Host**
+#      （含伪造 Host），且优先级高于 `Ingress/new-api-catchall-404`（order=100）⇒ 任务 47
+#      的「伪造 Host → 404」加固自本件 18:17 生效起失效，实测 `Host: bogus.example.com` → 200。
+#      裁定：**不整改**（裸 IP 直访是既有确认取舍；Host 白名单与无 Host 规则在 ALB 规则层无法共存）。
+#      **收敛路径**：G5 证书 + 公网 DNS 就绪 → 删除本件 → catchall-404 恢复为唯一兜底（届时补测 404）。
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: new-api-stable-ip
+  namespace: new-api
+  labels:
+    app: new-api
+    project: new-api
+    site: ph-mnl
+    env: prod
+    purpose: ip-direct-access
+  annotations:
+    alb.ingress.kubernetes.io/order: "50"          # ★ verify(1) < 本件(50) < catchall(100)
+    alb.ingress.kubernetes.io/backend-protocol: HTTP
+    # 与主站其余 Ingress 一致；证书到位后同步改回 '[{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80}]'
+    alb.ingress.kubernetes.io/healthcheck-enabled: "true"
+    alb.ingress.kubernetes.io/healthcheck-path: /api/status
+    alb.ingress.kubernetes.io/healthcheck-method: GET
+    alb.ingress.kubernetes.io/healthcheck-httpcode: http_2xx
+    # 2026-10-06 变更：6 → 20s（429 风险处置①；配合下方 ServerGroup 合并，健康检查流量降约 85%）
+    alb.ingress.kubernetes.io/healthcheck-interval-seconds: "20"
+    alb.ingress.kubernetes.io/healthcheck-timeout-seconds: "3"
+    alb.ingress.kubernetes.io/healthy-threshold-count: "2"
+    alb.ingress.kubernetes.io/unhealthy-threshold-count: "3"
+    alb.ingress.kubernetes.io/connection-drain-enabled: "true"
+    alb.ingress.kubernetes.io/connection-drain-timeout: "120"
+spec:
+  ingressClassName: alb
+  rules:
+    # ★ 2026-10-06 合并：原独立 Ingress `new-api-verify`（host ph-verify.internal.likha.hk，指向同一
+    #   Service）并为本 Ingress 的第一条规则 ⇒ 消除"两个 Ingress 各生成一个同质 ServerGroup、
+    #   健康检查 ×2"的问题。host 规则置于无 Host 规则之前，保证其优先级更高。
+    - host: ph-verify.internal.likha.hk
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: new-api-stable
+                port:
+                  number: 80
+    # ★ 故意不写 host —— Controller 生成无 Host 条件的 Path 规则
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: new-api-stable     # ClusterIP 172.21.15.220，4 个 ready endpoint
+                port:
+                  number: 80

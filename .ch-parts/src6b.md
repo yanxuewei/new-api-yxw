@@ -21,7 +21,7 @@ secrets := []string{os.Getenv("SESSION_SECRET"), os.Getenv("SESSION_SECRET_OLD")
 
 ```bash
 # V1 重叠窗口：旧 token 在滚动后仍可用
-curl -sS -H "Authorization: Bearer $OLD_TOKEN" https://api.likha.com/api/user/self | jq -e '.success'   # 期望 true
+curl -sS -H "Authorization: Bearer $OLD_TOKEN" https://www.likha.hk/api/user/self | jq -e '.success'   # 期望 true
 # V2 新签发 token 立即可用且被两 Pod 都认
 # V3 轮转后 KMS 旧版本不可读（防止误恢复）
 aliyun kms GetSecretValue --SecretName aone/newapi/prod/SESSION_SECRET --VersionId <old>   # 期望报错或按策略拒绝
@@ -72,7 +72,7 @@ psql "$DSN_MIGRATE" -c "select id,status from orders where out_trade_no='TEST'" 
 ```bash
 # 从 CAS 取证书 ID 并确认覆盖域名
 aliyun cas DescribeUserCertificateDetail --CertId ${CERT_ID} | jq -r '.CommonName, .Sans'
-# 期望 Sans 含 api.likha.com, ops.likha.com, *.likha.com
+# 期望 Sans 含 www.likha.hk, ops.likha.hk, *.likha.hk
 
 # 部署到 ALB listener（AlbConfig 里声明式管理，见 §6.3；不要控制台手工挂）
 # WAF / DCDN 侧在各自控制台或 OpenAPI 绑定同一 CertId
@@ -82,11 +82,11 @@ aliyun cas DescribeUserCertificateDetail --CertId ${CERT_ID} | jq -r '.CommonNam
 
 ```bash
 # V1 SNI 正确（同 IP 多域名场景）
-echo | openssl s_client -connect ${ALB_VIP}:443 -servername api.likha.com 2>/dev/null | openssl x509 -noout -dates -subject
-echo | openssl s_client -connect ${ALB_VIP}:443 -servername nonexistent.likha.com 2>&1 | grep -Ei "alert|error"
+echo | openssl s_client -connect ${ALB_VIP}:443 -servername www.likha.hk 2>/dev/null | openssl x509 -noout -dates -subject
+echo | openssl s_client -connect ${ALB_VIP}:443 -servername nonexistent.likha.hk 2>&1 | grep -Ei "alert|error"
 # V2 证书链完整（Android/老客户端友好）
-curl -sSIv https://api.likha.com/api/status 2>&1 | grep -E "SSL certificate|issuer"
-nmap --script ssl-enum-ciphers -p 443 api.likha.com | tail -20    # 期望 grade A，无 SHA1/弱套件
+curl -sSIv https://www.likha.hk/api/status 2>&1 | grep -E "SSL certificate|issuer"
+nmap --script ssl-enum-ciphers -p 443 www.likha.hk | tail -20    # 期望 grade A，无 SHA1/弱套件
 # V3 到期与自动续期
 aliyun cas DescribeUserCertificateList --ShowSize 50 | jq -r '.CertificateList[] | [.Name,.Fingerprint,.AfterDate] | @tsv'
 # 期望 AfterDate ≥ 今天 + 25 天；<30 天触发告警（P0-7：最长约 199/200 天）
@@ -94,7 +94,7 @@ aliyun cas DescribeUserCertificateList --ShowSize 50 | jq -r '.CertificateList[]
 
 **坑**：
 - **坑 1｜只换 CAS 证书，没同步 AlbConfig。** 后果：ALB 继续用旧证书，到期日全站 HTTPS 报错。改进：**证书部署纳入 GitOps**（CertManager + `cert-manager-alibabacloud-dns01-webhook`，或 ACM/KMS → 外部同步 Job 调 `UpdateListenerAttribute`）；到期告警必须打到 §10.8 值班通道。
-- **坑 2｜通配符不覆盖多级。** `*.likha.com` **不覆盖** `a.b.likha.com`。若将来用 `cdn.api.likha.com` 会握手失败。改进：域名规划统一二级。
+- **坑 2｜通配符不覆盖多级。** `*.likha.hk` **不覆盖** `a.b.likha.hk`。若将来用 `cdn.www.likha.hk` 会握手失败。改进：域名规划统一二级。
 - **坑 3｜国际站没有免费 DV（P0-7）**，别按国内站经验"等免费证书签发"。改进：付费 DigiCert/GlobalSign 通配符 + 托管自动续期，预算入 §9.9。
 - **坑 4｜证书私钥落盘在本地。** 改进：私钥只在 CAS/KMS；导出仅限轮换窗口并即时销毁（安全核查 #38 会查）。
 
@@ -265,7 +265,7 @@ psql "$DSN_MIGRATE" -c "select usename,state,count(*) from pg_stat_activity grou
 ```bash
 # 逐步加压找拐点：并发 SSE 数 vs 错误率/延迟/资源
 hey -z 120s -q <rate> -c <conc> -m POST -H "Content-Type: application/json" \
-  -D /tmp/req.json https://api.likha.com/v1/chat/completions
+  -D /tmp/req.json https://www.likha.hk/v1/chat/completions
 ```
 
 记录拐点表（**用 perf 环境，同规格 2C4G request / 4C8G limit**）：
@@ -483,7 +483,7 @@ sequenceDiagram
 2. 控制台 **RDS → 实例 → 服务可用性 → 主备切换**（指定 5 分钟内），同时开始打流量：
 
 ```bash
-hey -z 900s -c 100 -m GET https://api.likha.com/api/status &
+hey -z 900s -c 100 -m GET https://www.likha.hk/api/status &
 ```
 
 3. 观察并记录：
@@ -568,7 +568,7 @@ flowchart TD
 | P2 | 错误预算快速燃烧、P95 超标 10 分钟、HPA 打满 max、节点池扩容失败 | 群 + 短信 | 30 分钟 |
 | P3 | 单副本重启、慢查询、证书 30 天到期、日志降级计数上升 | 群 | 下个工作日 |
 
-4. 值班表（2 人轮换 + 项目负责人升级路径）；`ops.likha.com` 只对内网/堡垒开放。
+4. 值班表（2 人轮换 + 项目负责人升级路径）；`ops.likha.hk` 只对内网/堡垒开放。
 
 **验证**
 

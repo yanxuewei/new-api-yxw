@@ -1,0 +1,60 @@
+# 任务 19 收口 · 马尼拉（主站）AlbConfig `mnl-alb`
+# 集群：cd57e40ce9a634c1698c2f5c5e09bd93c（ap-southeast-6）
+# 对应 IngressClass：`alb`（spec.parameters.name = mnl-alb，2026-09-30 建）
+# 对应 ALB 实例：alb-1riqckb1h8ezm0y7s9 / alb-newapi-mnl
+#
+# == 本文件与 2026-10-06 之前线上形态的差异（本次收敛，对齐新加坡 sg-alb）==
+#
+# 1) **删除 `listeners[].httpDefaultActions`**（关键）
+#    线上该字段经历三态漂移，且三态都对云端无效：
+#      · last-applied : Redirect → www.likha.hk:443
+#      · live spec    : FixedResponse 404 "Not Found"
+#      · 云端实际      : ForwardGroup → sgp-fm7kdwz99wtzbffkfx
+#    新加坡侧零风险探针（2026-10-06）已定论：**`defaultActions` / `httpDefaultActions`
+#    写入均被 Controller 用自己的 ForwardGroup 覆盖，与字段名对错无关。**
+#    ⇒ 该字段是纯噪声 + 潜在误导，删除它让声明与云端一致（ForwardGroup）。
+#
+# 2) **补齐超时 `idleTimeout: 60` / `requestTimeout: 600`**
+#    线上一直是 ALB 默认值 15 / 60（任务 19 V1b ❌ 的真实根因是**从未写过**这两个
+#    字段，而非"ALB 不支持"）。新加坡侧写入即生效、云端回读一致（60/600）。
+#
+# 3) 采用**官方最小形态** —— listeners 只给 port / protocol（+ 超时），不写 default action。
+#
+# 管理红线：只经 AlbConfig/Ingress 声明式管理，**禁止在 ALB 控制台改 listener/default**。
+# ⚠ AlbConfig 是 Cluster-scoped ⇒ 不写 namespace，命令不带 -n。
+# ⚠ finalizer `ingress.k8s.alibaba/resources` ⇒ `kubectl delete albconfig mnl-alb`
+#   会**级联删除云上 ALB 实例**。可改，不可删。
+apiVersion: alibabacloud.com/v1
+kind: AlbConfig
+metadata:
+  name: mnl-alb
+  labels:
+    project: new-api
+    site: ph-mnl
+    env: prod
+spec:
+  config:
+    name: alb-newapi-mnl
+    addressType: Internet
+    zoneMappings:
+      - vSwitchId: vsw-5ts9tgdq1xz3picjgoqyu   # vsw-mnl-pub-a / ap-southeast-6a
+      - vSwitchId: vsw-5ts1dygyh2x0daspwny2r   # vsw-mnl-pub-b / ap-southeast-6b
+    accessLogConfig:
+      logProject: sls-newapi-mnl
+      logStore: alb_access        # ★ 必须 `alb_` 前缀（webhook albconfig.alb.validate.k8s.io 硬校验）
+    tags:
+      - { key: project, value: new-api }
+      - { key: site, value: ph-mnl }
+      - { key: env, value: prod }
+
+  listeners:
+    - port: 80
+      protocol: HTTP
+      idleTimeout: 60             # ✅ 目标值（原 15）
+      requestTimeout: 600         # ✅ 目标值（ALB 硬上限，原 60）
+  # ⏳ 443 + TLS 待 G5 证书（账号内 CAS 证书数为 0）；就绪后在此追加：
+  #    - port: 443
+  #      protocol: HTTPS
+  #      certificates: [{ CertificateId: "${CERT_ID_MNL}" }]
+  #      idleTimeout: 60
+  #      requestTimeout: 600

@@ -1,0 +1,57 @@
+# 任务 25 · 新加坡（备站）Ingress `new-api-ph-standby`
+# 集群：ca75829e3492d491d9d434de087913798（ap-southeast-1）
+# 后端：Service/new-api-ph-standby:80 → Pod:3000（任务 28 已就绪，2/2 Running，跨 AZ）
+#
+# ⚠️ 与任务卡的一处**有意偏差**（必须记录）：
+#   任务卡写 `alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}]'`，
+#   但 CAS 证书缺失（`ListUserCertificateOrder --region ap-southeast-1` ⇒ TotalCount=0，
+#   G5 未闭环）⇒ 443 监听器无从创建。本次降级为 **HTTP:80**，证书到位后改为 HTTPS:443。
+#   验证方式：`curl -H "Host: sg-standby.internal.likha.hk" http://<ALB公网IP>/api/status`
+#   或 `curl --resolve sg-standby.internal.likha.hk:80:<ALB公网IP> http://.../api/status`
+#
+# == 关键资源（2026-10-06）==
+#   ALB      alb-amdwm60xmznh7s1nae（alb-newapi-sg，Active/Internet/Standard/PostPay）
+#   DNS      alb-amdwm60xmznh7s1nae.ap-southeast-1.alb.aliyuncsslbintl.com
+#   公网 IP  43.98.186.238（ap-southeast-1a / eip-t4np56ofc8jz8b4r67enz）
+#            47.237.68.142（ap-southeast-1b / eip-t4nepu7cfv1grgpw1hx6f）
+#   监听器   lsn-qmi1hpyr3j83tq3z8j :80 HTTP（ingress-auto-listener-80）
+#
+# ⚠️ host 必须带 `.internal.` 段（任务卡坑 1）：写 `www.likha.hk` 会让公网流量进备站，
+#    且证书/SNI 与主站混用。备站常态**不上公网 DNS**，GTM 备池（任务 21）按硬门禁
+#    M4 接管演练通过前不得入池。
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: new-api-ph-standby
+  namespace: new-api
+  labels:
+    app: new-api
+    site: ph-sg
+    env: prod
+  annotations:
+    alb.ingress.kubernetes.io/backend-protocol: HTTP
+    # ↓ 证书到位后改回任务卡口径 '[{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80}]'
+    alb.ingress.kubernetes.io/healthcheck-enabled: "true"
+    alb.ingress.kubernetes.io/healthcheck-path: /api/status
+    alb.ingress.kubernetes.io/healthcheck-method: GET
+    alb.ingress.kubernetes.io/healthcheck-httpcode: http_2xx
+    alb.ingress.kubernetes.io/healthcheck-interval-seconds: "6"
+    alb.ingress.kubernetes.io/healthcheck-timeout-seconds: "3"
+    alb.ingress.kubernetes.io/healthy-threshold-count: "2"
+    alb.ingress.kubernetes.io/unhealthy-threshold-count: "3"
+    alb.ingress.kubernetes.io/connection-drain-enabled: "true"
+    alb.ingress.kubernetes.io/connection-drain-timeout: "120"
+spec:
+  ingressClassName: alb
+  rules:
+    - host: sg-standby.internal.likha.hk      # 仅 SNI/Host 路由与内部验收，不入公网 DNS
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: new-api-ph-standby
+                port:
+                  number: 80
