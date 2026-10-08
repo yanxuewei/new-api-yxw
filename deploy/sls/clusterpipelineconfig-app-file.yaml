@@ -1,0 +1,41 @@
+# 任务 26 步骤 2（2026-10-08 修订版）：new-api 容器**文件日志**采集 —— 新式 pipeline（对齐 app-stdout）
+#
+# 为什么迁移：老式 `AliyunLogConfig` 的控制器在 CRD→SLS 翻译时会把
+# `enable_timestamp_nanosecond` **静默剥掉**（同 app-stdout 的四坑之一）⇒ 纳秒开关形同虚设。
+# 只有新式 `ClusterAliyunPipelineConfig` 的 `spec.config.global` 能持久化该键。
+#
+# global 双开关（与 app-stdout 一致）：
+#   - EnableTimestampNanosecond：纳秒总开关（能否出 __time_ns_part__ 取决于有无亚秒时间源，见下）
+#   - UsingOldContentTag：保持 1.x tag 放置，尝试把容器元数据从 `__tag__:` 标签拉回普通字段
+#
+# 文件路径语义：`dockerFile: true`（老 CRD）↔ `EnableContainerDiscovery: true`（新 pipeline），
+#   FilePaths 用**容器内路径** `/data/logs/*.log`（镜像 WORKDIR=/data，logger MultiWriter 落盘）。
+apiVersion: telemetry.alibabacloud.com/v1alpha1
+kind: ClusterAliyunPipelineConfig
+metadata:
+  name: new-api-app-file-ns
+spec:
+  project:
+    name: k8s-log-cd57e40ce9a634c1698c2f5c5e09bd93c
+    endpoint: ap-southeast-6.log.aliyuncs.com
+  config:
+    global:
+      EnableTimestampNanosecond: true
+      UsingOldContentTag: true
+    inputs:
+      - Type: input_file
+        FilePaths:
+          - /data/logs/*.log
+        MaxDirSearchDepth: 1
+        EnableContainerDiscovery: true
+        FileEncoding: utf8
+        ContainerFilters:
+          IncludeContainerLabel:
+            io.kubernetes.container.name: new-api
+    flushers:
+      - Type: flusher_sls
+        Project: k8s-log-cd57e40ce9a634c1698c2f5c5e09bd93c
+        Logstore: app-file
+        Region: ap-southeast-6
+        Endpoint: ap-southeast-6-intranet.log.aliyuncs.com
+        TelemetryType: logs

@@ -1,3 +1,11 @@
+# ⚠️ 已废弃（2026-10-08）：被 `clusterpipelineconfig-app-file.yaml` / `…-sg.yaml`
+#    （新式 ClusterAliyunPipelineConfig）取代，两集群的 `AliyunLogConfig/new-api-app-file` 已删除。
+#    原因：本老式 CRD 的控制器会把 inputDetail 里未登记的键静默剥掉，纳秒开关
+#    `enable_timestamp_nanosecond` 到不了 SLS。⚠ 但注意：迁移后实测**文件采集拿不到 ms**
+#    （内容 `[GIN] … 18:31:49` 只有秒，且无 `_time_` 类亚秒字段）⇒ ns 开关对 app-file 是"预留"，
+#    要真出 ms 需先让 new-api 日志格式带毫秒（代码改动）。容器元数据也**只能**是 `__tag__:` 前缀
+#    （文件采集天生如此，`UsingOldContentTag` 无效）——详见 Day3任务26_SLS与可观测_执行报告.md「追加 3」。
+#
 # 任务 26 步骤 2（纠正版，2026-10-06）：new-api 容器**文件日志**采集
 #
 # 与卡内原始写法的差异（卡内三处不成立，取证见 Day3任务26_SLS与可观测_执行报告.md §一）：

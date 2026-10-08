@@ -217,3 +217,25 @@ processors:
 6. **测试口径坑（复用任务 47 教训）**：宿主 `http_proxy` 会污染 curl 结论；SLS/ARMS 的 region 参数必须显式传（否则默认 ap-southeast-6 会找错项目）。
 7. **审计类索引/投递（2026-10-06）**：两站 `rds-audit` 索引**已建**（IaC `deploy/sls/create_index_audit.sh`，全文 `ttl=30`）；但 RDS SQL 审计 `Disabled`、ActionTrail 投递 OSS ⇒ 两库 `count=0`，**开启投递属 RDS 写、待授权**。`sls-newapi-sg/waf-log` 索引**待任务 20 接入 WAF 后**再加回脚本 `TARGETS`（避免为空 Logstore 付索引存储）。
 8. **审计类查询口径**见 §一末尾代码块：`GetLogs` 前先 `GetIndex` 断言（无索引报 `IndexConfigNotExist` 会被误读为"没数据"）。
+
+---
+
+### ⏱ 追加 3（2026-10-08）：app-file 迁移新式 pipeline —— 及"对齐 app-stdout"两处不可行的定论
+
+**背景**：要求 app-file 做与 app-stdout 类似的修改（ms 精度 / 容器元数据裸字段）。
+
+**现状实测（迁移前，`GetLogsV2` 字段对比）**：app-file 的容器元数据**一直是** `__tag__:_pod_name_` / `__tag__:_image_name_` / `__tag__:_container_ip_`（今日与昨日窗口完全一致）⇒ **不是回归**；`__time__` 为**采集时刻**且无亚秒。
+
+**已做迁移（两站点 ✅）**：老式 `AliyunLogConfig` → 新式 `ClusterAliyunPipelineConfig`
+（`input_file` + `EnableContainerDiscovery: true` + `ContainerFilters.IncludeContainerLabel` + `global.{EnableTimestampNanosecond,UsingOldContentTag}`），
+老 CRD `new-api-app-file` 两集群已删。迁移后采集正常（`__tag__:__path__` / `__user_defined_id__` / 容器元数据齐全，新日志时间连续），**无回归**。清单：`deploy/sls/clusterpipelineconfig-app-file.yaml` / `…-sg.yaml`；老清单 `deploy/sls/aliyunlogconfig-app-file.yaml` 已标废弃。
+
+**结论 1 —— 容器元数据变裸字段：文件采集不可行 ❌**
+文件输入（`input_file`，无论老 CRD 的 `common_reg_log` 还是新 pipeline）把容器元数据写入 **LogGroup Tag** ⇒ SLS 侧渲染为 `__tag__:` 前缀；`global.UsingOldContentTag: true` 实测**无效**（对原生插件同样无效，见「追加 2」）。app-stdout 的裸字段来自**旧版 Go 插件 `service_docker_stdout`**，文件采集无对应插件 ⇒ 结构性差异，配置层面无法消除。
+
+**结论 2 —— 时间精确到 ms：文件采集不可行 ❌（除非改代码）**
+`__time_ns_part__` 只由 `processor_gotime` 在 `SetTime=true` 时写入，且需要**亚秒时间源**。文件日志既无 `_time_` 类容器 runtime 字段，内容 `[GIN] 2026/10/08 - 18:31:49 | …` 也**只有秒** ⇒ 无源可用；`EnableTimestampNanosecond` 单开不产 ns（与 stdout 结论一致）。**要出 ms 必须先让 new-api 日志格式带毫秒**（`common/logger` + GIN 格式，代码改动，未做）；改完后本新式配置 + `processor_gotime(SourceKey=content, 带 ms 的 pattern)` 即可生效——本次迁移正是为此铺路。
+
+**关键坑 —— 容器去重使"探针法"失效**：曾用独立 logstore `app-file-probe` + 平行 pipeline 配置试探，结果 **0 条**。原因：老配置 `new-api-app-file` 已占用该容器/路径，新配置默认**不重复采集同一容器**（`AllowingIncludedByMultiConfigs` 默认 false）⇒ 必须"删老配置 → 上新配置"才能接管。探针 logstore 已删除（`DeleteLogStore`），项目 logstore 数回到 7。
+
+**证据**：`deploy/logs/sls_dump_appfile.sh`（迁移前字段对比）、`sls_newest_appfile.sh` / `…_sg.sh`（迁移后验收）、`probe_create.sh` / `probe_index.sh` / `probe_check3.sh`（探针，含踩坑记录）。

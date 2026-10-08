@@ -1,0 +1,31 @@
+# 任务 26（2026-10-08）：新加坡备站 new-api 容器**文件日志**采集 —— 新式 pipeline
+# 与马尼拉版（clusterpipelineconfig-app-file.yaml）同构，仅 project/endpoint 换地域。
+apiVersion: telemetry.alibabacloud.com/v1alpha1
+kind: ClusterAliyunPipelineConfig
+metadata:
+  name: new-api-app-file-ns
+spec:
+  project:
+    name: k8s-log-ca75829e3492d491d9d434de087913798
+    endpoint: ap-southeast-1.log.aliyuncs.com
+  config:
+    global:
+      EnableTimestampNanosecond: true
+      UsingOldContentTag: true
+    inputs:
+      - Type: input_file
+        FilePaths:
+          - /data/logs/*.log
+        MaxDirSearchDepth: 1
+        EnableContainerDiscovery: true
+        FileEncoding: utf8
+        ContainerFilters:
+          IncludeContainerLabel:
+            io.kubernetes.container.name: new-api
+    flushers:
+      - Type: flusher_sls
+        Project: k8s-log-ca75829e3492d491d9d434de087913798
+        Logstore: app-file
+        Region: ap-southeast-1
+        Endpoint: ap-southeast-1-intranet.log.aliyuncs.com
+        TelemetryType: logs
