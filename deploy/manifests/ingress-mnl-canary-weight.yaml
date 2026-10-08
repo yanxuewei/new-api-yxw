@@ -1,0 +1,80 @@
+# Day 3 · 任务 27｜canary Ingress（权重 5）—— 马尼拉（主站）
+#
+# 权威卡片：deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md（Day 3 · 任务 27）
+#
+# == 官方约束（2026-10-08 取《在ACK集群中通过ALB Ingress实现灰度发布》）==
+#   · `canary: "true"` 必须写在**灰度件**上；正式件（`new-api-stable-ip`）**不加任何 canary 注解**。
+#     把 `canary` 置 `"false"` 不是关闭灰度，而是让该件退化成普通转发规则、把它指向的 Service
+#     （此处=new-api-canary）**接全量流量**。下线灰度的唯一正解是删除本 Ingress 对象。
+#   · 灰度件的 host/path/pathType 必须与对应正式件**逐字相同**，且 `ingressClassName` 相同。
+#   · **Header/Cookie 与 Weight 不能挂在同一条 Ingress** ⇒ 本件（权重）与
+#     `deploy/manifests/ingress-mnl-canary-header.yaml`（头强制）拆成两件。
+#   · `canary-weight: "0"` ⇒ ALB 把灰度服务从转发规则中移除（最快回滚，见 V4）。
+#
+# == 本件的 host 取自正式件的**第一条（带 Host）规则** ==
+#   2026-10-08 `ListRules` 基线（ListenerId lsn-ihrgkty2sjdy8s5p4h，ALB alb-1riqckb1h8ezm0y7s9）：
+#     Prio 1  Host=ph-verify.internal.likha.hk + Path=/*   → ForwardGroup sgp-j4qrgy3f7bcv1r67na（4 个 ENI 后端）
+#     Prio 2  Path=/*（无 Host）                            → ForwardGroup 同组
+#     Prio 3  Path=/*（无 Host）                            → FixedResponse 404（catchall，order=100）
+#   ⚠ 正式件还有**第二条无 Host 的规则**（裸 IP / 伪造 Host 流量），ALB 灰度无法为它配 canary
+#     ⇒ 本卡的 5% 权重只作用于带 Host `ph-verify.internal.likha.hk` 的流量（任务 47 裁定 A 的连带后果）。
+#   ⚠ ALB 里 Prefix `/` 落进规则会变成 `Path=/*`，属控制器归一化，不是清单写错。
+#
+# ★ `order: "45"`（正式件 50、catchall 100）—— 2026-10-08 apply 后 `ListRules` 实测：**前一种成立**。
+#   权重灰度**不产生独立规则**，控制器把本件合并成正式件那条规则的**第二个带权 tuple**：
+#     Prio 2  Host=ph-verify.internal.likha.hk AND Path=/*
+#             → ForwardGroup[ new-api-new-api-stable-80/W95  +  new-api-new-api-canary-80/W5 ]
+#   头强制件才产生自己的规则（实测 Prio 1）。⇒ 判据是"正式件规则里有没有 W5 那个 tuple"，
+#   不是"有没有一条 Priority 更小的灰度规则"；`order` 的 45 无需再收敛。
+#   ⚠ `canary-weight` 0→5 会让控制器**删旧组建新组**（实测 group id 变化），下游不要缓存 group id。
+#   （回读命令：`aliyun alb ListRules --ListenerIds.1 "$LID" --region ap-southeast-6`，
+#     `--ListenerId` 不是合法参数，CLI 会直接拒。）
+#
+# ⚠ 健康检查：ENI 型后端**必须开启**（Pod IP 会被回收复用，deploy/ALB后端类型选型_Eni-vs-NodePort型.md:91）；
+#   interval 沿用 20s（2026-10-06 429 处置后的现值，别回 6s）。两件 canary 件同指一个 Service
+#   ⇒ 2026-10-08 实测**确认各派生一个同质组**（两个 `new-api-new-api-canary-80`，Tag 的 ingress_name
+#   分别是 `-weight` / `-header`，配置完全一致：enabled/`/api/status`/GET/20s/3s/2/3/http_2xx，StickySession=false）
+#   ⇒ 本件贡献 1 后端 × 每 20s = **3 req/min** 的 ALB 健康检查。
+#   ★ 但对桶算术真正有影响的是**基线**：`/api/status` 实测 **≈195 req/min**（SLS 窗口计数），主体是
+#     **kubelet 探针**（readiness 5s + liveness 15s，日志里 client IP 是节点 IP 而非 ALB ENI），
+#     ≈ `GLOBAL_API_RATE_LIMIT=3600/180s` 的 **16%**。灰度新增的 3~6/min 是噪声级，
+#     下次 429 复核对表要用 195/min 这个基线，不是卡片原写的 3~6/min。
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: new-api-canary-weight
+  namespace: new-api
+  labels:
+    app: new-api
+    project: new-api
+    site: ph-mnl
+    track: canary
+    env: prod
+  annotations:
+    alb.ingress.kubernetes.io/canary: "true"
+    alb.ingress.kubernetes.io/canary-weight: "5"
+    alb.ingress.kubernetes.io/order: "45"
+    alb.ingress.kubernetes.io/backend-protocol: HTTP
+    # G5 证书未到 ⇒ ALB 只有 HTTP:80，必须与正式件逐字一致
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80}]'
+    alb.ingress.kubernetes.io/healthcheck-enabled: "true"
+    alb.ingress.kubernetes.io/healthcheck-path: /api/status
+    alb.ingress.kubernetes.io/healthcheck-method: GET
+    alb.ingress.kubernetes.io/healthcheck-httpcode: http_2xx
+    alb.ingress.kubernetes.io/healthcheck-interval-seconds: "20"
+    alb.ingress.kubernetes.io/healthcheck-timeout-seconds: "3"
+    alb.ingress.kubernetes.io/healthy-threshold-count: "2"
+    alb.ingress.kubernetes.io/unhealthy-threshold-count: "3"
+spec:
+  ingressClassName: alb
+  rules:
+    - host: ph-verify.internal.likha.hk
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: new-api-canary
+                port:
+                  number: 80

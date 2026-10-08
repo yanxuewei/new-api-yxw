@@ -10,7 +10,7 @@
           {
             "id": "5da66b33f5bbf458",
             "type": "tabs",
-            "dimension": 51.461988304093566,
+            "dimension": 45.97938144329897,
             "children": [
               {
                 "id": "729df3220eedf670",
@@ -25,13 +25,27 @@
                   "icon": "lucide-file",
                   "title": "阿里云国际站菲律宾部署_详细操作指南-v2.0"
                 }
+              },
+              {
+                "id": "5ea110ff6f941a51",
+                "type": "leaf",
+                "state": {
+                  "type": "markdown",
+                  "state": {
+                    "file": "impl_deploy.md",
+                    "mode": "preview",
+                    "source": true
+                  },
+                  "icon": "lucide-file",
+                  "title": "impl_deploy"
+                }
               }
             ]
           },
           {
             "id": "264054e36225ad52",
             "type": "tabs",
-            "dimension": 48.53801169590643,
+            "dimension": 54.02061855670103,
             "children": [
               {
                 "id": "08c6983e34278324",
@@ -220,18 +234,22 @@
   },
   "active": "08c6983e34278324",
   "lastOpenFiles": [
-    "deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md.bak-prepaid2postpaid-20260930-180320",
-    "deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md.bak-kmsdep-20260930-183903",
-    "deploy/task17_manual_secret.sh",
-    "deploy/patch_prepaid_to_postpaid_20260930.py",
-    "deploy/patch_kms_deprecated_20260930.py",
+    "deploy/logs/xlsx_sync/final_eyeball.sh",
+    "deploy/logs/xlsx_sync/verify4az.sh",
+    "deploy/logs/xlsx_sync/guide_patch3.py",
+    "deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md.tmp.27564.1791446226629",
+    "deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md.tmp.27564.1791446219793",
+    "deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md.tmp.27564.1791446208232",
+    "deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md.tmp.27564.1791446197029",
+    "deploy/logs/xlsx_sync/gap2.sh",
+    "deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md.tmp.27564.1791446188169",
+    "deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md.tmp.27564.1791446172300",
+    "deploy/logs/xlsx_sync/residual2.sh",
+    "deploy/预发与正式环境区别.md",
+    "impl_deploy.md",
+    "deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md",
+    "deploy/logs/xlsx_sync/guide_before.md",
     "deploy/KMS弃用_手工Secret注入_裁定_2026-09-30.md",
-    "deploy/task19b_bodies/02-nohost-ingress.sh",
-    "deploy/task19b_bodies/01-albconfig-timeout.sh",
-    "deploy/task19b_bodies/00-recon.sh",
-    "deploy/task19b_bodies",
-    "deploy/sls/create_index_audit.sh",
-    "deploy/sls/provision_app_file_sink.sh",
     "migrations/README.md",
     "deploy/Day2任务11_节点池付费方式裁定_按量付费_执行报告.md",
     "deploy/ALB后端类型选型_Eni-vs-NodePort型.md",
@@ -255,10 +273,6 @@
     "deploy/ai_model_price/cc_claude.jpg",
     "deploy/zhuoyanplus域名证书.jpg",
     "deploy/任务45环境隔离修订_2026-09-29.md",
-    "deploy/nodepool_ledger_sg.md",
-    "deploy/工单_ACK马尼拉控制面安全组缺失.md",
-    "deploy/工单_ACK马尼拉API端点错误.md",
-    "deploy/nodepool_ledger.md",
-    "deploy/ack_ledger.md"
+    "deploy/nodepool_ledger_sg.md"
   ]
 }

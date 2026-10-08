@@ -23,6 +23,11 @@ spec:
     configName: new-api-app-file
     inputType: file
     inputDetail:
+      # 2026-10-08：开启纳秒时间戳（同 app-stdout）。
+      # ⚠ 本配置未配时间提取（logType=common_reg_log 无 timeKey）⇒ 日志时间 = 采集时刻，
+      #   ns 部分也是采集时刻；若改为从内容提取时间（[GIN] 2026/10/08 - 14:20:24 只有秒），
+      #   ns 部分恒为 0 —— 内容侧要 ms 需 new-api 日志格式先带 ms。
+      enable_timestamp_nanosecond: true
       logType: common_reg_log
       logPath: /data/logs
       filePattern: "*.log"

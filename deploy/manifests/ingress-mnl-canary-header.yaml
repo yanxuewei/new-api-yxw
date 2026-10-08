@@ -1,0 +1,57 @@
+# Day 3 · 任务 27｜canary Ingress（Header 强制通道）—— 马尼拉（主站）
+#
+# 权威卡片：deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md（Day 3 · 任务 27 订正表 #2）
+#
+# 用途：内部验收/取证通道（V1、V6）。带 `x-canary: 1` 的请求**必定**进 canary，
+#   与权重无关，因此可以在"权重尚未生效/已归零"时单独证明路由本身是通的。
+#
+# ⚠ 官方硬限制：`canary-by-header` 与 `canary-weight` **不支持挂在同一条 Ingress 上**
+#   （优先级 Header > Cookie > Weight；混写会让控制器把该件当普通规则处理）⇒ 本件**不得**出现
+#   `canary-weight` 注解，与 `ingress-mnl-canary-weight.yaml` 分成两件。
+#
+# ⚠ 回滚语义要分清：`canary-weight: "0"` 只让**权重件**失效，**本件仍然把 `x-canary: 1`
+#   的流量送进 canary**。当作"全量回滚"用时这是漏点 ⇒ 彻底停灰度 = 删除两件 Ingress 对象
+#   （canary Deployment 保留作下次发布的回滚目标，见任务 31 坑 1）。
+#
+# ⚠ 两件并存可能各派生一个同质 ServerGroup（10-06 的建组口径）⇒ 健康检查流量翻倍。
+#   嫌重复时的收敛做法：灰度期只保留权重件，本件在需要取证时临时创建、用完即删（两件不并存）。
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: new-api-canary-header
+  namespace: new-api
+  labels:
+    app: new-api
+    project: new-api
+    site: ph-mnl
+    track: canary
+    env: prod
+  annotations:
+    alb.ingress.kubernetes.io/canary: "true"
+    alb.ingress.kubernetes.io/canary-by-header: "x-canary"
+    alb.ingress.kubernetes.io/canary-by-header-value: "1"
+    alb.ingress.kubernetes.io/order: "46"
+    alb.ingress.kubernetes.io/backend-protocol: HTTP
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80}]'
+    alb.ingress.kubernetes.io/healthcheck-enabled: "true"
+    alb.ingress.kubernetes.io/healthcheck-path: /api/status
+    alb.ingress.kubernetes.io/healthcheck-method: GET
+    alb.ingress.kubernetes.io/healthcheck-httpcode: http_2xx
+    alb.ingress.kubernetes.io/healthcheck-interval-seconds: "20"
+    alb.ingress.kubernetes.io/healthcheck-timeout-seconds: "3"
+    alb.ingress.kubernetes.io/healthy-threshold-count: "2"
+    alb.ingress.kubernetes.io/unhealthy-threshold-count: "3"
+spec:
+  # host / path / pathType / backend 必须与权重件**逐字一致**（同一 Service ⇒ 灰度只放大到同一后端）
+  ingressClassName: alb
+  rules:
+    - host: ph-verify.internal.likha.hk
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: new-api-canary
+                port:
+                  number: 80

@@ -1,0 +1,154 @@
+# Day 3 · 任务 27｜canary Deployment + 独立 Service —— 马尼拉（主站）
+#
+# 权威卡片：deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md（Day 3 · 任务 27）
+# 执行器：  deploy/task27_canary.sh（precheck / dryrun / apply-workload / apply-ingress / verify / rollback-zero / restore）
+# 通道：    deploy/ack_remote.sh mnl（两集群 endpoint_public_access=false，本机零 kubeconfig，
+#           全部 kubectl 经云助手 RunCommand 在 VPC 节点内执行 ⇒ 每次调用都是写类 API，需授权留痕）
+#
+# == 与 stable-deployment.yaml 的差异（其余逐字同构）==
+#   ① `track: canary` 贯穿 labels / selector / Service selector ⇒ 与 stable 端点天然隔离（V3 实测）。
+#   ② replicas 固定 1、**不挂 HPA、不加 PDB**（卡片两条实测理由：一次性压测 Pod 不进 scaleTargetRef
+#      指标平均；HPA 缩容不经 Eviction API，PDB 在 1 副本下 disruptionsAllowed=0 只会给驱逐添死锁点）。
+#   ③ **刻意不写 topologySpreadConstraints**：stable 的 AZ 硬约束（stable-deployment.yaml:95-109）
+#      labelSelector 只按 `app: new-api`，canary 带同一 label ⇒ 会被 stable 的扩副本 skew 算术计入；
+#      canary 单副本跨节点用下面的 hostname 反亲和即可。
+#   ④ `VERSION=canary-<tag>`：灰度的**唯一判别载体**。`main.go:198` 的 `middleware.Version()` 是引擎级
+#      中间件 ⇒ 任意路径（含静态 `/`）响应都带 `X-New-Api-Version`（`middleware/cors.go:18-23`）；
+#      `common/init.go:35-38` 允许 env `VERSION` 覆盖 `common.Version` ⇒ **stable 不需要任何改动**。
+#   ⑤ `CANARY=true`：`grep -rn CANARY --include=*.go` 0 命中 ⇒ 对应用行为是 no-op，仅作运维标记。
+#
+# == 候选镜像与 schema 闸门 ==
+#   ACR 实况（2026-10-08 `ListRepoTag`，InstanceId cri-avfqy9xkqi5bj8ee / RepoId crr-eo15b1p46wt8yeek）：
+#     20261008-0725a3bd1 / 20261007-e3be08079 / 20260928-26ac63233（=stable 现用）/ 20260928-4ab71f488 / 20260927-aef388bd8
+#   `git diff --name-only 26ac63233..0725a3bd1 -- '*.go' 'go.mod' 'go.sum' 'Dockerfile' 'web/'` 实测**空**
+#   ⇒ 本镜像与 stable 二进制行为一致（`migrations/` 只新增 SQL，`model/` 未变、代码不引用 nickname 列），
+#   **不触发 Expand 前置闸门**。日后若候选含 schema 变更，必须先跑任务 54 的
+#   `deploy/aliyun/ph/migrate-job.yaml`（账号 `newapi_migrate`）再起 canary——canary 与 stable 同用
+#   DML 账号 + `NODE_TYPE=slave`，启动期一条 DDL 都不发（`model/main.go:215-217`、`:262-264`）。
+#
+# ⚠ 容量（决定本件能不能落地）：canary 1 副本 = requests 2C/4Gi + limits 4C/8Gi。
+#   ResourceQuota `new-api-quota` hard limits.cpu 64，ns 内其他负载实测占 9.2C
+#   ⇒ stable 顶到 13 副本时 52+9.2=61.2，再叠 canary 4C = 65.2 > 64 ⇒ **灰度存续期 HPA 真实天花板 12 副本**。
+#   当前 stable 4 副本（16+9.2+4 = 29.2 ≤ 64）宽裕；`precheck` 会回读 quota.status 实况核对。
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: new-api-canary
+  namespace: new-api
+  labels:
+    app: new-api
+    project: new-api
+    site: ph-mnl
+    track: canary
+    env: prod
+spec:
+  replicas: 1
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: new-api
+      track: canary
+  template:
+    metadata:
+      labels:
+        app: new-api
+        project: new-api
+        site: ph-mnl
+        track: canary
+        env: prod
+      annotations:
+        # 与 stable 同算法：由 task27_canary.sh 在节点侧用集群 ConfigMap 现值的 sha256 前 12 位渲染
+        checksum/config: "__CONFIG_CHECKSUM__"
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "3000"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: new-api-app
+      terminationGracePeriodSeconds: 60
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - topologyKey: kubernetes.io/hostname
+              labelSelector:
+                matchLabels:
+                  app: new-api
+                  track: canary
+      containers:
+        - name: new-api
+          image: acr-newapi-mnl-registry-vpc.ap-southeast-6.cr.aliyuncs.com/newapi-prod/newapi-master:20261008-0725a3bd1
+          imagePullPolicy: IfNotPresent
+          args:
+            - "-log-dir=/data/logs"
+          ports:
+            - name: http
+              containerPort: 3000
+          volumeMounts:
+            - name: app-logs
+              mountPath: /data/logs
+          env:
+            - name: NODE_TYPE
+              value: "slave"
+            - name: GOMAXPROCS
+              value: "4"
+            - name: VERSION
+              value: "canary-20261008-0725a3bd1"
+            - name: CANARY
+              value: "true"
+          envFrom:
+            - configMapRef:
+                name: new-api-config
+            - secretRef:
+                name: new-api-secrets
+          startupProbe:
+            httpGet: {path: /api/status, port: http}
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            httpGet: {path: /api/status, port: http}
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: {path: /api/status, port: http}
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 5
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sh", "-c", "sleep 15"]
+          resources:
+            requests:
+              cpu: "2"
+              memory: 4Gi
+            limits:
+              cpu: "4"
+              memory: 8Gi
+      volumes:
+        - name: app-logs
+          emptyDir:
+            sizeLimit: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: new-api-canary
+  namespace: new-api
+  labels:
+    app: new-api
+    track: canary
+spec:
+  type: ClusterIP
+  selector:
+    app: new-api
+    track: canary
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

@@ -85,6 +85,97 @@ aliyun sls GetLogs --project sls-newapi-mnl --logstore rds-audit --region ap-sou
 
 ---
 
+### ⏱ 追加（2026-10-08）：时间字段精确到毫秒 —— `__time_ns_part__` 落地 ✅（两集群）
+
+**需求**：控制台时间列只到秒，要 ms 级。
+
+**机制（源码级取证）**：SLS 保留字段 `__time__` 恒为**秒**级；亚秒部分单独存 `__time_ns_part__`（0~999999999）。
+LoongCollector `plugins/processor/gotime/processor_gotime.go`：
+```go
+if p.SetTime {
+    log.Time = uint32(parsedTime.Unix())
+    if config.LogtailGlobalConfig.EnableTimestampNanosecond {
+        log.TimeNs = uint32(parsedTime.Nanosecond())   // ← 只有这里写 ns
+    }
+}
+```
+⇒ **纯采集不产 ns**：必须「global 开关 + 时间处理器 `SetTime`」两件套。前置：LoongCollector ≥1.8.0（实测 logtail-ds = **v3.3.3.1-aliyun** ✅）、仅 Linux。
+
+**四处"开关带不进去"的实测坑**（从老式 CRD 到新 API 逐个排除）：
+
+| 路径 | 结果 |
+| --- | --- |
+| 老式 `AliyunLogConfig` 的 `inputDetail.enable_timestamp_nanosecond` | ❌ 控制器翻译时剥键：CLI `GetConfig` 回读无此键 |
+| 新 OpenAPI `aliyun sls UpdateConfig`（CLI 3.5.1，`--body` 全量回写） | ❌ 静默剥键（`lastModifyTime` 变、键回读 `null`） |
+| python SDK `update_logtail_config`（**新 API 语义**，非老 REST） | ❌ 同上 |
+| `ClusterAliyunPipelineConfig` 的 `spec.config` **顶级**同名键 | ❌ 被剥（SLS 回读无此键） |
+| `ClusterAliyunPipelineConfig` 的 `spec.config.global` | ✅ **唯一可持久化位置** |
+
+**最终清单**（`deploy/sls/clusterpipelineconfig-app-stdout.yaml` / `...-sg.yaml`）：新式 `ClusterAliyunPipelineConfig`，`spec.project.name` 必填、`spec.config.name` **不许自定义**（webhook 拦）。输入**沿用旧版 Go 插件 `service_docker_stdout`**（⚠ 不是原生 `input_container_stdio` —— 见下方「追加 2」，原生插件会把容器元数据写成 `__tag__:` 标签），`global` 两个开关 + `processor_gotime` 从容器 runtime 字段 `_time_` 解析高精度时间：
+
+```yaml
+global:
+  EnableTimestampNanosecond: true     # 纳秒总开关（产 __time_ns_part__）
+  UsingOldContentTag: true            # 保持 1.x tag 放置（容器元数据走普通字段）
+inputs:
+  - Type: service_docker_stdout       # 旧版 Go 插件：容器元数据写裸字段
+    Stdout: true
+    Stderr: true
+    IncludeLabel: { io.kubernetes.container.name: new-api }
+processors:
+  - Type: processor_gotime
+    SourceKey: _time_                                # 容器 runtime 时间戳，自带纳秒
+    SourceFormat: "2006-01-02T15:04:05.999999999Z07:00"
+    DestKey: event_time_ms
+    DestFormat: "2006-01-02 15:04:05.000"
+    SetTime: true                                    # ← 关键：回写日志时间才产 ns
+    KeepSource: true
+    NoKeyError: false
+    AlarmIfFail: false
+```
+`processor_gotime` 四个参数 **SourceKey / SourceFormat / DestKey / DestFormat 全必填**（缺一个即 `ParameterInvalid`，如 `DestFormat is missing`）。
+
+**验收**（`GetLogsV2 --region <R>`，`reverse:true` 取最新；注意 `--region` 必须显式传，否则查 sg 项目报 `ProjectNotExist` 假错）：
+
+| 站点 | `__time__` | `__time_ns_part__` | `_time_` |
+| --- | --- | --- | --- |
+| mnl | 1791445261 | **377344812** | 2026-10-08T15:41:01.**377344812**+08:00 |
+| sg | 1791445411 | **453783474** | 2026-10-08T15:43:31.**453783474**+08:00 |
+
+**遗留 / 边界**：
+1. **只对新增日志生效**，存量日志不回填 ms；
+2. `app-file` Logstore **拿不到 ms**（结构性）：文件采集无 `_time_` 字段，内容 `[GIN] 2026/10/08 - 15:43:43` 本身只有秒；要 ms 需 new-api 日志格式先带 ms（代码改动，未做）。stdout 主路已覆盖，file 属冗余留存，影响可忽略；
+3. 老式 `AliyunLogConfig/new-api-app-stdout` 已在两集群删除（否则同容器双采集重复）；仓库老旧清单 `aliyunlogconfig-app-stdout.yaml` 已标废弃；
+4. 排序须 `ORDER BY __time__, __time_ns_part__`（单看 `__time__` 仍并列）；SQL 若引用 ns 字段，需在 Logstore「查询分析属性」给 `__time_ns_part__` 建 long 索引。
+
+### ⏱ 追加 2（2026-10-08）：修复容器元数据字段名回归（`_pod_name_`/`_image_name_` 变空）
+
+**现象**：纳秒上线后，控制台/查询里 `_pod_name_`、`_image_name_`、`_container_ip_` 等列全部为空（只有 `content` 有值）。
+
+**根因**（`GetLogsV2` 拉换配置前后同一条日志做字段集合对比）：
+
+| 字段 | 旧配置（旧版 API `AliyunLogConfig`） | 换原生插件后（新版 API pipeline） |
+| --- | --- | --- |
+| pod 名 | `_pod_name_`（**普通字段**） | `__tag__:_pod_name_`（**系统标签**） |
+| image / container_ip / namespace / container_name / pod_uid | 均为**裸字段** | 全部带 `__tag__:` 前缀 |
+
+即 iLogtail 2.0 的「tag 归位」变更：**旧版 API 建的配置沿用 1.x 行为（tag 存普通字段）；新版 API 建的配置默认归位（tag 存 tag 位，SLS 侧渲染成 `__tag__:` 前缀）**。容器元数据从裸字段搬到了 `__tag__:` 标签 ⇒ 依赖裸字段名的控制台视图/查询全部落空。
+
+**两条修正尝试**：
+1. `global.UsingOldContentTag: true`（官方升级说明给出的"还原 1.x"开关）→ ❌ **对原生插件无效**，重启 logtail-ds 强制重载后仍为 `__tag__` 前缀（实测）；
+2. **输入插件换回 `service_docker_stdout`**（`UsingOldContentTag: true` 保留作双保险）→ ✅ 立即恢复裸字段。
+
+**验收**（两站点；纳秒与裸字段**同时**保留）：
+
+| 站点 | `_pod_name_` | `_image_name_` | `__time_ns_part__` |
+| --- | --- | --- | --- |
+| mnl | `new-api-stable-f6f987798-m6g2m` | `…/newapi-master:20260928-26ac63233` | 946947518 |
+| sg | `new-api-ph-standby-5ccf946c69-wt8jp` | 同上 | 490802677 |
+
+**结论**：`__time_ns_part__` 与输入插件**无关**（由 `global.EnableTimestampNanosecond` + `processor_gotime SetTime` 决定）⇒ 完全可以用回 `service_docker_stdout`，不牺牲毫秒精度。原稿"老的 `service_docker_stdout` 不产 ns"是**误判**，已更正。另注意：`_node_name_`/`_node_ip_`/`_cluster_id_` 这类**节点级/环境 tag 一直是 `__tag__:` 前缀**（新旧一致），不属于本次回归。
+
+---
+
 ## 二、ARMS Prometheus（步骤 3）✅
 
 - 实例在册：`ack-newapi-mnl`（`id=994912`，`remote-write-prometheus`，`POSTPAY_GB`，`isClusterRunning=true`）；组件 `arms-prom/arms-prometheus-ack-arms-prometheus` 1/1、`node-exporter` 4/4、`kube-state-metrics` 1/1。

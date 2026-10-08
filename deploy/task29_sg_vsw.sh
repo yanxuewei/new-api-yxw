@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
-# 任务 29 前置：按 v2.1《网络、安全组、EIP 与凭据规划》补建新加坡 data 层交换机。
-# 背景：§2.2 基线表只登记了 SG 的 pub-a/pub-b/app-a/app-b 四个交换机，
-#       v2.1 表格另有 vsw-sg-data-a/b（RDS、Tair / ClickHouse 用，"数据库不暴露公网子网"），
-#       实际账号里不存在 ⇒ 任务 29 的 CreateInstance 无落点。
+# 任务 29 前置：按 v2.1《网络、安全组、EIP 与凭据规划》补建新加坡交换机。
+# 背景①（2026-09-30）：补建 data-a/b 两个交换机；
+# 背景②（2026-10-08）：ap-southeast-1 实测 4 个可用区（1a/1b/1c/1d），
+#       按尾部追加约定扩展 app-c/app-d/data-c/data-d（.80/.96/.112/.128，见 §2.2 增补注）。
 # 用法：bash deploy/task29_sg_vsw.sh verify    # 只读预检（幂等 + 网段冲突）
 #       bash deploy/task29_sg_vsw.sh create    # 建交换机 + 归位资源组 + 回读
+#       bash deploy/task29_sg_vsw.sh create --only data-c   # 只建指定名（可多个）
 set -euo pipefail
 
 REGION=ap-southeast-1
 VPC=vpc-t4nimmwvruexbnene0a3r
-RG=rg-aek4zvb3ldoiyua                     # rg-ph-sg，与既有 4 个 SG 交换机同组
+RG=rg-aek4zvb3ldoiyua                     # rg-ph-sg，与既有 SG 交换机同组
 OUTDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/logs/task29_sg_vsw"
 mkdir -p "$OUTDIR"
 
@@ -17,6 +18,10 @@ mkdir -p "$OUTDIR"
 SPECS=(
   "vsw-sg-data-a:ap-southeast-1a:10.1.48.0/20"
   "vsw-sg-data-b:ap-southeast-1b:10.1.64.0/20"
+  "vsw-sg-app-c:ap-southeast-1c:10.1.80.0/20"
+  "vsw-sg-app-d:ap-southeast-1d:10.1.96.0/20"
+  "vsw-sg-data-c:ap-southeast-1c:10.1.112.0/20"
+  "vsw-sg-data-d:ap-southeast-1d:10.1.128.0/20"
 )
 
 log() { printf '%s %s\n' "$(date -u +%H:%M:%SZ)" "$*"; }
@@ -86,10 +91,14 @@ move_to_rg() {
 }
 
 create() {
+  local only="${2:-}"
   log "写前快照（幂等闸门与网段比对的依据）："
   snapshot "$OUTDIR/vsw_before.json"
   for spec in "${SPECS[@]}"; do
     IFS=: read -r name zone cidr <<<"$spec"
+    if [[ -n "$only" ]] && [[ " $only " != *" $name "* ]]; then
+      continue
+    fi
     if [[ $(plan_status "$name" "$cidr") == exists ]]; then
       log "SKIP $name 已存在"
       continue
@@ -97,7 +106,7 @@ create() {
     log "CreateVSwitch $name $zone $cidr"
     aliyun vpc CreateVSwitch --RegionId "$REGION" --VpcId "$VPC" --ZoneId "$zone" \
       --CidrBlock "$cidr" --VSwitchName "$name" --Description "new-api sg $name" \
-      --ClientToken "newapi-$name-20260930" \
+      --ClientToken "newapi-$name-20261008" \
       --Tag.1.Key project --Tag.1.Value new-api \
       --Tag.2.Key site --Tag.2.Value sg \
       --Tag.3.Key env --Tag.3.Value prod \
@@ -113,7 +122,7 @@ create() {
 
   log "回读（name / zone / cidr / status / free / rg）："
   snapshot "$OUTDIR/vsw_after.json"
-  jq -r '.VSwitches.VSwitch[] | select(.VSwitchName|startswith("vsw-sg-data")) |
+  jq -r '.VSwitches.VSwitch[] | select(.VSwitchName|test("vsw-sg-(app-[cd]|data-[abcd])$")) |
     [.VSwitchName, .VSwitchId, .ZoneId, .CidrBlock, .Status,
      (.AvailableIpAddressCount|tostring), .ResourceGroupId,
      ([.Tags.Tag[]? | .Key + "=" + .Value] | join(","))] | @tsv' "$OUTDIR/vsw_after.json"
@@ -121,6 +130,6 @@ create() {
 
 case "${1:-}" in
   verify) verify ;;
-  create) create ;;
-  *) die "用法: $0 verify|create" ;;
+  create) create "$@" ;;
+  *) die "用法: $0 verify|create [--only <name> ...]" ;;
 esac

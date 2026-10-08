@@ -1,0 +1,40 @@
+# 任务 26（2026-10-08）：新加坡备站 new-api 容器 stdout 采集 —— 纳秒时间戳
+# 与马尼拉版（clusterpipelineconfig-app-stdout.yaml）同构，仅 project/endpoint 换地域。
+# 详见马尼拉版头部注释（含四处"开关带不进去"的实测坑与 processor_gotime 必要性）。
+apiVersion: telemetry.alibabacloud.com/v1alpha1
+kind: ClusterAliyunPipelineConfig
+metadata:
+  name: new-api-app-stdout-ns
+spec:
+  project:
+    name: k8s-log-ca75829e3492d491d9d434de087913798
+    endpoint: ap-southeast-1.log.aliyuncs.com
+  config:
+    global:
+      EnableTimestampNanosecond: true
+      # 保持 1.x tag 存储位置：容器元数据写成裸字段（非 `__tag__:` 前缀），见马尼拉版注释
+      UsingOldContentTag: true
+    inputs:
+      # 必须用旧版 Go 插件 service_docker_stdout（容器元数据写裸字段），见马尼拉版注释
+      - Type: service_docker_stdout
+        Stdout: true
+        Stderr: true
+        IncludeLabel:
+          io.kubernetes.container.name: new-api
+    processors:
+      - Type: processor_gotime
+        SourceKey: _time_
+        SourceFormat: "2006-01-02T15:04:05.999999999Z07:00"
+        DestKey: event_time_ms
+        DestFormat: "2006-01-02 15:04:05.000"
+        SetTime: true
+        KeepSource: true
+        NoKeyError: false
+        AlarmIfFail: false
+    flushers:
+      - Type: flusher_sls
+        Project: k8s-log-ca75829e3492d491d9d434de087913798
+        Logstore: app-stdout
+        Region: ap-southeast-1
+        Endpoint: ap-southeast-1-intranet.log.aliyuncs.com
+        TelemetryType: logs
