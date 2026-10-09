@@ -1,15 +1,22 @@
-# 任务 26 步骤 2（2026-10-08 修订版）：new-api 容器**文件日志**采集 —— 新式 pipeline（对齐 app-stdout）
+# 任务 26（2026-10-08 / 2026-10-09 修订）：new-api 容器**文件日志**采集 —— 毫秒时间戳
 #
-# 为什么迁移：老式 `AliyunLogConfig` 的控制器在 CRD→SLS 翻译时会把
-# `enable_timestamp_nanosecond` **静默剥掉**（同 app-stdout 的四坑之一）⇒ 纳秒开关形同虚设。
-# 只有新式 `ClusterAliyunPipelineConfig` 的 `spec.config.global` 能持久化该键。
+# 2026-10-09 追加：app-file 也能出毫秒（此前定论"结构性拿不到 ms"已被代码侧打破）。
+#   ▸ 前置：new-api 日志格式已改为带毫秒（`15:04:05` → `15:04:05.000`，
+#     改的是 3 个上游文件 5 处 —— 见仓库根 `UPSTREAM_CHANGES.md` 条目 1–5）。
+#   ▸ 取时间的两步（缺一不可）：
+#       ① processor_regex：从日志行 `content` 里抓出毫秒时间戳子串 → 字段 `log_ts`
+#          （`FullMatch: false` 必须显式给 —— 默认 true 要求整字段匹配，会全部抓不到）
+#       ② processor_gotime：解析 `log_ts` 并 **SetTime: true** 回写日志时间
+#          ⇒ 才触发 LoongCollector 的 `log.TimeNs`（配合 global.EnableTimestampNanosecond）
+#          ⇒ SLS 才落 `__time_ns_part__`
+#   ▸ 为什么不能省 ①：processor_gotime 对 SourceKey 做**整字段**解析，
+#     `content` 是整行 `[GIN] 2026/10/09 - 12:06:31.123 | api | …`，直接给它必然解析失败。
+#   ▸ 兼容旧行：改造前写入的行没有 `.000`，正则不命中（NoMatchError:false 不报错、不丢日志），
+#     gotime 因 NoKeyError:true 跳过 → 这些行退回**采集时刻**，不产生 __time_ns_part__。属预期降级。
 #
-# global 双开关（与 app-stdout 一致）：
-#   - EnableTimestampNanosecond：纳秒总开关（能否出 __time_ns_part__ 取决于有无亚秒时间源，见下）
-#   - UsingOldContentTag：保持 1.x tag 放置，尝试把容器元数据从 `__tag__:` 标签拉回普通字段
-#
-# 文件路径语义：`dockerFile: true`（老 CRD）↔ `EnableContainerDiscovery: true`（新 pipeline），
-#   FilePaths 用**容器内路径** `/data/logs/*.log`（镜像 WORKDIR=/data，logger MultiWriter 落盘）。
+# 另注（沿用 10-08 结论，未变）：
+#   · 文件采集的容器元数据天生是 `__tag__:` 前缀标签，`UsingOldContentTag` 改不动（与 app-stdout 不同）；
+#   · `FilePaths` 用容器内路径（镜像 WORKDIR=/data，logger MultiWriter 落盘），须 `EnableContainerDiscovery: true`。
 apiVersion: telemetry.alibabacloud.com/v1alpha1
 kind: ClusterAliyunPipelineConfig
 metadata:
@@ -32,6 +39,26 @@ spec:
         ContainerFilters:
           IncludeContainerLabel:
             io.kubernetes.container.name: new-api
+    processors:
+      # ① 从整行 content 抓毫秒时间戳 → log_ts（前缀 [GIN]/[SYS]/[INFO]/[WARN]/[ERR]/[DEBUG]/[FATAL]）
+      - Type: processor_regex
+        SourceKey: content
+        Regex: '^\[[A-Z]+\]\s+(\d{4}/\d{2}/\d{2} - \d{2}:\d{2}:\d{2}\.\d{3})'
+        Keys:
+          - log_ts
+        FullMatch: false
+        KeepSource: true
+        NoMatchError: false
+      # ② 解析 log_ts 并回写日志时间（SetTime）→ 触发 TimeNs → __time_ns_part__
+      - Type: processor_gotime
+        SourceKey: log_ts
+        SourceFormat: "2006/01/02 - 15:04:05.000"
+        DestKey: event_time_ms
+        DestFormat: "2006-01-02 15:04:05.000"
+        SetTime: true
+        KeepSource: true
+        NoKeyError: true
+        AlarmIfFail: false
     flushers:
       - Type: flusher_sls
         Project: k8s-log-cd57e40ce9a634c1698c2f5c5e09bd93c

@@ -1,5 +1,7 @@
-# 任务 26（2026-10-08）：新加坡备站 new-api 容器**文件日志**采集 —— 新式 pipeline
-# 与马尼拉版（clusterpipelineconfig-app-file.yaml）同构，仅 project/endpoint 换地域。
+# 任务 26（2026-10-08 / 2026-10-09 修订）：新加坡备站 new-api 容器**文件日志**采集 —— 毫秒时间戳
+# 与马尼拉版（clusterpipelineconfig-app-file.yaml）同构，仅 project/endpoint/region 换地域。
+#
+# 2026-10-09：加 processor_regex + processor_gotime 提取内容毫秒时间戳（详见马尼拉版头部注释）。
 apiVersion: telemetry.alibabacloud.com/v1alpha1
 kind: ClusterAliyunPipelineConfig
 metadata:
@@ -22,6 +24,24 @@ spec:
         ContainerFilters:
           IncludeContainerLabel:
             io.kubernetes.container.name: new-api
+    processors:
+      - Type: processor_regex
+        SourceKey: content
+        Regex: '^\[[A-Z]+\]\s+(\d{4}/\d{2}/\d{2} - \d{2}:\d{2}:\d{2}\.\d{3})'
+        Keys:
+          - log_ts
+        FullMatch: false
+        KeepSource: true
+        NoMatchError: false
+      - Type: processor_gotime
+        SourceKey: log_ts
+        SourceFormat: "2006/01/02 - 15:04:05.000"
+        DestKey: event_time_ms
+        DestFormat: "2006-01-02 15:04:05.000"
+        SetTime: true
+        KeepSource: true
+        NoKeyError: true
+        AlarmIfFail: false
     flushers:
       - Type: flusher_sls
         Project: k8s-log-ca75829e3492d491d9d434de087913798
