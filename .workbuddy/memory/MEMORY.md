@@ -14,6 +14,13 @@
 - 容器 `new-api`(:3000) · `postgres:15` · `redis` 均 `restart: always`。
 - **macOS 侧直操云端**：`~/.workbuddy/binaries/aliyun-cli/aliyun`（**无 `--region` 会静默用 profile 地域 ap-southeast-6**）；集群操作用 `deploy/ack_remote.sh`。
 
+## 上游二次开发纪律（2026-10-09 fanyan 下达 · fork 维护总纲）
+`new-api-yxw` = `QuantumNous/new-api` 的二次开发分支（origin `git@github.com:yanxuewei/new-api-yxw.git`，分支 `main`）。
+**五条铁律**：① **能扩展不改源码**（优先插件/hook/配置覆盖，其次才改上游文件）② 根目录 `UPSTREAM_CHANGES.md` 记定制清单、**每次 sync 前对照检查冲突点** ③ 自研代码放 `ours_likha/{code,ops,doc}` 与上游**物理隔离** ④ **禁止无意义的格式化改动上游文件**（一次格式化 = 永久冲突源）⑤ **merge 冲突解决后必须跑全量测试**，sync PR 的 CI **不允许 skip 任何 job**。
+- **落地物**：`UPSTREAM_CHANGES.md`（清单，含"不动的地方"反例表）· `ours_likha/ops/patches/0001-log-ms-precision.patch`（复现补丁）· `ours_likha/ops/verify-upstream-changes.sh`（**在位校验，sync 前后必跑**）· `ours_likha/ops/local-ci.sh`（本地复现 `ci.yml` 全量 job：backend `go vet/build` + `make test`，frontend `bun typecheck/test`）。
+- **当前唯一上游改动**：日志时间格式毫秒化 —— **3 文件 5 处**（`middleware/logger.go:38`、`common/sys_log.go:20/27/34`、`logger/logger.go:113`），`15:04:05` → `15:04:05.000`。该需求**无扩展点**（GIN formatter 是闭包硬编码；`middleware.SetUpLogger` 还承载私有脱敏 `redactTaskArtifactAccessQuery`，整体替换会丢脱敏）⇒ 原地最小改写，符合纪律 1/4。
+- ⚠️ **纪律 3 的例外**：当"能扩展不改源码"不成立时，允许**最小化原地补丁**，但必须登记清单 + 附可复现补丁 + 配在位校验。
+
 ## 两文档口径冲突（一律按 ①）
 | 项 | ② xlsx v2.3 | ① 指南（采信） |
 |---|---|---|

@@ -13,13 +13,14 @@
 
 | # | 上游文件（行） | 改动 | 原因 | 我们的提交 / PR | 复现补丁 |
 |---|---|---|---|---|---|
-| 1 | `middleware/logger.go:38` | `param.TimeStamp.Format("2006/01/02 - 15:04:05")` → `…:05.000` | GIN 访问日志需毫秒，供 SLS 采集到 ms | `<TBD-0001>` | `ours_likha/ops/patches/0001-log-ms-precision.patch` |
-| 2 | `common/sys_log.go:20` | `t.Format("2006/01/02 - 15:04:05")` → `…:05.000` | `[SYS]` 日志需毫秒 | `<TBD-0001>` | 同上 |
-| 3 | `common/sys_log.go:27` | 同上（`SysError`） | `[SYS]` 错误日志需毫秒 | `<TBD-0001>` | 同上 |
-| 4 | `common/sys_log.go:34` | 同上（`FatalLog`） | `[FATAL]` 日志需毫秒 | `<TBD-0001>` | 同上 |
-| 5 | `logger/logger.go:113` | `now.Format("2006/01/02 - 15:04:05")` → `…:05.000` | `[INFO]/[ERR]` 应用日志需毫秒 | `<TBD-0001>` | 同上 |
+| 1 | `middleware/logger.go:38` | `param.TimeStamp.Format("2006/01/02 - 15:04:05")` → `…:05.000` | GIN 访问日志需毫秒，供 SLS 采集到 ms | `9fff2aa47` | `ours_likha/ops/patches/0001-log-ms-precision.patch` |
+| 2 | `common/sys_log.go:20` | `t.Format("2006/01/02 - 15:04:05")` → `…:05.000` | `[SYS]` 日志需毫秒 | `9fff2aa47` | 同上 |
+| 3 | `common/sys_log.go:27` | 同上（`SysError`） | `[SYS]` 错误日志需毫秒 | `9fff2aa47` | 同上 |
+| 4 | `common/sys_log.go:34` | 同上（`FatalLog`） | `[FATAL]` 日志需毫秒 | `9fff2aa47` | 同上 |
+| 5 | `logger/logger.go:113` | `now.Format("2006/01/02 - 15:04:05")` → `…:05.000` | `[INFO]/[ERR]` 应用日志需毫秒 | `9fff2aa47` | 同上 |
 
-> **`<TBD-0001>` 占位**：本批改动提交后请把实际 commit SHA / PR 号回填到本列。
+> **提交引用**：本批改动落在 `9fff2aa47`（分支 `feature/log-ms-precision`，PR **待开**）。
+> 开 PR 后请把实际 PR 号补到本列（形如 `#NNN @ 9fff2aa47`）。
 
 ### 不动的地方（避免误改）
 
@@ -47,6 +48,10 @@
 ---
 
 ## 三、二次开发纪律（2026-10-09 fanyan 下达，全仓库适用）
+
+> 本纪律与 `deploy/git开发-发布-值班规范.md §4.3「二次开发隔离原则」**同源**——
+> 规范文档是**执行细则**（分支模型 / 发布流程 / 值班），本文件是**定制清单**（改了什么）。
+> 二者口径必须一致：任何一条纪律变更，两处同时改（见本仓「口径同源连带扫」约定）。
 
 1. **能扩展不改源码**：优先用插件 / hook / 配置覆盖方式实现定制，其次才是直接修改上游文件。
 2. **定制清单**：仓库根目录维护 `UPSTREAM_CHANGES.md`，逐条记录「我们改了上游哪些文件、为什么、

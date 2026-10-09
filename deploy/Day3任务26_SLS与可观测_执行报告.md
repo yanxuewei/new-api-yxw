@@ -236,6 +236,75 @@ processors:
 **结论 2 —— 时间精确到 ms：文件采集不可行 ❌（除非改代码）**
 `__time_ns_part__` 只由 `processor_gotime` 在 `SetTime=true` 时写入，且需要**亚秒时间源**。文件日志既无 `_time_` 类容器 runtime 字段，内容 `[GIN] 2026/10/08 - 18:31:49 | …` 也**只有秒** ⇒ 无源可用；`EnableTimestampNanosecond` 单开不产 ns（与 stdout 结论一致）。**要出 ms 必须先让 new-api 日志格式带毫秒**（`common/logger` + GIN 格式，代码改动，未做）；改完后本新式配置 + `processor_gotime(SourceKey=content, 带 ms 的 pattern)` 即可生效——本次迁移正是为此铺路。
 
+> ⏭ **2026-10-09 已按方案 A 实现**（用户裁定"要真出 ms"）：日志格式已带毫秒（代码改动）、SLS 侧 `processor_regex + processor_gotime` 已加 → **见下方「追加 4」**。本节的"不可行"结论**仅在"不改代码"前提下**成立。
+
 **关键坑 —— 容器去重使"探针法"失效**：曾用独立 logstore `app-file-probe` + 平行 pipeline 配置试探，结果 **0 条**。原因：老配置 `new-api-app-file` 已占用该容器/路径，新配置默认**不重复采集同一容器**（`AllowingIncludedByMultiConfigs` 默认 false）⇒ 必须"删老配置 → 上新配置"才能接管。探针 logstore 已删除（`DeleteLogStore`），项目 logstore 数回到 7。
 
 **证据**：`deploy/logs/sls_dump_appfile.sh`（迁移前字段对比）、`sls_newest_appfile.sh` / `…_sg.sh`（迁移后验收）、`probe_create.sh` / `probe_index.sh` / `probe_check3.sh`（探针，含踩坑记录）。
+
+---
+
+### ⏱ 追加 4（2026-10-09）：app-file 毫秒**已实现** —— 代码侧改日志格式 + SLS 侧加解析处理器
+
+> 本节**推翻「追加 3 · 结论 2」的"不可行"**：那个判断本身没错（文件日志确无 ms 源），但用户裁定走**方案 A —— 改 new-api 日志格式带毫秒**，从根上造出亚秒时间源。
+
+#### 一、代码改动（3 个上游文件 5 处，最小化原地补丁）
+
+| 文件:行 | 影响的日志行 |
+|---|---|
+| `middleware/logger.go:38` | `[GIN]` 访问日志 |
+| `common/sys_log.go:20 / 27 / 34` | `[SYS]` / `[SYS]`(err) / `[FATAL]` |
+| `logger/logger.go:113` | `[INFO] / [WARN] / [ERR] / [DEBUG]` |
+
+统一 `2006/01/02 - 15:04:05` → `2006/01/02 - 15:04:05.000`。
+
+**为什么是"改源码"而非"扩展"**：GIN 访问日志格式由 `middleware.SetUpLogger` 内的**闭包**决定，无 env / 配置项可覆盖；且该函数还承载**私有脱敏** `redactTaskArtifactAccessQuery`（任务产物访问 query 脱敏），在 `main.go` 侧整体替换会**丢脱敏** ⇒ 确无扩展点，按 fork 纪律第 1 条的例外做**最小化原地补丁**（仅动格式串，不碰控制流、无格式化噪音）。
+
+**fork 二次开发纪律落地**（用户 2026-10-09 下达 5 条；与 `deploy/git开发-发布-值班规范.md §4.3` **同源**，两处口径已对齐）：
+- 根目录新增 **`UPSTREAM_CHANGES.md`** —— 定制清单（逐条：上游文件/改动/原因/提交号）+ "不动的地方"反例表
+- 新增 **`ours_likha/{code,ops,doc}`** —— 自研与上游**物理隔离**（含 `ours_likha/.gitattributes` 固化行尾）
+- `ours_likha/ops/patches/0001-log-ms-precision.patch` —— 复现补丁（`git apply` 可直接回放）
+- `ours_likha/ops/verify-upstream-changes.sh` —— **定制在位校验**（sync 前后必跑，退出码非 0 即有定制被覆盖）
+- `ours_likha/ops/local-ci.sh` —— 本地复现 `ci.yml` **全量** job（backend + frontend）
+
+#### 二、SLS 侧（app-file，两站点已 apply ✅）
+
+在原 pipeline 上加了两个 processor（`GetLogtailPipelineConfig` 回读确认**已持久化**，CRD `success: true`）：
+
+```yaml
+processors:
+  - Type: processor_regex        # ① 从整行 content 抓出毫秒时间戳子串
+    SourceKey: content
+    Regex: '^\[[A-Z]+\]\s+(\d{4}/\d{2}/\d{2} - \d{2}:\d{2}:\d{2}\.\d{3})'
+    Keys: ["log_ts"]
+    FullMatch: false             # ★ 默认 true 要求**整字段**匹配 ⇒ 必须显式 false，否则全抓不到
+    KeepSource: true
+    NoMatchError: false
+  - Type: processor_gotime       # ② 解析 log_ts 并 SetTime 回写 → 触发 TimeNs
+    SourceKey: log_ts
+    SourceFormat: "2006/01/02 - 15:04:05.000"
+    SetTime: true
+    NoKeyError: true
+```
+
+- **为什么不能只给 `gotime`**：它对 `SourceKey` 做**整字段**解析，而 `content` 是整行（`[GIN] 2026/10/09 - 12:06:31.123 | api | …`）⇒ 必须先 regex 抽出子串。两步缺一不可。
+- **兼容旧行**：改造前写入的行没有 `.000`，regex 不命中（`NoMatchError:false` 不报错、不丢日志），`gotime` 因 `NoKeyError:true` 跳过 ⇒ 这些行退回**采集时刻**、无 `__time_ns_part__`。属预期降级，历史数据不回填。
+- **探针法在此依然失效**（容器去重，见「追加 3」关键坑），故直接改**现有同名 CRD** `new-api-app-file-ns`，不新建平行配置。
+
+#### 三、验证
+
+| 项 | 结果 |
+|---|---|
+| `go vet ./...`（root + relaykit） | ✅ 通过 |
+| `go build ./...`（root + relaykit） | ✅ 通过 |
+| `make test`（全部包） | ✅ **全绿**（`ours_likha/ops/local-ci.sh` → PASS=5 FAIL=0） |
+| 两站点 SLS `processors` 持久化 | ✅ `success: true`（回读一致） |
+| 前端 job（`bun typecheck` / `bun test`） | ⚠ 本机 WSL 无 bun 未跑；改动**纯后端**，由 PR 的 CI 覆盖（CI 不 skip 任何 job） |
+
+#### 四、发布状态（⛔ 待用户一步）
+
+- **提交**：`9fff2aa47`（`feat(log)`）+ `373c1d580`（`chore(ours_likha)`），分支 **`feature/log-ms-precision`**（PR 待开）。
+- **目标镜像**：`acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com/newapi-prod/newapi-master:20261009-373c1d580`（tag 不可变，新 tag 合规）。
+- ⛔ **未推送**：ACR 访问凭证（开通服务时设置的密码）本机未配置，`push.sh` 需交互输入 ⇒ 待提供后执行 `bash push.sh -n prod -t 20261009-373c1d580`。
+- ⛔ **未部署**：按规范 §7.1「集群内任何变更必须体现为 ops 仓库一次 commit，禁止手工 `kubectl set image`」——建议走 release 通道，或**至少先过 canary**（`deploy/aliyun/ph/canary-deployment.yaml` 已存在）验证 ms 再接全量。
+
