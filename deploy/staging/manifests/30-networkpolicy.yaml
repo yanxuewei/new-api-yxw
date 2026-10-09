@@ -1,0 +1,115 @@
+# staging · 30 NetworkPolicy
+#
+# 生效性已实测：terway-eniip 的 policy sidecar 在跑（任务45:E4，Pod 2/2 Ready）
+#           但全集群当前 **0 条 NetworkPolicy**（任务45:E3）⇒ 今天跨 ns 是 default-allow。
+# ⚠ 这是**第二道**边界。第一道是"不同 region + 不同 VPC + 不同实例 + CEN=0/peer=0"（任务45:E12）。
+#   Terway ENIIP 下 Pod IP 取自节点网段（pod_vswitch_ids=None，任务45:E2），
+#   所以 ipBlock 粒度只到 VPC 内网段，**不等于** Pod 粒度 —— 别把它当强隔离（任务45:371「把 namespace 当隔离」同一类错误）。
+# 回退：kubectl -n new-api-staging delete networkpolicy --all 即可整体摘除，不影响 prod。
+---
+# A. 入口侧 default-deny + 白名单放行（同 ns / 节点探针 / dev 侧压测与冒烟 ns）
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: np-staging-ingress-default-deny
+  namespace: new-api-staging
+spec:
+  podSelector: {}
+  policyTypes: ["Ingress"]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: np-staging-ingress-allow
+  namespace: new-api-staging
+spec:
+  podSelector:
+    matchLabels:
+      project: new-api
+  policyTypes: ["Ingress"]
+  ingress:
+    # ① 同 ns 内部（Service → Pod 在 Terway 下保留 client Pod IP，不依赖 nsSelector，但显式放行更安全）
+    - from:
+        - podSelector: {}
+      ports:
+        - {protocol: TCP, port: 3000}
+        - {protocol: TCP, port: 6379}
+    # ② kubelet 探针（liveness/readiness 从**节点 IP** 发起，不放进来的话 Pod 会被反复判死重启）
+    #    来源限雅加达 dev 节点段；雅加达与马尼拉 10.0.0.0/16 不同段 ⇒ 生产节点进不来
+    - from:
+        - ipBlock: {cidr: 10.2.16.0/20}   # vsw-jkt-dev-app-5a
+        - ipBlock: {cidr: 10.2.32.0/20}   # vsw-jkt-dev-app-5b
+        - ipBlock: {cidr: 10.2.80.0/20}   # vsw-jkt-dev-app-5c
+      ports:
+        - {protocol: TCP, port: 3000}
+    # ③ 冒烟/E2E 与压测入口（同集群的 dev/perf ns，按需开启；不给 prod 任何 ns）
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: new-api-perf
+      ports:
+        - {protocol: TCP, port: 3000}
+---
+# B. 出口侧 default-deny：这是"staging 打不到 prod 数据面"的策略层表达
+#    （结构性保证已经由不同 VPC + 白名单提供，本条是纵深防御 + 防误配 DSN）
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: np-staging-egress-default-deny
+  namespace: new-api-staging
+spec:
+  podSelector: {}
+  policyTypes: ["Egress"]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: np-staging-egress-allow
+  namespace: new-api-staging
+spec:
+  podSelector:
+    matchLabels:
+      project: new-api
+  policyTypes: ["Egress"]
+  egress:
+    # ① DNS（kube-system 的 CoreDNS）
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+    # ② 自身 Pod（Redis 回连、Service 转发）
+    - to:
+        - podSelector: {}
+    # ③ 集群内 Redis：走 Service 时目的 IP 是 Pod IP（Terway 保留），按端口放行即可
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: redis-staging
+      ports:
+        - {protocol: TCP, port: 6379}
+    # ④ 雅加达 RDS 私网 5432：⚠ 这里**必须收窄到实例的 /32**（回读 DescribeDBInstanceNetInfo 后替换），
+    #    写 /20 会把同段所有内网地址一起放行。留 /20 只是 apply 前不阻塞的临时值。
+    - to:
+        - ipBlock: {cidr: REPLACE_ME_JKT_RDS_IP_32}
+      ports:
+        - {protocol: TCP, port: 5432}
+    # ⑤ 上游模型 provider（中转站的真实出口）：公网 443，但**排除**所有私网段与元数据服务
+    #    100.100.100.200 是阿里云 ECS 元数据地址 ⇒ 必须排除，否则 Pod 可换 Worker RAM 角色的临时凭证
+    #    （prod 侧同理，属 O3 的独立整改项）
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 100.64.0.0/10
+              - 100.100.100.200/32
+              - 169.254.0.0/16
+      ports:
+        - {protocol: TCP, port: 443}
+        - {protocol: TCP, port: 80}
+    # ⑥ 镜像拉取与云助手走节点侧，不经 Pod 网络，无需在此放行

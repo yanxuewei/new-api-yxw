@@ -10,7 +10,7 @@
           {
             "id": "5da66b33f5bbf458",
             "type": "tabs",
-            "dimension": 45.97938144329897,
+            "dimension": 42.77456647398844,
             "children": [
               {
                 "id": "729df3220eedf670",
@@ -45,23 +45,38 @@
           {
             "id": "264054e36225ad52",
             "type": "tabs",
-            "dimension": 54.02061855670103,
+            "dimension": 57.22543352601156,
             "children": [
               {
-                "id": "08c6983e34278324",
+                "id": "5526bac4a6e8cfb1",
+                "type": "leaf",
+                "state": {
+                  "type": "markdown",
+                  "state": {
+                    "file": "deploy/git开发-发布-值班规范.md",
+                    "mode": "preview",
+                    "source": false
+                  },
+                  "icon": "lucide-file",
+                  "title": "git开发-发布-值班规范"
+                }
+              },
+              {
+                "id": "154318d88c2a0957",
                 "type": "leaf",
                 "state": {
                   "type": "markdown",
                   "state": {
                     "file": "deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md",
                     "mode": "preview",
-                    "source": true
+                    "source": false
                   },
                   "icon": "lucide-file",
                   "title": "阿里云国际站菲律宾部署_详细操作指南-v2.0"
                 }
               }
-            ]
+            ],
+            "currentTab": 1
           }
         ],
         "direction": "vertical"
@@ -232,22 +247,30 @@
       "bases:新建数据库": false
     }
   },
-  "active": "08c6983e34278324",
+  "active": "154318d88c2a0957",
   "lastOpenFiles": [
-    "deploy/logs/sls_newest_appfile_sg.sh",
-    "deploy/logs/sls_newest_appfile.sh",
-    "deploy/sls/clusterpipelineconfig-app-file.yaml",
-    "deploy/sls/clusterpipelineconfig-app-file-sg.yaml",
-    "deploy/logs/probe_check3.sh",
-    "deploy/logs/probe_check2.sh",
-    "deploy/logs/probe_check.sh",
-    "deploy/logs/sls_query_appfile_probe.sh",
-    "deploy/logs/lt_gen_nowait.sh",
-    "deploy/logs/probe_index.sh",
-    "deploy/logs/probe_create.sh",
+    "deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md",
+    "deploy/git开发-发布-值班规范.md",
+    "deploy/logs/sedREQuzL",
+    "deploy/logs/probe_bun_host.sh",
+    "deploy/logs/sedH0DoEx",
+    "deploy/logs/commit_msg2.txt",
+    "ours_likha/ops/sedJJZJKe",
+    "ours_likha/code/cmd/logms-check/main.go",
+    "ours_likha/code/cmd/logms-check",
+    "ours_likha/code/cmd",
+    "deploy/logs/sedJhUov3",
+    "deploy/logs/probe_bun_isolated.sh",
+    "ours_likha/ops/README.md",
+    "ours_likha/doc/README.md",
+    "ours_likha/code/README.md",
+    "ours_likha/README.md",
+    "UPSTREAM_CHANGES.md",
+    "github-team-guide.md",
+    "deploy/日志库ClickHouse_学习手册.md",
+    "deploy/staging/隔离方案_staging资源归属_2026-10-08.md",
     "deploy/预发与正式环境区别.md",
     "impl_deploy.md",
-    "deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md",
     "deploy/logs/xlsx_sync/guide_before.md",
     "deploy/KMS弃用_手工Secret注入_裁定_2026-09-30.md",
     "migrations/README.md",
@@ -262,17 +285,9 @@
     "deploy/_tmp_s8.md",
     "deploy/jakarta_dev_ledger.md",
     "Day1任务9_日志库CK决策_执行报告.md",
-    "deploy/Day1任务9_日志库CK决策_执行报告.md",
-    "deploy/付费方式修订记录-2026-09-28.md",
-    "deploy/Day2任务11_ACK节点池_执行报告.md",
-    "deploy/Day1任务4_RDS_PostgreSQL_执行报告.md",
-    "deploy/logs/inbound-wecom-20260929-2101/阿里云国际站菲律宾部署_详细操作指南-v2.0.md",
-    "deploy/跳板机运维入门_登录机器与Pod_2026-09-29.md",
     "deploy/ai_model_price/国内模型价格.png",
     "deploy/ai_model_price/自己部署.jpg",
     "deploy/ai_model_price/cc_claude.jpg",
-    "deploy/zhuoyanplus域名证书.jpg",
-    "deploy/任务45环境隔离修订_2026-09-29.md",
-    "deploy/nodepool_ledger_sg.md"
+    "deploy/zhuoyanplus域名证书.jpg"
   ]
 }

@@ -1,0 +1,21 @@
+# staging · 10 namespace
+#
+# 归属：雅加达 dev 集群 cb0abf5bc06034f7bbdb991752f6f3e62（ap-southeast-5），
+#       不是马尼拉生产集群 cd57e40ce9a634c1698c2f5c5e09bd93c。
+# 口径：任务45:3（禁止 staging 落生产集群）+ VPC与vSwitch落地:120（namespace 命名沿用
+#       new-api-staging / new-api-perf，但归属改为非生产集群）。
+# 执行：kubectl apply -f 本文件（经 deploy/ack_remote.sh，雅加达侧当前无公网 kubeconfig）
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: new-api-staging
+  labels:
+    app.kubernetes.io/part-of: new-api
+    env: staging
+    site: jkt
+    project: new-api
+    # 计费/筛选维度：与资源组 rg-nonprod(rg-aek4hk3prqgqjcy) 对齐。
+    # 注意：资源组只是计费/授权分组，**不是安全边界**（任务45:70），真正的边界是不同 VPC + 不同实例。
+    newapi.io/resource-group: rg-nonprod
+    newapi.io/env-tier: nonprod
