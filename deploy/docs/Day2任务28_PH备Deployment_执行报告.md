@@ -4,7 +4,7 @@
 - **卡片窗口**：D2 上午 11:00–13:00（单人 2 人时）。**实际执行 13:42–14:00**（顺延，原因：先完成 10-06 F13/F14 裁定回写）。
 - **通道**：`deploy/ack_remote.sh sg`（SG 集群 `ca75829e3492d491d9d434de087913798`，`endpoint_public_access=false`，全部 kubectl 经云助手在 VPC worker `10.1.x` 节点内执行；`ACKCTL_DIR=/tmp/ackctl-sg-t28`）。
 - **写操作清单**：`Deployment/new-api-ph-standby`、`Service/new-api-ph-standby`（**均为新建**，SG `ns/new-api` 此前实测**无任何业务对象**，不覆盖、不修改既有对象）；另有两个**临时探针 Pod**（`t28-pg`/`t28-pg2`，`postgres:17`，用完即删，实测已删）。**未新增任何云资源、未产生云费用**（跑在既有 2 台按量节点上）。
-- **产物**：`deploy/aliyun/ph/standby-deployment.yaml`、`deploy/task28_standby.sh`、`deploy/task28_bodies/{00-recon,01-recon2,02-mnl-check,03-ingressclass,04-verify-extra}.sh`、`deploy/logs/task28_*`（11 个目录）。
+- **产物**：`deploy/aliyun/ph/standby-deployment.yaml`、`deploy/task28/standby.sh`、`deploy/task28/bodies/{00-recon,01-recon2,02-mnl-check,03-ingressclass,04-verify-extra}.sh`、`deploy/logs/task28_*`（11 个目录）。
 
 ---
 
@@ -13,7 +13,7 @@
 | 卡片前置 | 实况 | 证据 |
 | --- | --- | --- |
 | 任务 24 SG 集群就绪、**常态 2 节点** | ✅ 2 节点，且**分属 1a/1b**：`ap-southeast-1.10.1.19.103`=**1a**/`ecs.g9ae.2xlarge`、`…10.1.38.113`=**1b**/`ecs.g8ine.2xlarge`；allocatable 各 **7910m / ~29.5Gi**；已请求 1a `3310m/4626Mi`、1b `1400m/2204Mi` ⇒ 单 AZ 放 1 副本（requests 2C/4Gi）绰绰有余 | `logs/task28_recon2_20261006-134525/`、`logs/task28_precheck_20261006-135341/` P4 |
-| 机型口径 | ⚠ **卡片原写 g9i.2xlarge 与实际不符**（两台既非同类、也不是 g9i）⇒ 已在指南卡片前置段落落 10-06 纠偏；成本口径按 `task23_price_matrix.py` 的 1a 三机型含盘包月（g9i 302.10 / g9ae 332.32 / g8ine 362.44） | 同上 + `deploy/docs/Day2任务23_stable部署_执行报告.md` |
+| 机型口径 | ⚠ **卡片原写 g9i.2xlarge 与实际不符**（两台既非同类、也不是 g9i）⇒ 已在指南卡片前置段落落 10-06 纠偏；成本口径按 `deploy/task23/price_matrix.py` 的 1a 三机型含盘包月（g9i 302.10 / g9ae 332.32 / g8ine 362.44） | 同上 + `deploy/docs/Day2任务23_stable部署_执行报告.md` |
 | 任务 22 跨区 DSN 路径已定 | ✅ 现网 sg `SQL_DSN` 实测 = `postgres://newapi_sg:***@pgm-5tstdhko64x2c01wpub…:6432/newapi?sslmode=verify-full&sslrootcert=/etc/ssl/rds/ca.crt`（**verify-full 已落**，卡片步骤 2 的"sg 现为 require"**已过时**）；CA 由 `secret/rds-ca-apse6` 提供 | `logs/task28_recon_20261006-134247/` §5（值已脱敏）、`logs/task28_precheck_…-135341/` P1 |
 | 单地域镜像源，两集群同仓同 tag | ✅ 同仓同 tag 同 **digest**：`…newapi-master:20260928-26ac63233`，`imageID=sha256:38fd74feac699a7926378f5bed197fd881409d58dddd2ab56f550ecdd72282b3`（两 Pod 一致），与马尼拉 stable 同 tag | `logs/task28_verifyextra_20261006-135749/` ⑤ |
 | **两地域 `SESSION_SECRET` 必须一致** | ✅ **实测同指纹**：mnl `sha256[:12]=c5fbe2dbc89b`（len 42）、sg `c5fbe2dbc89b`（len 42）⇒ 保管目录单真源生效。⚠ `SESSION_SECRET_OLD` **sg 缺失**（mnl 有，`6b9e5430519c`）⇒ 属任务 17 残留，**不影响本卡**（备站只用现役密钥），但双密钥过渡（任务 55 R40）在 sg 侧尚未武装 | `logs/task28_mnlcheck_20261006-134548/` §A、`logs/task28_recon_…-134247/` §5c |
@@ -33,7 +33,7 @@
 
 | 步骤 | 模式 | 结果 | 日志 |
 | --- | --- | --- | --- |
-| 只读侦察 | `task28_bodies/00-recon.sh` | 拿到节点/Secret/CM/SA/Quota/拉取/6432 六项现值；**脚本缺陷见 §七** | `logs/task28_recon_20261006-134247/` |
+| 只读侦察 | `task28/bodies/00-recon.sh` | 拿到节点/Secret/CM/SA/Quota/拉取/6432 六项现值；**脚本缺陷见 §七** | `logs/task28_recon_20261006-134247/` |
 | 缺口复测 | `01-recon2.sh` | ns 对象全清单（**全空**）；SG 无 Redis 键；IngressClass 异常发现 | `logs/task28_recon2_20261006-134525/` |
 | 两地配对 | `02-mnl-check.sh`（mnl 集群） | SESSION_SECRET 同指纹；镜像无 psql；mnl cm 与 sg 仅 TZ 不同 | `logs/task28_mnlcheck_20261006-134548/` |
 | IngressClass 取证 | `03-ingressclass.sh` | 见 §七 坑 5 | `logs/task28_ingressclass_20261006-135357/` |
@@ -73,7 +73,7 @@
 - 坑 2｜**SG 无 Redis 是"已知降级"不是遗漏**：`common/redis.go:25` 对空 `REDIS_CONN_STRING` 是 `RedisEnabled=false` + 一条日志 + `return nil`（**不致命**），而 cm `MEMORY_CACHE_ENABLED=false` ⇒ 限流退化为单 Pod 内存态（`middleware/rate-limit.go:148`）、渠道/配置每次读库。备站常态零流量可接受；**要恢复跨副本一致性需 SG Tair（成本项，另卡裁定）**。现网日志已实测到该降级行。
 - 坑 3｜liveness 绑 `/api/status`（卡片坑 3 仍在）：主库抖动时 `/api/status` 虽不查库，但冷 Pod 一旦被 startupProbe 放行后仍有 5×15 s 的 kill 窗口；根治仍是 G8 的 `/healthz`。本卡把风险从"启动期"收住，未消除"运行期"。
 - 坑 4｜探针 Pod 也受 `new-api-quota` 管：必须给 `resources`，否则 `Forbidden: failed quota`（任务 16 §六③ 已记，本卡脚本照做：100m/128Mi）。探针 `postgres:17` 走公网拉取，实测 `phase=Running` 约 8–12 s。
-- 坑 5｜**并发会话已在动 SG 集群**：`IngressClass/alb`（`parameters → AlbConfig/sg-alb`，labels `site=ph-sg`，`kubectl.kubernetes.io/last-applied-configuration` 注解）实测创建于 `2026-10-06T05:44:40Z`（本地 13:44:40），**正好落在我这次侦察窗口内**；`ownerReferences=None`、集群内 `AlbConfig` 对象数 0、云侧 ALB 实例 0，`deploy/manifests/ingressclass-sg.yaml` + `deploy/task25_bodies/01-ingressclass.sh` 是同一份内容 ⇒ 判定为**任务 25 的并发执行**，非本卡所为、也非控制器自动建。ALB 控制器本身活着（`lease/alb` holder `controlplane-alb-85b899ccd-ccz2p`，`renewTime` 与节点 UTC **同秒**）。⇒ 两卡对象不重叠（本卡只 deploy/svc `new-api-ph-standby`），但**任务 25 的 Ingress 后端正是本卡 Service**，本卡 apply 客观上是它的前置。
+- 坑 5｜**并发会话已在动 SG 集群**：`IngressClass/alb`（`parameters → AlbConfig/sg-alb`，labels `site=ph-sg`，`kubectl.kubernetes.io/last-applied-configuration` 注解）实测创建于 `2026-10-06T05:44:40Z`（本地 13:44:40），**正好落在我这次侦察窗口内**；`ownerReferences=None`、集群内 `AlbConfig` 对象数 0、云侧 ALB 实例 0，`deploy/manifests/ingressclass-sg.yaml` + `deploy/task25/bodies/01-ingressclass.sh` 是同一份内容 ⇒ 判定为**任务 25 的并发执行**，非本卡所为、也非控制器自动建。ALB 控制器本身活着（`lease/alb` holder `controlplane-alb-85b899ccd-ccz2p`，`renewTime` 与节点 UTC **同秒**）。⇒ 两卡对象不重叠（本卡只 deploy/svc `new-api-ph-standby`），但**任务 25 的 Ingress 后端正是本卡 Service**，本卡 apply 客观上是它的前置。
 - 坑 6｜`v1 Endpoints is deprecated in v1.33+`：集群 1.35.7，卡片 `kubectl get endpoints` 仍可用但每次带告警；判据应改 `EndpointSlice`。
 
 ## 八、待办 / 需裁定
@@ -81,7 +81,7 @@
 | 项 | 归属 | 说明 |
 | --- | --- | --- |
 | **V4 真判据**（主站 token → SG ALB） | 任务 25 落地后回补 | 需要 SG ALB DNS + 一个真实主站 token；**token 属凭据，执行时只走集群内注入、不进日志** |
-| sg 补 `SESSION_SECRET_OLD` + `SQL_DSN_MIGRATE`（`REDIS_CONN_STRING` **不在可补范围**） | 任务 17 残留 | ✅ **2026-10-06 用户核准补齐**（原话「sg 三个 Secret 键可以补齐」）。脚本已就绪并加护栏（见 §十二-补），但**本会话无法执行**：明文只在 **WSL 堡垒机** `/root/.deploy_secrets/`（本机 macOS 实测 `ls /root/.deploy_secrets` = No such file、`/mnt/e/...` 不存在）⇒ 属"核准到但执行位不在此"，须由项目负责人在 WSL 侧跑 `bash deploy/task17_secret_inject.sh --apply sg`。**三键里只有两键可补**：`REDIS_CONN_STRING` 需 SG Tair（任务 29 仍 `Trade_Not_Support_Async_Pay`）⇒ 脚本对 sg **不写该键**，不是遗漏 |
+| sg 补 `SESSION_SECRET_OLD` + `SQL_DSN_MIGRATE`（`REDIS_CONN_STRING` **不在可补范围**） | 任务 17 残留 | ✅ **2026-10-06 用户核准补齐**（原话「sg 三个 Secret 键可以补齐」）。脚本已就绪并加护栏（见 §十二-补），但**本会话无法执行**：明文只在 **WSL 堡垒机** `/root/.deploy_secrets/`（本机 macOS 实测 `ls /root/.deploy_secrets` = No such file、`/mnt/e/...` 不存在）⇒ 属"核准到但执行位不在此"，须由项目负责人在 WSL 侧跑 `bash deploy/task17/secret_inject.sh --apply sg`。**三键里只有两键可补**：`REDIS_CONN_STRING` 需 SG Tair（任务 29 仍 `Trade_Not_Support_Async_Pay`）⇒ 脚本对 sg **不写该键**，不是遗漏 |
 | SG Tair 是否采购（决定备站有无 Redis 一致性） | 成本裁定项 | 现状=不建；若 GTM 接管后要求限流/缓存跨副本一致，则必须建 |
 | 443 / `SESSION_COOKIE_SECURE` / `TRUSTED_URL` | 任务 44 + G5 证书 | 与主站同批，本卡未动 |
 | 任务 43 的 sg HPA（`2–24`） | 任务 43 | 本卡按卡片**只建 Deployment 副本数 2**，未建 HPA/PDB；**且 24 需按 F12/F14 口径重算 = 主站 15 × 1.5 ≈ 23** |
@@ -100,27 +100,27 @@
 
 1. 立即用本地脚本对该日志做脱敏，复扫判据：`:[A-Za-9]{12,}@` 形态口令 **0 处**、`BEGIN CERTIFICATE` **0 处**（`logs/task28_recon_20261006-134247/remote.out`）。
 2. `deploy/logs` 命中仓库 `.gitignore` 第 13 行 `logs` ⇒ **未进入 Git**（`git check-ignore -v` 实测）。
-3. 脚本层已修正：后续所有 Secret 读取一律"整体 `-o json` → 本地 python 只取键名"，值不落任何输出（`01-recon2.sh` §B、`task28_standby.sh` P1、`02-mnl-check.sh` §A 的骨架掩码 + 指纹口径）。
+3. 脚本层已修正：后续所有 Secret 读取一律"整体 `-o json` → 本地 python 只取键名"，值不落任何输出（`01-recon2.sh` §B、`deploy/task28/standby.sh` P1、`02-mnl-check.sh` §A 的骨架掩码 + 指纹口径）。
 4. **是否轮换这两个口令（RDS `newapi_sg`、ClickHouse）请裁定** —— 泄露面限于本机文件与本次会话记录，未出机器；轮换属密钥轮换，未核准不动手（任务 4 的 RDS 轮换 SOP 可复用）。
    ✅ **2026-10-06 裁定：不轮换，AI 不处理，后续由人工修改**（原话「不用处理，后面会人工修改」）。⇒ 本项从"待裁定"降为"人工待办"，脚本与集群侧**不做任何动作**；登记口径保留（事件本身与脱敏证据不得抹掉）。
 
 ## 十一、本卡应固化进指南的内容
 
 - 清单：`deploy/aliyun/ph/standby-deployment.yaml`（差异①–⑤ 的依据写在文件头）。
-- 执行器：`deploy/task28_standby.sh`，模式 `--precheck | --dryrun | --apply | --verify | --status | --cleanup`；`--cleanup` 可整卡回退（只删本卡 deploy/svc/探针，保留 Secret/CM/SA/CA）。
+- 执行器：`deploy/task28/standby.sh`，模式 `--precheck | --dryrun | --apply | --verify | --status | --cleanup`；`--cleanup` 可整卡回退（只删本卡 deploy/svc/探针，保留 Secret/CM/SA/CA）。
 - 护栏已进脚本：镜像域名含 `-vpc` 即 die、tag 为 `latest` 即 die、清单解析不到 replicas/requests/limits 即 die、Apply 前 AZ 去重数打印。
 
 ## 十二、文档回写（2026-10-06 已完成，本轮实际改动清单）
 
 | 文件 | 改动 |
 | --- | --- |
-| 指南 `任务 28` 卡 | ① 卡头加 `⚠ 部分交付（V1–V3 ✅，V4 阻塞于任务 25）` + 执行状态块（指向本报告/脚本/manifest）；② 前置段补"两地同 digest `sha256:38fd74f…82b3`"与"两地 `SESSION_SECRET` 同指纹 `c5fbe2dbc89b`（静态前提≠V4）"；③ 步骤 1 YAML 后加**实况纠偏表 D1–D5**（YAML 原文保留作方案口径）；④ 步骤 2 ExternalSecret 两行标"作废留痕、勿执行"并替换为"本卡不建 Secret，一律走 `task17_secret_inject.sh`"，同时**更正 `sslmode` 过期文本**（sg 已 `verify-full` + CA 落地，原"现为 require"作废）；⑤ 验证方法后加**验证实况**（3 处方法级错误 + V1 按 `nodeName` 反查 zone 的正确查法）；⑥ 不通过时修复首条补两个高频成因（未挂 CA / `-vpc` 域名 + `SA/new-api-app` 凭据）；⑦ 坑 6/7/8 新增（探针无 `psql`、取键名泄值、备站少键不报错） |
+| 指南 `任务 28` 卡 | ① 卡头加 `⚠ 部分交付（V1–V3 ✅，V4 阻塞于任务 25）` + 执行状态块（指向本报告/脚本/manifest）；② 前置段补"两地同 digest `sha256:38fd74f…82b3`"与"两地 `SESSION_SECRET` 同指纹 `c5fbe2dbc89b`（静态前提≠V4）"；③ 步骤 1 YAML 后加**实况纠偏表 D1–D5**（YAML 原文保留作方案口径）；④ 步骤 2 ExternalSecret 两行标"作废留痕、勿执行"并替换为"本卡不建 Secret，一律走 `deploy/task17/secret_inject.sh`"，同时**更正 `sslmode` 过期文本**（sg 已 `verify-full` + CA 落地，原"现为 require"作废）；⑤ 验证方法后加**验证实况**（3 处方法级错误 + V1 按 `nodeName` 反查 zone 的正确查法）；⑥ 不通过时修复首条补两个高频成因（未挂 CA / `-vpc` 域名 + `SA/new-api-app` 凭据）；⑦ 坑 6/7/8 新增（探针无 `psql`、取键名泄值、备站少键不报错） |
 | 指南 `Day 2 · 泳道 B 出口检查清单` | "新加坡备站"行加 10-06 实况：前四项 ✅、V3 期望由 300 改 20、**V4 ⛔ 归任务 25** ⇒ 本行不得勾选 |
 | `核心更新总结_2026-10-05.md` | §1 标题与计数改 **3 张部分交付**、B 窗行加任务 28；**新增 §1c 任务 28 交付明细**（含安全事件行）；§4 加"任务 28 的 V4 ⛔ 阻塞"；§5 新增 **⑧**（步骤 2 `sslmode` 与任务 30 登记矛盾，已连正文更正 + 整键覆盖写的回退风险）；§6 加 **18**（是否轮换口令，待裁定）与 **19**（补三键 + V4 重放，两项收尾）；§7 加 **4 行**（`资源清单-新加坡!H18` 补正为"CM 100 / 备站 Pod 10"两层 + `max 24→23`、`里程碑与验收!D7` 标 ⚠ 部分、`落地计划!C26/AC26` 改配置完成、`AC 列整体` 行补任务 28） |
 
 > xlsx **未编辑**（遵守"只出回改清单"）。本轮全部改动**未 commit**。
 
-## 十二-补、`task17_secret_inject.sh` 加固（2026-10-06，响应"sg 三键可补齐"的核准）
+## 十二-补、`deploy/task17/secret_inject.sh` 加固（2026-10-06，响应"sg 三键可补齐"的核准）
 
 | 改动 | 为什么 |
 | --- | --- |
@@ -136,8 +136,8 @@
 
 ```bash
 # 在 WSL 堡垒机（有 /root/.deploy_secrets 与 deploy/.env 的那台）执行
-bash deploy/task17_secret_inject.sh --check
-bash deploy/task17_secret_inject.sh --apply sg      # 只动 sg，5 键；mnl 不碰
+bash deploy/task17/secret_inject.sh --check
+bash deploy/task17/secret_inject.sh --apply sg      # 只动 sg，5 键；mnl 不碰
 # 回读判据：两地键集差只剩 REDIS_CONN_STRING（SG Tair 未建，故意不写）
 ```
 

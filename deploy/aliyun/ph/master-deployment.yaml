@@ -1,7 +1,7 @@
 # Day 2 · 任务 18｜master Deployment（只跑 AutoMigrate，不接流量）
 #
 # 配套：deploy/docs/阿里云国际站菲律宾部署_详细操作指南-v2.0.md「任务 18」
-#       deploy/task18_master_migrate.sh（--precheck / --apply / --verify / --status / --cleanup）
+#       deploy/task18/master_migrate.sh（--precheck / --apply / --verify / --status / --cleanup）
 #
 # 三份与文档卡片的最小差异，全部有实测依据（详见 deploy/docs/Day2任务18_master迁移幂等_执行报告.md）：
 #   ① 镜像走 **VPC 内网域名** `acr-newapi-mnl-registry-vpc.ap-southeast-6.cr.aliyuncs.com`
@@ -77,7 +77,7 @@ spec:
         - name: new-api
           # tag = <日期>-<git 短 SHA>，不可变（该仓库 TagImmutability=true）。
           # 2026-09-28 之后无 Go 代码变更（git log 26ac63233..HEAD -- '*.go' 为空），
-          # 所以本 tag 与当前 main 的二进制行为一致。发布镜像由 task18_master_migrate.sh 覆盖。
+          # 所以本 tag 与当前 main 的二进制行为一致。发布镜像由 deploy/task18/master_migrate.sh 覆盖。
           image: acr-newapi-mnl-registry-vpc.ap-southeast-6.cr.aliyuncs.com/newapi-prod/newapi-master:20260928-26ac63233
           imagePullPolicy: IfNotPresent
           ports:

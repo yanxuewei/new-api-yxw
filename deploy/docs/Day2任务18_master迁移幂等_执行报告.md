@@ -3,7 +3,7 @@
 - **卡片**：`deploy/docs/阿里云国际站菲律宾部署_详细操作指南-v2.0.md` §Day2 任务 18（单人，2 人时，13:30–15:30）
 - **执行日期**：2026-10-05
 - **执行通道**：`deploy/ack_remote.sh mnl`（云助手 `ecs RunCommand` → worker 节点内 kubectl，admin 私网 kubeconfig；`ACKCTL_DIR=/tmp/ackctl-mnl-t18` 与并行的任务 17 会话隔离）
-- **产物**：`deploy/aliyun/ph/master-deployment.yaml`、`deploy/task18_master_migrate.sh`（`--precheck/--apply/--verify/--status/--cleanup`）、`deploy/logs/task18_*_20261005-*/`（body.sh + remote.out 全量留存）
+- **产物**：`deploy/aliyun/ph/master-deployment.yaml`、`deploy/task18/master_migrate.sh`（`--precheck/--apply/--verify/--status/--cleanup`）、`deploy/logs/task18_*_20261005-*/`（body.sh + remote.out 全量留存）
 - **结论**：✅ **完成**。空库首启建出 36 表 / 177 索引 / 0 ERROR；第 2 次冷启动 schema 指纹与首启**逐字相同**（幂等成立）；master 红线、不接流量、迁移账号边界三项验收全过。收口后追加一项修复：**master 的镜像拉取路径由公网域名改为 ACR 企业版 VPC 内网域名（`-vpc`），并在零缓存节点完成全量冷拉复测**（§十）。
 - **授权留痕**：① 拉取凭据修复方式 = 「装 credential-helper 组件」；② 生产 DDL 门禁 = 「一次核准，apply+verify 连着跑」（项目负责人 IM 会话内答复，2026-10-05）。
 
@@ -201,7 +201,7 @@ FPB = 36|e0573c6f2c3aef3bcfd8f9297f6a2948|8a088809e6f2eaa5d3d484efb8a67127
 4. **任务 54**：AutoMigrate 幂等已确认 ⇒ 可在 staging 建 `golang-migrate` 基线；prod 保持 master-only AutoMigrate。
 5. **任务 23**：`endpoints/new-api-master ready=0` 是占位资源，清理时点为任务 23；master 标签 `app=new-api-migrate` 与其 selector 的隔离关系必须保留，否则坑 1 立刻复现。任务 23 卡片前置里的"ExternalSecret 已建"已随本次一并改为实测口径（手工 Opaque Secret）。
 6. ~~**新加坡集群的 credential-helper 仍未装**（本卡只闭环马尼拉侧）~~ ⇒ **2026-10-05 21:2x 复核推翻此条**：SG 侧 `managed-aliyun-acr-credential-helper` 状态 `active`（`cs ListClusterAddonInstances --cluster_id ca75829e…`），`new-api` ns 内已生成 `secret/acr-credential-secret-aggregation`（创建时间 `2026-10-05T10:19:10Z`，覆盖 `-vpc` 与公网两个 mnl registry host，字段齐备），且 SG 的 SA `new-api-app` 已挂 `imagePullSecrets=[acr-credential-secret-aggregation]`。⇒ 遗留项从「未装」改为「**未验证过 SG 侧真实拉取**」（SG 目前无任何工作负载，任务 24/23 部署时一并验）。红线不变：**任何要拉本镜像的 Pod 必须显式 `serviceAccountName: new-api-app`**。
-7. master Deployment **保持 Running**（本卡交付态即运行中，未 `--cleanup`）；回退方式 `bash deploy/task18_master_migrate.sh --cleanup`（只删 Deployment 与本卡临时 Pod，**不动 schema**）。
+7. master Deployment **保持 Running**（本卡交付态即运行中，未 `--cleanup`）；回退方式 `bash deploy/task18/master_migrate.sh --cleanup`（只删 Deployment 与本卡临时 Pod，**不动 schema**）。
 
 ## 九、证据索引
 

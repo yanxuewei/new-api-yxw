@@ -88,14 +88,14 @@
 
 | 文件 | 用途 |
 | --- | --- |
-| `deploy/task30_bodies/03-sg-tcp.sh` | SG→MNL RTT / 端口对照 / ICMP（节点级，~30 s） |
-| `deploy/task30_bodies/04-sg-tls.sh` | 证书链与 TLS 详情（**注意 6432 需 psql 判 TLS**） |
-| `deploy/task30_bodies/05-sg-pg-pod.sh` | SG 一次性探针 Pod + psql/pgbench/V1/V3（数据面主力） |
-| `deploy/task30_bodies/06-sg-verifyfull.sh` | `verify-full` 三种口径复现（require / system / 缺 rootcert） |
-| `deploy/task30_bodies/07-mnl-write.sh` | 主站侧对照 + V2 写 marker（建 Pod + 建表 + insert） |
-| `deploy/task30_bodies/08-sg-read.sh` | V2 读侧 + 清理 |
-| `deploy/task30_bodies/09-sg-latency-breakdown.sh` | 建连成本拆解（进程/池/直连） |
-| `deploy/task30_bodies/10-sg-verifyfull-path.sh` | `verify-full` 可行路径 + 连接复用对照 + 连接账目 |
+| `deploy/task30/bodies/03-sg-tcp.sh` | SG→MNL RTT / 端口对照 / ICMP（节点级，~30 s） |
+| `deploy/task30/bodies/04-sg-tls.sh` | 证书链与 TLS 详情（**注意 6432 需 psql 判 TLS**） |
+| `deploy/task30/bodies/05-sg-pg-pod.sh` | SG 一次性探针 Pod + psql/pgbench/V1/V3（数据面主力） |
+| `deploy/task30/bodies/06-sg-verifyfull.sh` | `verify-full` 三种口径复现（require / system / 缺 rootcert） |
+| `deploy/task30/bodies/07-mnl-write.sh` | 主站侧对照 + V2 写 marker（建 Pod + 建表 + insert） |
+| `deploy/task30/bodies/08-sg-read.sh` | V2 读侧 + 清理 |
+| `deploy/task30/bodies/09-sg-latency-breakdown.sh` | 建连成本拆解（进程/池/直连） |
+| `deploy/task30/bodies/10-sg-verifyfull-path.sh` | `verify-full` 可行路径 + 连接复用对照 + 连接账目 |
 
 > 探针 Pod 标准写法（`new-api` ns 有 `ResourceQuota new-api-quota`，缺 resources 直接 `Forbidden: failed quota`）：见 05 号脚本 YAML 段。
 > `ack_remote.sh` 单次窗口约 5 分钟（`loops×5s`），**测量脚本必须拆段**——本次 `02-sg-net.sh`（50×TCP + 20×TLS）整体超时失败，即为反例。
@@ -180,10 +180,10 @@
 | 文件 | 用途 |
 | --- | --- |
 | `deploy/certs/rds-apse6-ca.crt` | RDS 马尼拉根 CA（根 + 6 区中间），可直接被 `sslrootcert` 使用 |
-| `deploy/task30_bodies/11-sg-verifyfull.sh` | 落地 CA Secret + 探针 Pod 跑正/负例矩阵（模板，`__CA_B64__` 需注入） |
-| `deploy/task30_bodies/12-sg-dsn-verifyfull.sh` | DSN 切 `verify-full` + 用 Secret 原值端到端复验（幂等） |
-| `deploy/task30_bodies/13-sg-conn-probe.sh` | 拔线自愈三段探测（`sed` 注入 `TAG=baseline/broken/recovered`） |
-| `deploy/task30_bodies/14-sg-v3-conncount.sh` | V3 连接账目（`pg_stat_activity` 分组，任意业务账号即可） |
+| `deploy/task30/bodies/11-sg-verifyfull.sh` | 落地 CA Secret + 探针 Pod 跑正/负例矩阵（模板，`__CA_B64__` 需注入） |
+| `deploy/task30/bodies/12-sg-dsn-verifyfull.sh` | DSN 切 `verify-full` + 用 Secret 原值端到端复验（幂等） |
+| `deploy/task30/bodies/13-sg-conn-probe.sh` | 拔线自愈三段探测（`sed` 注入 `TAG=baseline/broken/recovered`） |
+| `deploy/task30/bodies/14-sg-v3-conncount.sh` | V3 连接账目（`pg_stat_activity` 分组，任意业务账号即可） |
 
 ### 7.7 本卡状态
 

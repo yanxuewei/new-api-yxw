@@ -18,9 +18,9 @@
 | 存储类型 | ✅ `cloud_essd` / `cloud_essd2` / `cloud_essd3` 各 73；`cloud_ssd`、`local_ssd` **不可售（0）** |
 | **下单** | ✅ **成功** —— 订单 `518158947970481`，**未支付**，实付 **10594.13 USD/年**（标价 15134.47，折扣 30%） |
 | **账户余额** | ❌ **0.00 USD** → 无法支付，实例未创建（硬阻塞） |
-| 交付物 | ✅ 一个可重跑脚本 `deploy/task4_rds_mnl.sh`（7 step，幂等）+ 指南任务 4 已按实测修订 |
+| 交付物 | ✅ 一个可重跑脚本 `deploy/task4/rds_mnl.sh`（7 step，幂等）+ 指南任务 4 已按实测修订 |
 
-> **关键路径**：充值 → 支付订单 `518158947970481` → 实例自动创建（1–10 min）→ 跑 `./deploy/task4_rds_mnl.sh check` 验收。
+> **关键路径**：充值 → 支付订单 `518158947970481` → 实例自动创建（1–10 min）→ 跑 `./deploy/task4/rds_mnl.sh check` 验收。
 > **本次未产生任何费用**：下单用 `--AutoPay false`，只出订单不扣费、不建实例（零资金风险，这是本轮验证方式的要点）。
 
 ---
@@ -150,7 +150,7 @@ aliyun rds CreateDBInstance --RegionId ap-southeast-6 \
 # 1) 支付订单（控制台：费用中心 → 订单管理 → 未支付订单 → 支付）
 #    订单 518158947970481，应付 10594.13 USD
 # 2) 等待 1–10 分钟后验收
-./deploy/task4_rds_mnl.sh check
+./deploy/task4/rds_mnl.sh check
 ```
 
 `check` 会完成：属性核对（Category/Zone/SlaveZone/PayType/Storage）→ 打标签 `project=new-api site=ph-mnl env=prod` → 输出 `SHOW max_connections` 待办提醒。
@@ -197,7 +197,7 @@ aliyun rds CreateDBInstance --RegionId ap-southeast-6 \
 
 | 文件 | 说明 |
 |---|---|
-| `deploy/task4_rds_mnl.sh` | 7 step：`verify` / `price` / `create`（AutoPay=false 安全试单）/ `create-pay`（真实付款）/ `check` / `tag` / `all`。含 PATH 自愈、双重幂等闸门（实例查重 + 未支付订单闸门）、逐调用落盘日志 `deploy/logs/task4_rds_*.log` |
+| `deploy/task4/rds_mnl.sh` | 7 step：`verify` / `price` / `create`（AutoPay=false 安全试单）/ `create-pay`（真实付款）/ `check` / `tag` / `all`。含 PATH 自愈、双重幂等闸门（实例查重 + 未支付订单闸门）、逐调用落盘日志 `deploy/logs/task4_rds_*.log` |
 | `deploy/docs/阿里云国际站菲律宾部署_详细操作指南-v2.0.md` | 任务 4 已按实测修订：包年包月命令、9 必填参数、支付与幂等段、`不通过时修复` +4 条、`坑` 段新增坑 5–8；§2.1 付费方式行与任务 52 成本锚点补入 RDS 实付价 |
 | 本报告 | — |
 

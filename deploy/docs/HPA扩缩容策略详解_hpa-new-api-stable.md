@@ -3,7 +3,7 @@
 > 对象：`HorizontalPodAutoscaler/hpa-new-api-stable`（namespace `new-api`，apiVersion `autoscaling/v2`）
 > 目标：`Deployment/new-api-stable`
 > 实况抓取：**2026-10-06 23:10 (GMT+8)**，经 `deploy/ack_remote.sh mnl` 从集群内直读
-> 抓取脚本：`deploy/hpa_bodies/00-get-hpa.sh`（HPA spec + 实时用量）、`deploy/hpa_bodies/01-node-capacity.sh`（节点可分配量）
+> 抓取脚本：`deploy/hpa/bodies/00-get-hpa.sh`（HPA spec + 实时用量）、`deploy/hpa/bodies/01-node-capacity.sh`（节点可分配量）
 
 ---
 
@@ -355,6 +355,6 @@ spec:
 
 | 文件 | 用途 |
 |---|---|
-| `deploy/hpa_bodies/00-get-hpa.sh` | 直读 HPA 全量 spec + 用量 + 事件 |
-| `deploy/hpa_bodies/01-node-capacity.sh` | 节点 allocatable / allocated 核算 |
+| `deploy/hpa/bodies/00-get-hpa.sh` | 直读 HPA 全量 spec + 用量 + 事件 |
+| `deploy/hpa/bodies/01-node-capacity.sh` | 节点 allocatable / allocated 核算 |
 | `deploy/ack_remote.sh <mnl\|sg> <body.sh>` | 执行通道（云助手 + 节点内 kubectl） |

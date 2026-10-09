@@ -3,7 +3,7 @@
 - **卡片**：`deploy/docs/阿里云国际站菲律宾部署_详细操作指南-v2.0.md` §Day2 任务 23（第 3419–3553 行，单人 2 人时，D2 上午 09:00–11:00）
 - **执行日期**：2026-10-05 23:10–23:31（UTC+8；集群侧 UTC 15:2x）**＋ 2026-10-06 07:42–08:40 补测 V3/V4/ALB 与成本复核 ＋ 08:51–08:54 只读复核（托管组件存活 / 切流现状 / 弹性组件实名）**
 - **执行通道**：`deploy/ack_remote.sh mnl`（云助手 `ecs RunCommand` → VPC worker 节点内 kubectl，admin 私网 kubeconfig；10-05 用 `ACKCTL_DIR=/tmp/ackctl-mnl-t23` 固定目录，**10-06 起执行期文件与节点侧目录一律按 `RUN_ID` 唯一**，原因见 §十一-⑦）
-- **产物**：`deploy/aliyun/ph/stable-deployment.yaml`（清单，含差异说明）、`deploy/task23_stable.sh`（`--precheck/--dryrun/--apply/--verify/--status/--wire-alb/--cleanup`）、`deploy/task23_bodies/03b~04c-*.sh`（V3/V4 补测 body）、`deploy/task23_bodies/05-albctrl-lease.sh`/`06-goatscaler-lease.sh`/`07-ingress-backend.sh`（10-06 08:5x 托管组件存活与切流复核，全只读）、`deploy/task23_price_matrix.py`（单价复核）、`deploy/logs/task23_*_2026100{5,6}-*/`（body.sh + remote.out + 实际下发清单全量留存）
+- **产物**：`deploy/aliyun/ph/stable-deployment.yaml`（清单，含差异说明）、`deploy/task23/stable.sh`（`--precheck/--dryrun/--apply/--verify/--status/--wire-alb/--cleanup`）、`deploy/task23/bodies/03b~04c-*.sh`（V3/V4 补测 body）、`deploy/task23/bodies/05-albctrl-lease.sh`/`06-goatscaler-lease.sh`/`07-ingress-backend.sh`（10-06 08:5x 托管组件存活与切流复核，全只读）、`deploy/task23/price_matrix.py`（单价复核）、`deploy/logs/task23_*_2026100{5,6}-*/`（body.sh + remote.out + 实际下发清单全量留存）
 - **结论**：✅ **清单已落地，V1–V4 与 ALB 切流全部有实测证据**（10-06 补测后）。马尼拉 `new-api-stable` 4/4 Running、跨 AZ 2/2、0 重启、Service 转发通（ClusterIP 3×200 + 集群 DNS 4×ok）、真实滚动一次（revision 1→2）且事件序列证明「先建后杀」；stable Pod 对 PG **零 DDL**（schema 指纹 FP0==FP1 逐字相同）、DB 账号 `newapi`（非迁移账号）、`GOMAXPROCS=4` 对 `nproc=8`；**V3 drain 真驱逐通过**（仅 1 个 stable Pod 被驱逐、容量未减、替补可调度、uncordon 已恢复）；**V4 分三段**：指标链路（canary 200%/65% → 1→3）通过、真实 stable 容量通路（4→6→4、AZ 3/3、配额 25/64）通过，**但"CPU 65% 由业务流量触发"未证**（详见 §七 的结论口径）；**ALB 已切 `svc/new-api-stable` 并 200 取证**，同步销掉任务 19 的 V2 健康检查。
   **裁定已落地**：`maxReplicas` **16 → 15**（不抬配额），现网 + 清单 + 卡片三处同步，算术见 §九。**卡片方法缺陷**：卡片 V4 的"独立 stress Pod"判据在本 workload 上必然假阴性，已连正文改为三段式（§八-6/7）。
   **08:5x 复核收回了 3 条既有判定**（详见 §十三-③/⑤、§十四-2/2b）：① 任务 19 的"集群内无 alb workload ⇒ ALB Ingress Controller 未运行"**判据无效**（组件在 ACK 托管控制面；lease `renewTime` 与节点侧 `date -u` 同秒 + `SuccessfullyReconciled` 才是证据），已连任务 19 正文与步骤 1 命令一起改正；② 本卡上一版"用户面没有 cluster-autoscaler"⇒ 实况是弹性组件实名 **`ack-goatscaler`** 且活着（`cm/autoscaler-meta` 全参数已取），**组件存在性已证、开节点动作未实测**；③ 由 ②带出的**双层缩容风险**（`scale_down_enabled=true` + `unneeded_duration 10m` + 本服务 CPU 常年 0%）已列入残留。
@@ -16,7 +16,7 @@
 | # | 卡片口径 | 实装口径 | 依据 |
 | --- | --- | --- | --- |
 | ① | PDB `minAvailable: 3`；V3 期望「ALLOWED DISRUPTIONS = 0（4 副本时）」 | 沿用现网 `pdb-new-api-stable` 的 **`minAvailable: "70%"`**；4 副本下 `disruptionsAllowed = 1` | 现网该 PDB 早在 **2026-09-30 08:54:10** 就按 `70%` 建好，selector 与卡片逐字相同（`app=new-api`+`track=stable`），apply 为 `configured`→无实际变化。4 副本下 `ceil(0.7×4)=3` ⇒ 与 `minAvailable: 3` **完全等价**；而写成固定 3 在 HPA 扩到 16 时反而把健康下限降到 3（70% 口径是 12），所以选一个**不放松且随规模自动收紧**的值。⚠ 卡片 V3 的期望值本身算错：`minAvailable 3` + 4 副本 ⇒ allowed = 4−3 = **1**，不是 0（已连正文一起改）。 |
-| ② | 步骤 3：GitOps 里**不要写** `spec.replicas` | 清单**保留** `replicas: 4` | 本仓无 ArgoCD/Flux，apply 由 `task23_stable.sh` 直发，不存在 sync 打回 4 的事故路径；`--verify` 会把 `Deployment.spec.replicas` 与 HPA 期望做对照。**接 GitOps 时必须按卡片加** `ignoreDifferences: [/spec/replicas]`。 |
+| ② | 步骤 3：GitOps 里**不要写** `spec.replicas` | 清单**保留** `replicas: 4` | 本仓无 ArgoCD/Flux，apply 由 `deploy/task23/stable.sh` 直发，不存在 sync 打回 4 的事故路径；`--verify` 会把 `Deployment.spec.replicas` 与 HPA 期望做对照。**接 GitOps 时必须按卡片加** `ignoreDifferences: [/spec/replicas]`。 |
 
 其余按卡片逐条实装，另有 **7 处卡片正文本身的问题**（含判据/manifest/验收方法写错）已连正文修正，见 §八。`env` 里补了 `GOMAXPROCS: "4"`——卡片步骤 1 的 manifest 没写，但坑 2 的改进项要求显式钉住，实测对照见 §六-④。
 
@@ -91,7 +91,7 @@ AZ ap-southeast-6b Running pods = 2
 
 证据：`deploy/logs/task23_verify_20261005-232501/remote.out`（`ROLL=1` 的那次）+ `…-232713/remote.out`（只读取证）
 
-① `ROLL=1 bash deploy/task23_stable.sh --verify` 下发 `rollout restart`，`maxUnavailable: 0 / maxSurge: 1`，`[OK] 滚动完成`，revision **1 → 2**，旧 RS `7df66777c` desired 归 0、新 RS `7f96d6ff48` `desired=4 current=4 ready=4 available=4`。
+① `ROLL=1 bash deploy/task23/stable.sh --verify` 下发 `rollout restart`，`maxUnavailable: 0 / maxSurge: 1`，`[OK] 滚动完成`，revision **1 → 2**，旧 RS `7df66777c` desired 归 0、新 RS `7f96d6ff48` `desired=4 current=4 ready=4 available=4`。
 
 ② **容量不减的机械证据**（事件时间戳，23:27:13 只读轮）：
 
@@ -208,7 +208,7 @@ AZ ap-southeast-6b Running pods = 2
 
 ---
 
-## 十一、失误与修正（脚本侧，均已落进 `task23_stable.sh` / `task23_bodies/*`）
+## 十一、失误与修正（脚本侧，均已落进 `deploy/task23/stable.sh` / `task23/bodies/*`）
 
 | # | 症状 | 根因 | 修正 |
 | --- | --- | --- | --- |
@@ -253,8 +253,8 @@ AZ ap-southeast-6b Running pods = 2
 | --- | --- | --- | --- |
 | ① | **HPA 缩容不经 Eviction API** | `minReplicas 6→4` 的事件只有 `SuccessfulDelete` + `Scaled down from 6 to 4`，无 `Eviction` ⇒ PDB `disruptionsAllowed` 对 HPA 缩容**没有约束力** | 「有 PDB 就不会掉容量」这条直觉只对 drain / 主动驱逐成立。若要让缩容也受 PDB 保护，只能靠 `behavior.scaleDown.selectPolicy=Disabled` 关掉自动缩容，或走外部驱逐编排 ⇒ 卡片与任务 46 故障演练需按此口径 |
 | ② | **`topologySpreadConstraints` 会否决"落到空节点"** | drain 后 `.22.194` 完全空闲，替补 Pod 却被调度到已有 2 副本的 `.43.201`；6 副本时分布恰好 6a=3 / 6b=3 | AZ 硬约束在真实故障下生效（好事），但短时会出现"某 AZ 4 副本挤在 2 台机器"⇒ 单机故障域概率上升。若要每节点均摊需加 `whenUnsatisfiable` 之外的拓扑或换 `podAntiAffinity`，属任务 42/47 议题 |
-| ③ | **弹性组件确实存在且在运行，但实名是 `ack-goatscaler`（不是 cluster-autoscaler）** —— 本行由"未证"改为"已证存在，扩节点动作仍未实测" | 10-06 08:52（UTC 00:52）只读三步（`deploy/task23_bodies/06-goatscaler-lease.sh`、`07-ingress-backend.sh`；证据 `logs/task23_goatscaler_20261006-085256/`、`logs/task23_ingress_be_20261006-085337/`）：`lease/kube-system/ack-goatscaler` holder **`ack-goatscaler-65889bc864-qdqdd`**、`renewTime=2026-10-06T00:52:57Z`（节点侧当时 `00:52:58Z`，**同秒续约**）；用户面 `pods -A`/`deploy,ds,sts -A` 含 goat **计数 0**（与 alb 同构，见 ⑤）；`cm/kube-system/autoscaler-meta` = `{"scaler-type":"goatscaler", "unneeded_duration":"10m","cool_down_duration":"10m","utilization_threshold":"0.5","scale_down_enabled":true,"scan_interval":"60s","expander":"least-waste","scale_up_from_zero":true,"max_graceful_termination_sec":14400,"skip_nodes_with_system_pods":true,"min_replica_count":0,"cpu":"500m","memory":"500Mi","nodepool_backoff_sec":600,"daemonset_eviction_for_nodes":false,"scaling_configurations":null}`；集群侧节点池 `DescribeClusterNodePools`：`np-mnl-app` `enable=true min=4 max=8 charge=PostPaid`、`np-sg-ph-standby` `enable=true min=2 max=12 charge=PostPaid`（原文 10-05 记的 `max=8` 一致）。`cm/cluster-autoscaler-status` **NotFound** ⇒ 它不用那个 CM，**当时按该名字查是查法错误** | 任务 42 的前提从"找不找得到 autoscaler"变成两件事：**(a) 扩容动作从未被实测**——节点数自始等于 `min=4`，goatscaler 只有一次真实 `Pending` 才会证明它能否开出第 5/6 台（§九 的 15 副本需 6 台仍悬着）；**(b) 缩容侧是活的**（`scale_down_enabled=true` + `unneeded_duration 10m` + `utilization_threshold 0.5`），叠加 ④（本服务 CPU 常年 ~0%）⇒ 一旦扩到 5~8 台再回落，节点会在 ~10 min 后被回收，与 HPA 缩容形成**双层缩容**。以上参数含义按 cluster-autoscaler 同名项推断，**任务 42 须实测确认**，别当已证 |
-| ④ | **CPU 维度的 HPA 对本服务在当前流量模型下等于不工作** | 8 路 × 500 次 `/api/status`（实测脚本 `deploy/task23_bodies/04-hpa-trigger.sh:44`）⇒ `cpu=1m`（0.05% of requests 2C）；`/api/status` 是极轻端点，真实开销在 relay 的序列化/加解密 | `target 65%`（= 1.3C/Pod）只有真实 relay 流量能达到 ⇒ 监控与告警不能把"HPA 从没扩过"当异常；反过来，一旦 relay QPS 上来，扩容会成台阶式跳变，` stabilizationWindowSeconds 300` 是唯一的抖动保护 |
+| ③ | **弹性组件确实存在且在运行，但实名是 `ack-goatscaler`（不是 cluster-autoscaler）** —— 本行由"未证"改为"已证存在，扩节点动作仍未实测" | 10-06 08:52（UTC 00:52）只读三步（`deploy/task23/bodies/06-goatscaler-lease.sh`、`07-ingress-backend.sh`；证据 `logs/task23_goatscaler_20261006-085256/`、`logs/task23_ingress_be_20261006-085337/`）：`lease/kube-system/ack-goatscaler` holder **`ack-goatscaler-65889bc864-qdqdd`**、`renewTime=2026-10-06T00:52:57Z`（节点侧当时 `00:52:58Z`，**同秒续约**）；用户面 `pods -A`/`deploy,ds,sts -A` 含 goat **计数 0**（与 alb 同构，见 ⑤）；`cm/kube-system/autoscaler-meta` = `{"scaler-type":"goatscaler", "unneeded_duration":"10m","cool_down_duration":"10m","utilization_threshold":"0.5","scale_down_enabled":true,"scan_interval":"60s","expander":"least-waste","scale_up_from_zero":true,"max_graceful_termination_sec":14400,"skip_nodes_with_system_pods":true,"min_replica_count":0,"cpu":"500m","memory":"500Mi","nodepool_backoff_sec":600,"daemonset_eviction_for_nodes":false,"scaling_configurations":null}`；集群侧节点池 `DescribeClusterNodePools`：`np-mnl-app` `enable=true min=4 max=8 charge=PostPaid`、`np-sg-ph-standby` `enable=true min=2 max=12 charge=PostPaid`（原文 10-05 记的 `max=8` 一致）。`cm/cluster-autoscaler-status` **NotFound** ⇒ 它不用那个 CM，**当时按该名字查是查法错误** | 任务 42 的前提从"找不找得到 autoscaler"变成两件事：**(a) 扩容动作从未被实测**——节点数自始等于 `min=4`，goatscaler 只有一次真实 `Pending` 才会证明它能否开出第 5/6 台（§九 的 15 副本需 6 台仍悬着）；**(b) 缩容侧是活的**（`scale_down_enabled=true` + `unneeded_duration 10m` + `utilization_threshold 0.5`），叠加 ④（本服务 CPU 常年 ~0%）⇒ 一旦扩到 5~8 台再回落，节点会在 ~10 min 后被回收，与 HPA 缩容形成**双层缩容**。以上参数含义按 cluster-autoscaler 同名项推断，**任务 42 须实测确认**，别当已证 |
+| ④ | **CPU 维度的 HPA 对本服务在当前流量模型下等于不工作** | 8 路 × 500 次 `/api/status`（实测脚本 `deploy/task23/bodies/04-hpa-trigger.sh:44`）⇒ `cpu=1m`（0.05% of requests 2C）；`/api/status` 是极轻端点，真实开销在 relay 的序列化/加解密 | `target 65%`（= 1.3C/Pod）只有真实 relay 流量能达到 ⇒ 监控与告警不能把"HPA 从没扩过"当异常；反过来，一旦 relay QPS 上来，扩容会成台阶式跳变，` stabilizationWindowSeconds 300` 是唯一的抖动保护 |
 | ⑤ | **托管组件跑在 ACK 控制面，用户面不可见**（10-06 由 ALB + goatscaler 双证） | `get pods -A` 计 alb = **0**、`get deploy/ds/sts -A` 计 alb = 0，但 lease `alb`/`alb-gateway` holder = **`controlplane-alb-84bb75d758-l8q7g_…`**、**`renewTime=2026-10-06T00:52:57Z` 而节点侧 `date -u` 同时刻 00:52:58Z ⇒ 同秒续约 = 正在运行**；headless `Service/alb-ingress-controller` + `EndpointSlice alb-ingress-controller-4dprp`（`7.8.229.211`/`7.8.72.26`，两条 `ready=true`，AGE 10h = 10-05 22:08 重装时刻）；`ingress/new-api-verify` `Scheduled for sync` + `SuccessfullyReconciled`（31m 前）、`albconfig/mnl-alb SuccessfullyReconciled`（同批）。goatscaler 同构（③） | **修正了任务 19 的既有结论**：该卡曾以"集群内无任何 alb workload"为据判定控制器未运行 ⇒ 那条**判据无效**（10-05 的病征实际是"无调谐产物"，重装后恢复）。今后核查托管组件（ALB / cluster-autoscaler / 其他 addon）按 **lease holder + renewTime 与当前 UTC 同秒 → EndpointSlice IP/AGE → 调谐产物（events + 云侧对象变化）** 三级取证，`get pods` 为 0 **不是**缺失证据。已连任务 19 正文（③ 判定方法纠偏、步骤 1 命令）一起改正。另：本集群 `kubectl get ingest` 短名**不可用**（`the server doesn't have a resource type "ingest"`），必须写 `ingresses.networking.k8s.io` |
 
 ---
@@ -274,7 +274,7 @@ AZ ap-southeast-6b Running pods = 2
 
 ## 十五、机型单价核实与月费重算（裁定 4「单价不一样，月费要重算」）
 
-只读取证：`aliyun ecs DescribePrice`（`Amount=1`，含系统盘 ESSD 100 GB + 数据盘 ESSD PL1 300 GB），脚本 `deploy/task23_price_matrix.py`，输出 `deploy/logs/task23_price_20261006-082504/matrix.out`；新加坡侧 `deploy/logs/task23_cost_20261006-082618/`。
+只读取证：`aliyun ecs DescribePrice`（`Amount=1`，含系统盘 ESSD 100 GB + 数据盘 ESSD PL1 300 GB），脚本 `deploy/task23/price_matrix.py`，输出 `deploy/logs/task23_price_20261006-082504/matrix.out`；新加坡侧 `deploy/logs/task23_cost_20261006-082618/`。
 
 ### 马尼拉 `ap-southeast-6` / `ap-southeast-6a`（节点池 `np-mnl-app`）
 

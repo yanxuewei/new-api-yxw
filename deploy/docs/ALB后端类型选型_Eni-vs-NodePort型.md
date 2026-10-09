@@ -271,7 +271,7 @@ python3 lib/aliyun_rpc.py alb GetListenerAttribute ...   # 同样命令
 | default **变成 Redirect** | 声明**有效**，隐患为真 | **必须**先修（走方案 C，最稳） |
 | default **保持 ForwardGroup** | 声明**无效**（字段名错） | 隐患是假的，但字段名是定时炸弹；仍建议走 C，并顺手修字段名 |
 
-> ⚠️ 若结果是"变成 Redirect"，IP 直连会**当场失联**。回滚只需一条 `UpdateListenerAttribute` 把 default 改回 ForwardGroup（命令模式见 `task_alb_url_bodies/`）。**建议在低峰执行，并预先备好回滚命令。**
+> ⚠️ 若结果是"变成 Redirect"，IP 直连会**当场失联**。回滚只需一条 `UpdateListenerAttribute` 把 default 改回 ForwardGroup（命令模式见 `task_alb_url/bodies/`）。**建议在低峰执行，并预先备好回滚命令。**
 
 ---
 
@@ -300,5 +300,5 @@ python3 lib/aliyun_rpc.py alb ListRules --region ap-southeast-6 --version 2020-0
   ListenerIds.1=lsn-ihrgkty2sjdy8s5p4h
 
 # AlbConfig / Ingress 声明
-bash ack_remote.sh mnl task_alb_url_bodies/27-albconfig-inspect.sh
+bash ack_remote.sh mnl task_alb_url/bodies/27-albconfig-inspect.sh
 ```

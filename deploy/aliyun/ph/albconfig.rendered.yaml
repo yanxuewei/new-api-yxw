@@ -9,7 +9,7 @@
 #   ${CERT_ID_ALB} = CAS 证书 ID。2026-09-29 实测 `aliyun cas ListUserCertificateOrder`
 #   TotalCount=0（账号内**无任何证书**），且 likha.hk 的 NS 仍指向 GoDaddy
 #   （ns21/ns22.domaincontrol.com），G4(NS)/G5(证书) 均未闭环 → 443 监听无法按方案创建。
-#   回填方式：`export CERT_ID_ALB=<cas-cert-id>` 后由 deploy/task19_alb_mnl.sh 渲染。
+#   回填方式：`export CERT_ID_ALB=<cas-cert-id>` 后由 deploy/task19/alb_mnl.sh 渲染。
 #
 # 管理红线（§6.3 坑 4）：ALB 只经 AlbConfig/Ingress 声明式管理，禁止控制台手工改 listener/转发规则。
 # 参数依据（P0-5，勿改回方案 v2.1 原值）：requestTimeout 上限 600s；idleTimeout 60s 是"两包之间静默间隔"。
@@ -38,7 +38,7 @@ spec:
       httpDefaultActions:
         - type: Redirect
           redirectConfig: { host: www.likha.hk, https: on, port: "443" }
-    # ⚠️ 442/443 监听当前被证书阻塞：CERT_ID_ALB 为空时由脚本整段剔除（见 task19_alb_mnl.sh --without-tls）
+    # ⚠️ 442/443 监听当前被证书阻塞：CERT_ID_ALB 为空时由脚本整段剔除（见 deploy/task19/alb_mnl.sh --without-tls）
     - port: 443
       protocol: HTTPS
       securityPolicyId: tls_cipher_policy_1_2_strict_with_1_3   # 显式指定，否则可协商 TLS1.0 被安全核查判不合格（坑 3）

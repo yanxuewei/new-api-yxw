@@ -72,16 +72,16 @@ ap-southeast-6b	ecs.g9ae.2xlarge
 
 ## 三、交付物
 
-### 3.1 `deploy/task10_11_ack_mnl.sh`（主脚本，幂等，可重跑）
+### 3.1 `deploy/task10_11/ack_mnl.sh`（主脚本，幂等，可重跑）
 
 ```bash
-./deploy/task10_11_ack_mnl.sh verify      # 只读：机型+配额+版本+Pod容量（P0）
-./deploy/task10_11_ack_mnl.sh keypair     # 建密钥对 newapi-mnl（幂等，私钥落 ~/.ssh/newapi-mnl.pem，600）
-./deploy/task10_11_ack_mnl.sh cluster     # 任务 10：建 ack-newapi-mnl（K8s 1.35.7，Terway，RRSA，审计，公网端点关）
-./deploy/task10_11_ack_mnl.sh nodepool    # 任务 11：建 np-mnl-app（desired 4 / 4–8，跨 6a+6b，BALANCE）
-./deploy/task10_11_ack_mnl.sh kubeconfig  # 拉 60 min 临时 kubeconfig → /tmp/kubeconfig-mnl
-./deploy/task10_11_ack_mnl.sh check       # 验证：集群/节点池/Pod vSwitch 余量
-./deploy/task10_11_ack_mnl.sh all         # verify → keypair → cluster → nodepool → kubeconfig → check
+./deploy/task10_11/ack_mnl.sh verify      # 只读：机型+配额+版本+Pod容量（P0）
+./deploy/task10_11/ack_mnl.sh keypair     # 建密钥对 newapi-mnl（幂等，私钥落 ~/.ssh/newapi-mnl.pem，600）
+./deploy/task10_11/ack_mnl.sh cluster     # 任务 10：建 ack-newapi-mnl（K8s 1.35.7，Terway，RRSA，审计，公网端点关）
+./deploy/task10_11/ack_mnl.sh nodepool    # 任务 11：建 np-mnl-app（desired 4 / 4–8，跨 6a+6b，BALANCE）
+./deploy/task10_11/ack_mnl.sh kubeconfig  # 拉 60 min 临时 kubeconfig → /tmp/kubeconfig-mnl
+./deploy/task10_11/ack_mnl.sh check       # 验证：集群/节点池/Pod vSwitch 余量
+./deploy/task10_11/ack_mnl.sh all         # verify → keypair → cluster → nodepool → kubeconfig → check
 ```
 
 关键写死项（杜绝控制台默认值坑）：
@@ -101,7 +101,7 @@ ap-southeast-6b	ecs.g9ae.2xlarge
 | 磁盘 | system 100G `cloud_essd` **PL1** + data 300G `cloud_essd` **PL1** | 坑 2：PL2 有 461G 下限，300G 必须 PL1 |
 | `data_disks` + `disk_init` | 300G + `mount_for_runtime: true` | 坑 3：数据盘不给 containerd → 系统盘写满 → `disk-pressure` 驱逐雪崩 |
 
-### 3.2 `deploy/task11_node_init.sh`（节点 `user_data`，三段幂等）
+### 3.2 `deploy/task11/node_init.sh`（节点 `user_data`，三段幂等）
 
 1. **nofile=200000 三处**：`/etc/systemd/system.conf.d/10-newapi-limits.conf`（`DefaultLimitNOFILE`）+ `/etc/security/limits.d/99-newapi.conf` + kubelet/containerd 的 **unit drop-in** `LimitNOFILE` —— 节点 `ulimit -n` 对容器不生效，容器继承 containerd/kubelet，故必须改 unit；
 2. **sysctl**：`ip_local_port_range=10240 65535` / `somaxconn=32768` / `tcp_tw_reuse=1`；
@@ -141,8 +141,8 @@ ap-southeast-6b	ecs.g9ae.2xlarge
 
 ```bash
 cd /path/to/new-api-yxw
-./deploy/task10_11_ack_mnl.sh verify      # 1) 再确认机型/配额（D2 强制）
-./deploy/task10_11_ack_mnl.sh all         # 2) 密钥对 → 建集群(5–15min) → 建池 → kubeconfig → check
+./deploy/task10_11/ack_mnl.sh verify      # 1) 再确认机型/配额（D2 强制）
+./deploy/task10_11/ack_mnl.sh all         # 2) 密钥对 → 建集群(5–15min) → 建池 → kubeconfig → check
 ```
 
 预期验证结果（`check` 步骤会打印命令，需在堡垒机或集群网内执行 kubectl）：
@@ -172,7 +172,7 @@ kubectl debug node/<node> -it --image=busybox -- sh -c 'df -h /host/var/lib/cont
 
 | 轮次 | 命令 | 结果 |
 |---|---|---|
-| 1 | `task10_11_ack_mnl.sh cluster` | ❌ 脚本 bug：`say "私钥已保存：$pem（…"` —— bash 3.2 把全角括号并入变量名 → `unbound variable`（**密钥对此时已建成功、私钥已落盘**）。扫描全脚本同类写法（`$VAR` 紧跟全角标点）共 3 处，全部改 `${VAR}` |
+| 1 | `deploy/task10_11/ack_mnl.sh cluster` | ❌ 脚本 bug：`say "私钥已保存：$pem（…"` —— bash 3.2 把全角括号并入变量名 → `unbound variable`（**密钥对此时已建成功、私钥已落盘**）。扫描全脚本同类写法（`$VAR` 紧跟全角标点）共 3 处，全部改 `${VAR}` |
 | 2 | 同上（修复后） | ❌ 服务端 400，**两个独立错误**：`MissingPodVswitchIds: PodVswitchIds is empty` + `ErrorNotEnabled: please enable cskpro container service before creating cluster` → 已按 C6/C7 修正 body 并加开通预检门禁 |
 | 3 | 同上（加预检后） | ⛔ **FATAL 风控拦截**：`OpenAckService --type propayasgo` 返回 `RISK.RISK_CONTROL_REJECTION` / *"your order is suspended… contact Customer Service"* → 脚本按预期停在门禁，**不再向建簇 API 发无效请求** |
 

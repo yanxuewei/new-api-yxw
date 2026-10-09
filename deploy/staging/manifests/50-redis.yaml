@@ -1,7 +1,7 @@
 # staging · 50 集群内 Redis（不与 prod Tair 共用）
 #
 # 为什么不用 prod Tair r-5tsf1fe16543e274：
-#   ① 单实例、**DB 0、default 账号**，键名**无环境前缀**（task7_tair.sh:173；
+#   ① 单实例、**DB 0、default 账号**，键名**无环境前缀**（deploy/task7/tair.sh:173；
 #      middleware/rate-limit.go:128,224 的 rateLimit:<uid> / <mark>+clientIP；
 #      middleware/model-rate-limit.go:88,102 的 <mark>:user:<id>）
 #      ⇒ staging 与 prod 撞同一 key 空间，限流计数、模型标记互相污染，**不是"加前缀"能解决的**
@@ -11,7 +11,7 @@
 #      prod sg 副本当前 redis=unset、限流退化为单 Pod 内存（Day2任务28:73 / 任务53:27）
 #      ⇒ 非生产不必受这条阻塞，集群内自建即可（任务45:§6 建议口径）
 #
-# 真落地了计划里那条命令禁用（task29_tair_sg.sh:22 曾只是纸面）：
+# 真落地了计划里那条命令禁用（deploy/task29/tair_sg.sh:22 曾只是纸面）：
 #   禁 FLUSHALL / FLUSHDB / KEYS / CONFIG / SHUTDOWN / DEBUG
 # 代码侧事实：非测试 Go 代码**无** Redis FlushAll/FlushDB 调用（grep 仅命中 c.Writer.Flush）
 #           ⇒ 风险主要来自人/CI 误操作与压测，不是业务代码，所以 ACL 禁用是有效边界。

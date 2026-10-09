@@ -30,7 +30,7 @@ GUIDE_A = "deploy/docs/阿里云国际站菲律宾部署_详细操作指南.md"
 GUIDE_B = "deploy/docs/阿里云国际站菲律宾部署_详细操作指南-ch.md"
 IMPL_D = "impl_deploy.md"
 IMPL_T = "impl_tech.md"
-XLSX = "deploy/菲律宾部署方案-v2.1-修订版.xlsx"
+XLSX = "deploy/docs/菲律宾部署方案-v2.1-修订版.xlsx"
 
 # ---------------------------------------------------------------- 机型修正
 MACHINE = [

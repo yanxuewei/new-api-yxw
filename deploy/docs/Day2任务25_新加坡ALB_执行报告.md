@@ -34,7 +34,7 @@
 | `deploy/manifests/ingress-sg-standby.yaml` | 备站 Ingress 权威副本 |
 | `deploy/manifests/ingress-sg-standby-noHost.yaml` | **IP 直访**用无 Host Ingress 权威副本（§八） |
 | `deploy/manifests/hosts-sg-standby.sh` | 本机 `/etc/hosts` 一键加/删（`add\|del\|status`，§八） |
-| `deploy/task25_bodies/00–10-*.sh` | 勘察 / 建类 / 建 AlbConfig / 超时探针 / defaultAction 探针 / 终态 / 备站核查 / 建 Ingress / 无 Host 建 / 组成员对比 |
+| `deploy/task25/bodies/00–10-*.sh` | 勘察 / 建类 / 建 AlbConfig / 超时探针 / defaultAction 探针 / 终态 / 备站核查 / 建 Ingress / 无 Host 建 / 组成员对比 |
 
 ---
 

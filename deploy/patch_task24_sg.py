@@ -35,7 +35,7 @@ DONE_BLOCK = """> **✅ 已落地（2026-09-29）** · 集群 `ca75829e3492d491d
 > | 节点（2 台） | `g9ae.2xlarge`@**1a** + `g8ine.2xlarge`@**1b**（**勿硬编码机型分布** —— 1b 没有 g9i） |
 > | 终验 | 集群 12/12 + 节点池 **17/17 PASS**；集群内 2/2 `Ready`、`site=sg`、nofile=**200000**、Terway CNI、300G 盘已挂 `/var/lib/containerd` |
 >
-> 完整台账 → **`deploy/nodepool_ledger_sg.md`**；脚本 `deploy/task24_ack_sg.sh`（建集群）+ `deploy/task24_nodepool_sg.sh`（**复用任务 11 同一份逻辑与 user_data**）+ `deploy/nodepool_azbalance_fix.sh`（跨区均衡断言）。
+> 完整台账 → **`deploy/nodepool_ledger_sg.md`**；脚本 `deploy/task24/ack_sg.sh`（建集群）+ `deploy/task24/nodepool_sg.sh`（**复用任务 11 同一份逻辑与 user_data**）+ `deploy/nodepool_azbalance_fix.sh`（跨区均衡断言）。
 >
 > **★ 建完集群第 1 件事：核对控制面安全组有没有 6443。** 新加坡**同构复现**了马尼拉那条缺陷（见下方坑 6）；本卡已在**建节点池之前**补上，所以 2 台节点**首次引导即成功**，完全没重演马尼拉那条 6 小时排障链。
 """

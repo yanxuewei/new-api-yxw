@@ -100,9 +100,9 @@ aliyun alb AddServersToServerGroup --region ap-southeast-6 --ServerGroupId sgp-f
 | `deploy/manifests/albconfig-mnl.yaml` | 马尼拉 AlbConfig **权威副本**（收敛后形态 + 三态漂移注释） |
 | `deploy/manifests/ingress-mnl-stable-ip.yaml` | **无 Host Ingress** 权威副本（IP 直访，order 50） |
 | `deploy/manifests/hosts-mnl.sh` | 本机 `/etc/hosts` 一键加/删（`add\|del\|status`，标记段 `mnl-verify`） |
-| `deploy/task19b_bodies/00-recon.sh` | 勘察（AlbConfig/Ingress/Svc/规则/事件/webhook 判活） |
-| `deploy/task19b_bodies/01-albconfig-timeout.sh` | AlbConfig 收敛 |
-| `deploy/task19b_bodies/02-nohost-ingress.sh` | 无 Host Ingress |
+| `deploy/task19/bodies/00-recon.sh` | 勘察（AlbConfig/Ingress/Svc/规则/事件/webhook 判活） |
+| `deploy/task19/bodies/01-albconfig-timeout.sh` | AlbConfig 收敛 |
+| `deploy/task19/bodies/02-nohost-ingress.sh` | 无 Host Ingress |
 
 **可直接使用的入口**
 

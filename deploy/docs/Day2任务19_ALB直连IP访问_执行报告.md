@@ -131,7 +131,7 @@ http://8.212.183.7
 - 本地域不存在 `RevokeSecurityGroupIngress`（只有 `RevokeSecurityGroup` / `RevokeSecurityGroupEgress`）。
 - **零风险探针**：真实 SG + 不存在的规则（`PortRange=19999/19999 --SourceCidrIp=10.99.0.0/16`）→ 回 `InvalidSecurityGroupRule.RuleNotExist`，即证明参数层已过且不会误删。
 
-脚本：`deploy/task19_cleanup_residue.sh`（首版，含数组参数 → 已废弃）· `deploy/task19_cleanup_residue2.sh`（**可用版**，逐条删 + 每步复测 + 失败自动回滚）。
+脚本：`deploy/task19/cleanup_residue.sh`（首版，含数组参数 → 已废弃）· `deploy/task19/cleanup_residue2.sh`（**可用版**，逐条删 + 每步复测 + 失败自动回滚）。
 
 ---
 
@@ -214,7 +214,7 @@ albconfig.alibabacloud.com/mnl-alb        annotated (server dry run)
 | 节点本地自测 `10.0.22.194:32656/api/status` | `200 × 3/3` ✅ |
 | 本机 ALB 复测（两 IP × 6） | `200 × 12/12` ✅ **无断流** |
 | 落库存档 `deploy/manifests/newapi-np.yaml` | ✅ 含固化值 + 完整注释 |
-| 更新 `task_alb_url_bodies/06-create-nodeport.sh` | ✅ 显式带 `nodePort`，并加断言：非 32656 直接打 `FAIL` |
+| 更新 `task_alb_url/bodies/06-create-nodeport.sh` | ✅ 显式带 `nodePort`，并加断言：非 32656 直接打 `FAIL` |
 | manifest 双重校验（`--dry-run=client` + `--dry-run=server`） | 均 `configured`，与线上值逐字段一致 ✅ |
 
 ### 10.3 效果

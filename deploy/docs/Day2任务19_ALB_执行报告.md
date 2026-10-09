@@ -78,9 +78,9 @@
 | 1 | 修复/重装 `alb-ingress-controller`（③） | ~~先确认卸载副作用 → 幂等重装~~ **✅ 2026-10-05 22:08 完成**（卸载 + 重装 v3.1.1；控制器回归、调谐恢复 —— 新建 ServerGroup + :80 规则，见 §七） | ✅ 已完成 |
 | 2 | 闭环 G4：`likha.hk` 解析落地（NS 指向阿里云云解析或至少域名可解析） | `dig NS likha.hk` 有应答 + `alidns DescribeDomains` 可见域名 | ⏸ 阻塞（NXDOMAIN） |
 | 3 | 闭环 G5：购买/签发 `*.likha.hk` 通配符证书并完成 DCV | `cas ListUserCertificateOrder` TotalCount≥1 且拿到 `CertIdentifier` | ⏸ 阻塞 |
-| 4 | 以 `CERT_ID_ALB=<id>` 回跑 `bash deploy/task19_alb_mnl.sh`（EXEC_MODE=ack-remote） | 443 监听 + TLS 策略 + 301 跳转 + 超时 60/600 全部到位 | ⏸ 依赖 1/2/3 |
+| 4 | 以 `CERT_ID_ALB=<id>` 回跑 `bash deploy/task19/alb_mnl.sh`（EXEC_MODE=ack-remote） | 443 监听 + TLS 策略 + 301 跳转 + 超时 60/600 全部到位 | ⏸ 依赖 1/2/3 |
 | 5 | 健康检查真实验收（V2） | 任务 18/23 部署后 Pod 就绪，`/api/status`（G8 后切 `/readyz`）全绿 | ✅ **2026-10-06 闭环**（后端 `new-api-stable`、经 ALB 200、SG 健康检查 `true`；`/readyz` 仍属 G8 后续替换） |
-| 6 | 任务 23 落地前删除占位资源 | `bash deploy/task19_alb_mnl.sh --cleanup` | ⏸ 后置 |
+| 6 | 任务 23 落地前删除占位资源 | `bash deploy/task19/alb_mnl.sh --cleanup` | ⏸ 后置 |
 
 ## 六、证据
 
@@ -122,5 +122,5 @@
 2. **443 / TLS 策略 / 60/600 超时 / V3 / V4**：全部等待 `${CERT_ID_ALB}`。
 3. **V2 健康检查**：占位 Service 仍 0 endpoints（master Pod 标签刻意不命中），验收归任务 23。⇒ **10-06 已由任务 23 闭环**（后端切 `new-api-stable` + 经 ALB 200 + SG 健康检查 `true`）。
 
-**解除动作（单一）**：G5 签发 `*.likha.hk` → 取得 `CertIdentifier` → 以 `CERT_ID_ALB=<id>` 重放 `task19_alb_mnl.sh`（80 Redirect + 443 + 超时 + TLS 策略）→ 逐项验收 V1b/301/V3/V4。
+**解除动作（单一）**：G5 签发 `*.likha.hk` → 取得 `CertIdentifier` → 以 `CERT_ID_ALB=<id>` 重放 `deploy/task19/alb_mnl.sh`（80 Redirect + 443 + 超时 + TLS 策略）→ 逐项验收 V1b/301/V3/V4。
 

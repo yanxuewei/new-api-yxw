@@ -27,7 +27,7 @@ sg-mnl-app-xxxx               # 本卡要固化的业务 SG
 
 把三个业务 SG ID 固化为环境变量并写入 IaC：`SG_MNL_ALB` / `SG_MNL_APP` / `SG_MNL_DB`（新加坡 `SG_SG_ALB` / `SG_SG_APP`）。
 
-> **✅ 已提前落地（2026-09-29，早于本卡排期 D5）**：5 个业务安全组 + **17 条可确定规则**已实建并复核，ID 见 **`deploy/sg_ledger.md`**，脚本 **`deploy/task22_sg_bootstrap.sh`**（幂等；`--verify` 随时核对现状，`--dry-run` 空跑）。
+> **✅ 已提前落地（2026-09-29，早于本卡排期 D5）**：5 个业务安全组 + **17 条可确定规则**已实建并复核，ID 见 **`deploy/sg_ledger.md`**，脚本 **`deploy/task22/sg_bootstrap.sh`**（幂等；`--verify` 随时核对现状，`--dry-run` 空跑）。
 >
 > | 变量 | 名称 | SG ID | Region |
 > | --- | --- | --- | --- |

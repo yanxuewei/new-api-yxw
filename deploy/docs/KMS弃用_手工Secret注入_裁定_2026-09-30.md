@@ -21,11 +21,11 @@
 | 自定义策略 `new-api-kms-readonly`（v1/v2 两个版本，14 个 Secret ARN） | DeletePolicyVersion(v1) + DeletePolicy | `GetPolicy` → `EntityNotExist.Policy` ✅ |
 | SA `new-api-app` 的注解 `pod-identity.alibabacloud.com/role-name` | `kubectl annotate ... role-name-` 移除 | `get sa -o jsonpath` 无该注解 ✅ |
 | 集群 RRSA 开关 / `ack-pod-identity-webhook` addon / ns `injection` label | **保留**（无害；开关随建簇参数，保留避免集群级变更） | — |
-| `deploy/task17_rrsa.sh` | 头部标记 **⛔ 已废弃**（KMS 弃用）；如未来重启 KMS 路线可复跑重建角色 | — |
+| `deploy/task17/rrsa.sh` | 头部标记 **⛔ 已废弃**（KMS 弃用）；如未来重启 KMS 路线可复跑重建角色 | — |
 
 ## 三、替代方案：手工 Secret 注入（本裁定落地物）
 
-**交付物**：`deploy/task17_manual_secret.sh` —— 在目标集群 `new-api` 命名空间创建/更新 generic Secret **`new-api-secret`**（7 键，键名与原策略 ARN 严格一致，**Pod 侧 secretKeyRef / 任务 23 manifest 零改动**）：
+**交付物**：`deploy/task17/manual_secret.sh` —— 在目标集群 `new-api` 命名空间创建/更新 generic Secret **`new-api-secret`**（7 键，键名与原策略 ARN 严格一致，**Pod 侧 secretKeyRef / 任务 23 manifest 零改动**）：
 
 ```
 SQL_DSN  SQL_DSN_MIGRATE  REDIS_CONN_STRING  SESSION_SECRET
@@ -34,8 +34,8 @@ SESSION_SECRET_OLD  PAYMENT_PRIVATE_KEY  TLS_WILDCARD
 
 **操作模型**：
 ```bash
-VALUES_FILE=./newapi.values bash deploy/task17_manual_secret.sh --apply mnl   # 值文件 0600，用完脚本自动 shred
-bash deploy/task17_manual_secret.sh --check                                   # 复核 7 键齐全性
+VALUES_FILE=./newapi.values bash deploy/task17/manual_secret.sh --apply mnl   # 值文件 0600，用完脚本自动 shred
+bash deploy/task17/manual_secret.sh --check                                   # 复核 7 键齐全性
 ```
 
 **补偿控制（手工方案相对 KMS 失去的能力 → 替代做法）**：
@@ -68,10 +68,10 @@ bash deploy/task17_manual_secret.sh --check                                   # 
 
 ## 五、未完成 / 挂账
 
-1. **凭据值本身**：仍待数据泳道提供（值不因 KMS 弃用而免除）。值齐后：`VALUES_FILE=... bash deploy/task17_manual_secret.sh --apply mnl` → `--check` → 部署任务 23 时做 Pod 注入 smoke。
+1. **凭据值本身**：仍待数据泳道提供（值不因 KMS 弃用而免除）。值齐后：`VALUES_FILE=... bash deploy/task17/manual_secret.sh --apply mnl` → `--check` → 部署任务 23 时做 Pod 注入 smoke。
 2. **新加坡集群**：同构 Secret 待跨区通道建立（跳板机私网不可达，任务 46 限制）；helper 已预留 `--apply sg`（当前拒绝执行并提示）。
 3. **任务 36/55 双密钥演练**：演练时按新 SOP（Secret 键改值）重写证据。
 
 ## 六、回滚（如未来重启 KMS 路线）
 
-复跑 `deploy/task17_rrsa.sh --apply`（重建角色/策略）→ 购 KMS 实例 → 建凭据 → 恢复 ExternalSecret 组件选型。手工 Secret 与 KMS 可并存过渡（Secret 名不变）。
+复跑 `deploy/task17/rrsa.sh --apply`（重建角色/策略）→ 购 KMS 实例 → 建凭据 → 恢复 ExternalSecret 组件选型。手工 Secret 与 KMS 可并存过渡（Secret 名不变）。

@@ -37,7 +37,7 @@
 
 ## 四、核验脚本
 
-`deploy/task17_dsn_verify.sh [mnl|sg|both]`（幂等**只读**）
+`deploy/task17/dsn_verify.sh [mnl|sg|both]`（幂等**只读**）
 1. Secret 键清单（仅键名）
 2. DSN 结构脱敏（scheme/user/pw_len/host/port/db）
 3. **端点口径断言**：mnl 应 VPC（`-clickhouse.clickhouseserver.`）；sg 应 PUBLIC（`-public.clickhouseserver.`）
@@ -64,7 +64,7 @@
 
 ## 七、卡片判据复核（2026-10-05 21:1x，只读）
 
-> 复核对象：指南 v2.0 任务 17 卡 + xlsx `落地计划` row20（判据「密钥不落 Git，注入后应用可正常启动」）。取证脚本 `deploy/task17_cardcheck_body.sh`（经 `ack_remote.sh` 在节点内跑），日志 `deploy/logs/task17_cardcheck_20261005-211402/mnl.out`。
+> 复核对象：指南 v2.0 任务 17 卡 + xlsx `落地计划` row20（判据「密钥不落 Git，注入后应用可正常启动」）。取证脚本 `deploy/task17/bodies/cardcheck_body.sh`（经 `ack_remote.sh` 在节点内跑），日志 `deploy/logs/task17_cardcheck_20261005-211402/mnl.out`。
 
 | # | 卡片原判据 | 实况 | 判定 |
 | --- | --- | --- | --- |
@@ -74,13 +74,13 @@
 | 4 | ConfigMap 关键约束 | 见 §八（含 150→100 与两个空转键删除） | ✅（本卡收口后） |
 | 5 | Secret 键齐 | mnl 6 / sg 3。sg 缺 `REDIS_CONN_STRING`（SG Tair 未建，任务 29 被"交易侧拒付"卡住 ⇒ **不在可补范围**）、`SQL_DSN_MIGRATE`（备站迁移账号未下发）、`SESSION_SECRET_OLD`（双密钥轮换前置）⇒ **三键里只有两键可补**。**2026-10-06 用户已核准补齐**（「sg 三个 Secret 键可以补齐」），注入脚本 sg 分支已从 4 键加固为 **5 键**（原先**没有** `SQL_DSN_MIGRATE`）并加 `--apply [mnl|sg|both]` 单站过滤与写前/写后键集对照，详见任务 28 报告 §十二-补。**⚠ 执行位在 WSL 堡垒机**（明文只在 `/root/.deploy_secrets/`），Mac 本机跑不了 | 🔶 分阶段，前置在别的卡；补键动作**待人工执行** |
 | 6 | 两地 `SESSION_SECRET` 同一份 | 两地 sha256 前 12 位同为 `c5fbe2dbc89b`（len 42）⇒ 同值 | ✅ 附条件（轮换须两地同批，见 §十） |
-| 7 | RRSA + KMS + ExternalSecret 三步 | **按裁定不实施**。实测：RAM `new-api-rrsa-kms-mnl/-sg` 与 `new-api-kms-readonly` 全部 **404 不存在**（从未 apply，`task17_rrsa.sh` 只跑过 `--check`）；KMS `ListSecrets` 菲/新均 **0**、`ListKeys` **0**（但菲区**存在**实例 `kst-php6abb88e21s0imvefj0` ⇒ 旧文档"必须先购实例"的阻塞理由已失效）；两地 addon 清单**无 `ack-secret-manager`**，集群**无 ExternalSecret CRD**；master 容器内 `ALIBABA_CLOUD_*` 变量数 **0** ⇒ 该链路从未产生注入 | ⛔ 不实施 |
+| 7 | RRSA + KMS + ExternalSecret 三步 | **按裁定不实施**。实测：RAM `new-api-rrsa-kms-mnl/-sg` 与 `new-api-kms-readonly` 全部 **404 不存在**（从未 apply，`deploy/task17/rrsa.sh` 只跑过 `--check`）；KMS `ListSecrets` 菲/新均 **0**、`ListKeys` **0**（但菲区**存在**实例 `kst-php6abb88e21s0imvefj0` ⇒ 旧文档"必须先购实例"的阻塞理由已失效）；两地 addon 清单**无 `ack-secret-manager`**，集群**无 ExternalSecret CRD**；master 容器内 `ALIBABA_CLOUD_*` 变量数 **0** ⇒ 该链路从未产生注入 | ⛔ 不实施 |
 
 **结论**：卡片两条真判据（1/2）实测通过，3/4 通过，5 是跨卡依赖，6 通过附条件，7 按裁定作废 ⇒ **本卡按"实测口径"闭合**。判据同步写回指南卡片头（`> ⛔ 裁定` + `> ✅ 执行登记` 两段）。
 
 ## 八、B 线收口写操作（21:34–21:40，两地）
 
-执行器：`deploy/task17_bline_align.sh --apply`（幂等，节点侧生成 RFC6902 ops，只对差异下刀）；日志 `deploy/logs/task17_bline_20261005-213429/{mnl,sg}_apply.out`。
+执行器：`deploy/task17/bline_align.sh --apply`（幂等，节点侧生成 RFC6902 ops，只对差异下刀）；日志 `deploy/logs/task17_bline_20261005-213429/{mnl,sg}_apply.out`。
 
 | 动作 | mnl | sg |
 | --- | --- | --- |
@@ -93,16 +93,16 @@
 
 收口后两地 ConfigMap 一致为 **7 键**：`TZ` / `NODE_TYPE=slave` / `MEMORY_CACHE_ENABLED=false` / `SYNC_FREQUENCY=30` / `SQL_MAX_OPEN_CONNS=100` / `SQL_MAX_IDLE_CONNS=50` / `LOG_SQL_CLICKHOUSE_TTL_DAYS=90`（`SQL_MAX_LIFETIME` 两地均未显式设 ⇒ 取代码默认 60s，与卡片值等价）。
 
-**幂等复测**（`deploy/logs/task17_postrestart_20261005-213600/mnl.out`，脚本 `deploy/task17_postrestart_verify_body.sh`）：
+**幂等复测**（`deploy/logs/task17_postrestart_20261005-213600/mnl.out`，脚本 `deploy/task17/bodies/postrestart_verify_body.sh`）：
 
 - 容器 env 实测 `SQL_MAX_OPEN_CONNS=100` / `SQL_MAX_IDLE_CONNS=50`，两个已删键为空 ⇒ 配置真生效。
 - 重启后 DDL 分口径计数 **PG=0 / CK=3 / ERROR=0**，日志总行数 ≤20000（窗口未截断，计数可信）。
 - schema 指纹 = 任务 18 基线 `36|e0573c6f2c3aef3bcfd8f9297f6a2948|8a088809e6f2eaa5d3d484efb8a67127`，**逐字相同**。
-- **中途一次假警报**：首跑指纹是 `37|77f5c248d32…|1174c9028…`（表数 37 ≠ 36）。根因**不是**本次配置改动，而是**并行会话的任务 30 演练**在 21:17:24 建了 `ops_drill_marker` 表（oid 序 + 仓库 `deploy/task30_bodies/07-mnl-write.sh:63-66` 佐证）。在指纹 SQL 里加 `table_name<>'ops_drill_marker'` 排除后回到基线值；演练表（1 行）未动。⇒ 教训：**并发操作同库时，指纹比对必须先隔离他人的写入面**。
+- **中途一次假警报**：首跑指纹是 `37|77f5c248d32…|1174c9028…`（表数 37 ≠ 36）。根因**不是**本次配置改动，而是**并行会话的任务 30 演练**在 21:17:24 建了 `ops_drill_marker` 表（oid 序 + 仓库 `deploy/task30/bodies/07-mnl-write.sh:63-66` 佐证）。在指纹 SQL 里加 `table_name<>'ops_drill_marker'` 排除后回到基线值；演练表（1 行）未动。⇒ 教训：**并发操作同库时，指纹比对必须先隔离他人的写入面**。
 
 ## 九、DSN 的 TLS 档位实测（新增）
 
-脚本：`deploy/task17_dsn_sslmode_body.sh`（结构脱敏）+ `deploy/task17_dsn_ssl_probe_body.sh`（临时 psql Pod 查 `pg_stat_ssl`，只 `SELECT`）；日志 `deploy/logs/task17_sslcheck_20261005-220/{mnl_sslmode,sg_sslmode,mnl_sslprobe}.out`。
+脚本：`deploy/task17/bodies/dsn_sslmode_body.sh`（结构脱敏）+ `deploy/task17/bodies/dsn_ssl_probe_body.sh`（临时 psql Pod 查 `pg_stat_ssl`，只 `SELECT`）；日志 `deploy/logs/task17_sslcheck_20261005-220/{mnl_sslmode,sg_sslmode,mnl_sslprobe}.out`。
 
 | 站点/键 | `sslmode` 实况 | 实测结论 |
 | --- | --- | --- |
@@ -116,27 +116,27 @@
 
 ## 十、遗留 / 待核准
 
-1. **`SESSION_SECRET` 轮换**（⚠ 破坏性，需项目负责人核准留痕）：核查脚本 `deploy/task17_pw_hash_body.sh` 的非 DSN 分支曾打印该值**前 12 位**（值只出现在当次会话输出）。已修脚本为"只输出 sha256 指纹 + 长度"并注明禁止改回明文；检索 `/tmp/ackctl-*`、`deploy/logs`、`/tmp` 确认**落盘副本 = 0**。轮换前置：**sg 集群还没有 `SESSION_SECRET_OLD` 键**，须先补该键（普通写；脚本已于 §十二 具备该能力，**待一次 `--apply`**），再走"旧值进 `_OLD`、新值进主键、两地同批、各自 `rollout restart`"。
+1. **`SESSION_SECRET` 轮换**（⚠ 破坏性，需项目负责人核准留痕）：核查脚本 `deploy/task17/bodies/pw_hash_body.sh` 的非 DSN 分支曾打印该值**前 12 位**（值只出现在当次会话输出）。已修脚本为"只输出 sha256 指纹 + 长度"并注明禁止改回明文；检索 `/tmp/ackctl-*`、`deploy/logs`、`/tmp` 确认**落盘副本 = 0**。轮换前置：**sg 集群还没有 `SESSION_SECRET_OLD` 键**，须先补该键（普通写；脚本已于 §十二 具备该能力，**待一次 `--apply`**），再走"旧值进 `_OLD`、新值进主键、两地同批、各自 `rollout restart`"。
 2. **Cookie `Secure` 缺项**：`SESSION_COOKIE_SECURE` / `SESSION_COOKIE_TRUSTED_URL` 两地 ConfigMap 均未设 ⇒ `common/session_cookie.go:44-83` 默认 `false`，签发的会话 Cookie 不带 `Secure`。与 443/证书同批补（任务 19/23），且 `SECURE=true` 必须配对 `TRUSTED_URL`，否则 `InitSessionCookieSettings()` 报错、应用起不来。
 3. **DSN 证书校验**（§九）：需 RDS 根 CA + DSN 同批改动，另立卡。
-4. **sg 侧缺口**：`REDIS_CONN_STRING`（等 SG Tair，任务 29 交易拒付 ⇒ **故意不写，不是遗漏**）、`SQL_DSN_MIGRATE`、`SESSION_SECRET_OLD` ⇒ 后两键**可补且已于 2026-10-06 核准**，脚本 sg 分支现为 5 键（见任务 28 报告 §十二-补），**须由项目负责人在 WSL 堡垒机执行** `bash deploy/task17_secret_inject.sh --check` 后 `--apply sg`（先看 `LOG_SQL_DSN` 是否 `-public`，守卫不过会 die）；且 sg **无 PAYMENT_PRIVATE_KEY / TLS_WILDCARD**（G5 与支付私钥依赖）。
-5. **本卡不做的事**：不建 KMS 凭据、不建 RRSA 角色（裁定）；`deploy/task17_rrsa.sh` 保留仅作留痕，**不再执行**。
+4. **sg 侧缺口**：`REDIS_CONN_STRING`（等 SG Tair，任务 29 交易拒付 ⇒ **故意不写，不是遗漏**）、`SQL_DSN_MIGRATE`、`SESSION_SECRET_OLD` ⇒ 后两键**可补且已于 2026-10-06 核准**，脚本 sg 分支现为 5 键（见任务 28 报告 §十二-补），**须由项目负责人在 WSL 堡垒机执行** `bash deploy/task17/secret_inject.sh --check` 后 `--apply sg`（先看 `LOG_SQL_DSN` 是否 `-public`，守卫不过会 die）；且 sg **无 PAYMENT_PRIVATE_KEY / TLS_WILDCARD**（G5 与支付私钥依赖）。
+5. **本卡不做的事**：不建 KMS 凭据、不建 RRSA 角色（裁定）；`deploy/task17/rrsa.sh` 保留仅作留痕，**不再执行**。
 
 ## 十一、脚本与证据索引
 
 | 用途 | 路径 |
 | --- | --- |
-| 手工 Secret 注入（`--check`/`--apply`） | `deploy/task17_secret_inject.sh`（值源 `~/.deploy_secrets/*` + `deploy/.env`，body `shred` 销毁；mnl 6 键 / **sg 4 键，含 `SESSION_SECRET_OLD`**，见 §十二） |
-| DSN/鉴权只读核验 | `deploy/task17_dsn_verify.sh` → `deploy/logs/task17_verify_20261005-162208/` |
-| 卡片判据只读核查 | `deploy/task17_cardcheck_body.sh` → `deploy/logs/task17_cardcheck_20261005-211402/` |
-| 口令指纹（绝不出口令） | `deploy/task17_pw_hash_body.sh` |
-| 配置对齐（幂等写） | `deploy/task17_bline_align.sh` → `deploy/logs/task17_bline_20261005-213429/` |
-| 重启后幂等 + 期望态 | `deploy/task17_postrestart_verify_body.sh` → `deploy/logs/task17_postrestart_20261005-213600/` |
-| TLS/sslmode 实测 | `deploy/task17_dsn_sslmode_body.sh`、`deploy/task17_dsn_ssl_probe_body.sh` → `deploy/logs/task17_sslcheck_20261005-220/` |
+| 手工 Secret 注入（`--check`/`--apply`） | `deploy/task17/secret_inject.sh`（值源 `~/.deploy_secrets/*` + `deploy/.env`，body `shred` 销毁；mnl 6 键 / **sg 4 键，含 `SESSION_SECRET_OLD`**，见 §十二） |
+| DSN/鉴权只读核验 | `deploy/task17/dsn_verify.sh` → `deploy/logs/task17_verify_20261005-162208/` |
+| 卡片判据只读核查 | `deploy/task17/bodies/cardcheck_body.sh` → `deploy/logs/task17_cardcheck_20261005-211402/` |
+| 口令指纹（绝不出口令） | `deploy/task17/bodies/pw_hash_body.sh` |
+| 配置对齐（幂等写） | `deploy/task17/bline_align.sh` → `deploy/logs/task17_bline_20261005-213429/` |
+| 重启后幂等 + 期望态 | `deploy/task17/bodies/postrestart_verify_body.sh` → `deploy/logs/task17_postrestart_20261005-213600/` |
+| TLS/sslmode 实测 | `deploy/task17/bodies/dsn_sslmode_body.sh`、`deploy/task17/bodies/dsn_ssl_probe_body.sh` → `deploy/logs/task17_sslcheck_20261005-220/` |
 
 ## 十二、注入脚本补 `SESSION_SECRET_OLD`（2026-10-05 收口后追加，仅改本地脚本，未动集群）
 
-**动因**：任务 55 的双密钥轮换被脚本卡住——`deploy/task17_secret_inject.sh` 的 sg 分支只写 3 个 `--from-literal`（`SQL_DSN`/`SESSION_SECRET`/`LOG_SQL_DSN`），**无论跑多少次都不带 `SESSION_SECRET_OLD`**，轮换 SOP 的 T1「两地同批写」在备站根本无法成立。
+**动因**：任务 55 的双密钥轮换被脚本卡住——`deploy/task17/secret_inject.sh` 的 sg 分支只写 3 个 `--from-literal`（`SQL_DSN`/`SESSION_SECRET`/`LOG_SQL_DSN`），**无论跑多少次都不带 `SESSION_SECRET_OLD`**，轮换 SOP 的 T1「两地同批写」在备站根本无法成立。
 
 **改动（4 处，全在 `collect_sg` / sg body / 脚本头注释）**：
 
@@ -160,9 +160,9 @@
 | 生成的 body 可解析 | `bash -n` 通过——heredoc 把反斜杠续行折叠成单行命令，`&` 始终落在双引号内 ⇒ 不会被 shell 当后台符截断 |
 | 临时文件权限 | body `600`；夹具（含哑口令）跑完即 `rm -rf`，`grep -rl` 确认哑值只存在于夹具自身文件 |
 
-**仍待执行（不在本次改动范围）**：**先补真源再注入**——把执行机保管文件 `/root/.deploy_secrets/LOG_SQL_DSN` 的 host 从 `-clickhouse` 改为 `-public`（或按站点拆成两份），否则脚本里的 sed 只是补丁。随后 `bash deploy/task17_secret_inject.sh --apply` 一次（普通写，两地 Secret + ConfigMap 同批），跑完用 `deploy/task17_dsn_verify.sh both` 复验——其第 3 项就是端点口径断言（mnl VPC / sg PUBLIC），第 4 项做端到端鉴权；再用 `task17_pw_hash_body.sh` 核对两地 `_OLD` 指纹一致。**这一步在执行机上跑，需按变更窗口登记**；真正的 `SESSION_SECRET` 轮换仍是破坏性操作，另待项目负责人核准。
+**仍待执行（不在本次改动范围）**：**先补真源再注入**——把执行机保管文件 `/root/.deploy_secrets/LOG_SQL_DSN` 的 host 从 `-clickhouse` 改为 `-public`（或按站点拆成两份），否则脚本里的 sed 只是补丁。随后 `bash deploy/task17/secret_inject.sh --apply` 一次（普通写，两地 Secret + ConfigMap 同批），跑完用 `deploy/task17/dsn_verify.sh both` 复验——其第 3 项就是端点口径断言（mnl VPC / sg PUBLIC），第 4 项做端到端鉴权；再用 `deploy/task17/bodies/pw_hash_body.sh` 核对两地 `_OLD` 指纹一致。**这一步在执行机上跑，需按变更窗口登记**；真正的 `SESSION_SECRET` 轮换仍是破坏性操作，另待项目负责人核准。
 
-**配套修正**：核对用的 `deploy/task17_pw_hash_body.sh` 键清单原本只到 `SESSION_SECRET`，**没有遍历 `SESSION_SECRET_OLD`**（指南任务 55 的 V4 注释属预期而非实测）⇒ 已把该键加入清单。哑值实测两个分支：有键时输出 `value_sha[:12] / len`（不出值），缺键时输出 `(键不存在)` ⇒ sg 在补键之前跑它就是 `(键不存在)`，正好当补键前后的判据。
+**配套修正**：核对用的 `deploy/task17/bodies/pw_hash_body.sh` 键清单原本只到 `SESSION_SECRET`，**没有遍历 `SESSION_SECRET_OLD`**（指南任务 55 的 V4 注释属预期而非实测）⇒ 已把该键加入清单。哑值实测两个分支：有键时输出 `value_sha[:12] / len`（不出值），缺键时输出 `(键不存在)` ⇒ sg 在补键之前跑它就是 `(键不存在)`，正好当补键前后的判据。
 
 ## 十三、10-06 复核：上面 §十二 的三处口径已被取代（**执行时以本节为准**）
 
@@ -178,10 +178,10 @@
 **⚠ 执行位**：明文保管目录 `/root/.deploy_secrets/` 与 `deploy/.env` 只在 **WSL 堡垒机**上（本机 macOS `ls /root/.deploy_secrets` = No such file、`/mnt/e/...` 不存在）⇒ 补键动作**须由项目负责人在 WSL 侧执行**：
 
 ```bash
-bash deploy/task17_secret_inject.sh --check        # 先盘点，确认 LOG_SQL_DSN 是 -public
-bash deploy/task17_secret_inject.sh --apply sg     # 只动 sg，5 键；mnl 不碰
-bash deploy/task17_dsn_verify.sh sg                # 复验端点与鉴权
-bash deploy/task17_pw_hash_body.sh                 # 核对两地 SESSION_SECRET_OLD 指纹一致
+bash deploy/task17/secret_inject.sh --check        # 先盘点，确认 LOG_SQL_DSN 是 -public
+bash deploy/task17/secret_inject.sh --apply sg     # 只动 sg，5 键；mnl 不碰
+bash deploy/task17/dsn_verify.sh sg                # 复验端点与鉴权
+bash deploy/task17/bodies/pw_hash_body.sh                 # 核对两地 SESSION_SECRET_OLD 指纹一致
 ```
 
 两次 `keys BEFORE` / 键集对照的输出（**只含键名**）留档在 `deploy/logs/task17_secret_*`；body 用后即 `shred`。本会话**未执行任何注入**，集群侧 sg 仍是 3 键。

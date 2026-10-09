@@ -1,7 +1,7 @@
 # Day 3 · 任务 27｜canary Deployment + 独立 Service —— 马尼拉（主站）
 #
 # 权威卡片：deploy/docs/阿里云国际站菲律宾部署_详细操作指南-v2.0.md（Day 3 · 任务 27）
-# 执行器：  deploy/task27_canary.sh（precheck / dryrun / apply-workload / apply-ingress / verify / rollback-zero / restore）
+# 执行器：  deploy/task27/canary.sh（precheck / dryrun / apply-workload / apply-ingress / verify / rollback-zero / restore）
 # 通道：    deploy/ack_remote.sh mnl（两集群 endpoint_public_access=false，本机零 kubeconfig，
 #           全部 kubectl 经云助手 RunCommand 在 VPC 节点内执行 ⇒ 每次调用都是写类 API，需授权留痕）
 #
@@ -63,7 +63,7 @@ spec:
         track: canary
         env: prod
       annotations:
-        # 与 stable 同算法：由 task27_canary.sh 在节点侧用集群 ConfigMap 现值的 sha256 前 12 位渲染
+        # 与 stable 同算法：由 deploy/task27/canary.sh 在节点侧用集群 ConfigMap 现值的 sha256 前 12 位渲染
         checksum/config: "__CONFIG_CHECKSUM__"
         prometheus.io/scrape: "true"
         prometheus.io/port: "3000"
