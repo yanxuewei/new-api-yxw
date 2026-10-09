@@ -236,6 +236,157 @@ processors:
 **结论 2 —— 时间精确到 ms：文件采集不可行 ❌（除非改代码）**
 `__time_ns_part__` 只由 `processor_gotime` 在 `SetTime=true` 时写入，且需要**亚秒时间源**。文件日志既无 `_time_` 类容器 runtime 字段，内容 `[GIN] 2026/10/08 - 18:31:49 | …` 也**只有秒** ⇒ 无源可用；`EnableTimestampNanosecond` 单开不产 ns（与 stdout 结论一致）。**要出 ms 必须先让 new-api 日志格式带毫秒**（`common/logger` + GIN 格式，代码改动，未做）；改完后本新式配置 + `processor_gotime(SourceKey=content, 带 ms 的 pattern)` 即可生效——本次迁移正是为此铺路。
 
+> ⏭ **2026-10-09 已按方案 A 实现**（用户裁定"要真出 ms"）：日志格式已带毫秒（代码改动）、SLS 侧 `processor_regex + processor_gotime` 已加 → **见下方「追加 4」**。本节的"不可行"结论**仅在"不改代码"前提下**成立。
+
 **关键坑 —— 容器去重使"探针法"失效**：曾用独立 logstore `app-file-probe` + 平行 pipeline 配置试探，结果 **0 条**。原因：老配置 `new-api-app-file` 已占用该容器/路径，新配置默认**不重复采集同一容器**（`AllowingIncludedByMultiConfigs` 默认 false）⇒ 必须"删老配置 → 上新配置"才能接管。探针 logstore 已删除（`DeleteLogStore`），项目 logstore 数回到 7。
 
 **证据**：`deploy/logs/sls_dump_appfile.sh`（迁移前字段对比）、`sls_newest_appfile.sh` / `…_sg.sh`（迁移后验收）、`probe_create.sh` / `probe_index.sh` / `probe_check3.sh`（探针，含踩坑记录）。
+
+---
+
+### ⏱ 追加 4（2026-10-09）：app-file 毫秒**已实现** —— 代码侧改日志格式 + SLS 侧加解析处理器
+
+> 本节**推翻「追加 3 · 结论 2」的"不可行"**：那个判断本身没错（文件日志确无 ms 源），但用户裁定走**方案 A —— 改 new-api 日志格式带毫秒**，从根上造出亚秒时间源。
+
+#### 一、代码改动（3 个上游文件 5 处，最小化原地补丁）
+
+| 文件:行 | 影响的日志行 |
+|---|---|
+| `middleware/logger.go:38` | `[GIN]` 访问日志 |
+| `common/sys_log.go:20 / 27 / 34` | `[SYS]` / `[SYS]`(err) / `[FATAL]` |
+| `logger/logger.go:113` | `[INFO] / [WARN] / [ERR] / [DEBUG]` |
+
+统一 `2006/01/02 - 15:04:05` → `2006/01/02 - 15:04:05.000`。
+
+**为什么是"改源码"而非"扩展"**：GIN 访问日志格式由 `middleware.SetUpLogger` 内的**闭包**决定，无 env / 配置项可覆盖；且该函数还承载**私有脱敏** `redactTaskArtifactAccessQuery`（任务产物访问 query 脱敏），在 `main.go` 侧整体替换会**丢脱敏** ⇒ 确无扩展点，按 fork 纪律第 1 条的例外做**最小化原地补丁**（仅动格式串，不碰控制流、无格式化噪音）。
+
+**fork 二次开发纪律落地**（用户 2026-10-09 下达 5 条；与 `deploy/git开发-发布-值班规范.md §4.3` **同源**，两处口径已对齐）：
+- 根目录新增 **`UPSTREAM_CHANGES.md`** —— 定制清单（逐条：上游文件/改动/原因/提交号）+ "不动的地方"反例表
+- 新增 **`ours_likha/{code,ops,doc}`** —— 自研与上游**物理隔离**（含 `ours_likha/.gitattributes` 固化行尾）
+- `ours_likha/ops/patches/0001-log-ms-precision.patch` —— 复现补丁（`git apply` 可直接回放）
+- `ours_likha/ops/verify-upstream-changes.sh` —— **定制在位校验**（sync 前后必跑，退出码非 0 即有定制被覆盖）
+- `ours_likha/ops/local-ci.sh` —— 本地复现 `ci.yml` **全量** job（backend + frontend）
+
+#### 二、SLS 侧（app-file，两站点已 apply ✅）
+
+在原 pipeline 上加了两个 processor（`GetLogtailPipelineConfig` 回读确认**已持久化**，CRD `success: true`）：
+
+```yaml
+processors:
+  - Type: processor_regex        # ① 从整行 content 抓出毫秒时间戳子串
+    SourceKey: content
+    Regex: '^\[[A-Z]+\]\s+(\d{4}/\d{2}/\d{2} - \d{2}:\d{2}:\d{2}\.\d{3})'
+    Keys: ["log_ts"]
+    FullMatch: false             # ★ 默认 true 要求**整字段**匹配 ⇒ 必须显式 false，否则全抓不到
+    KeepSource: true
+    NoMatchError: false
+  - Type: processor_gotime       # ② 解析 log_ts 并 SetTime 回写 → 触发 TimeNs
+    SourceKey: log_ts
+    SourceFormat: "2006/01/02 - 15:04:05.000"
+    SetTime: true
+    NoKeyError: true
+```
+
+- **为什么不能只给 `gotime`**：它对 `SourceKey` 做**整字段**解析，而 `content` 是整行（`[GIN] 2026/10/09 - 12:06:31.123 | api | …`）⇒ 必须先 regex 抽出子串。两步缺一不可。
+- **兼容旧行**：改造前写入的行没有 `.000`，regex 不命中（`NoMatchError:false` 不报错、不丢日志），`gotime` 因 `NoKeyError:true` 跳过 ⇒ 这些行退回**采集时刻**、无 `__time_ns_part__`。属预期降级，历史数据不回填。
+- **探针法在此依然失效**（容器去重，见「追加 3」关键坑），故直接改**现有同名 CRD** `new-api-app-file-ns`，不新建平行配置。
+
+#### 三、验证
+
+| 项 | 结果 |
+|---|---|
+| `go vet ./...`（root + relaykit） | ✅ 通过 |
+| `go build ./...`（root + relaykit） | ✅ 通过 |
+| `make test`（全部包） | ✅ **全绿**（`ours_likha/ops/local-ci.sh` → PASS=5 FAIL=0） |
+| 两站点 SLS `processors` 持久化 | ✅ `success: true`（回读一致） |
+| 前端 job（`bun typecheck` / `bun test`） | ⚠ 本机 WSL 无 bun 未跑；改动**纯后端**，由 PR 的 CI 覆盖（CI 不 skip 任何 job） |
+
+#### 四、发布状态（⛔ 待用户一步）
+
+- **提交**：`9fff2aa47`（`feat(log)`）+ `373c1d580`（`chore(ours_likha)`）（+ 清单回填/脚本/报告随后的 `chore` 提交），分支 **`feature/log-ms-precision`**（PR 待开）。
+- **目标镜像**：`acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com/newapi-prod/newapi-master:20261009-373c1d580`（tag 不可变，新 tag 合规）。
+- ⛔ **未推送**：ACR 访问凭证（开通服务时设置的密码）本机未配置，`push.sh` 需交互输入 ⇒ 待提供后执行 `bash push.sh -n prod -t 20261009-373c1d580`。
+- ⛔ **未部署**：按规范 §7.1「集群内任何变更必须体现为 ops 仓库一次 commit，禁止手工 `kubectl set image`」——建议走 release 通道，或**至少先过 canary**（`deploy/aliyun/ph/canary-deployment.yaml` 已存在）验证 ms 再接全量。
+
+**本地构建镜像失败（两次，环境问题非代码问题）**
+
+| 次 | 源 | 结果 |
+|---|---|---|
+| 1 | `Dockerfile.mac` 默认（goproxy.cn） | `go mod download` → `dial tcp 59.34.197.45:443: i/o timeout`，2m01s 失败 |
+| 2 | `--go-proxy aliyun` | Go 依赖 OK（2.7s，阿里云源通）；**前端 `bun install` 跑 1395s 后被终止**（exit 143），23m23s 失败 |
+
+**容器出网探针（`deploy/logs/net_probe.sh`，同一时刻两个镜像结果相反）**：
+
+| 目标 | tools 镜像 | alpine:3.20 |
+|---|---|---|
+| `registry.npmmirror.com` | **FAIL** | OK |
+| `registry.npmjs.org` | OK | OK |
+| `mirrors.aliyun.com/goproxy` | OK | **FAIL** |
+| `goproxy.cn` | OK | OK |
+
+⇒ **WSL 内 Docker 容器出网间歇抖动**（非墙、非代码）：两次构建分别在 Go 源与 npm 源上卡死，形态与探针互相矛盾的结果吻合。
+⇒ **结论：本机不具备稳定构建镜像的条件**。发版应走 **CI（`release.yml`，tag 触发）** 或在出网稳定的主机上构建；`push.sh` 自身参数已就绪（`--npm-registry official` 可绕 npmmirror，但官方源实测慢约 10 倍）。
+
+### ⏱ 追加 5（2026-10-09）：毫秒改动**运行时证据已取得**；构建卡点精确定位（修正「追加 4」的口径）
+
+#### 一、代码侧：运行时自检通过 ✅（不再只有静态校验）
+
+新增 `ours_likha/code/cmd/logms-check`（自研目录，不依赖 DB/Redis/Docker），把 `gin.DefaultWriter`
+重定向到内存 buffer 后，**真实调用**三条被改路径并机械断言：
+
+```
+[SYS]  2026/10/09 - 12:45:09.668 | ms-probe: sys log line
+[SYS]  2026/10/09 - 12:45:09.668 | ms-probe: sys error line
+[INFO] 2026/10/09 - 12:45:09.668 | SYSTEM | ms-probe: info line
+[WARN] 2026/10/09 - 12:45:09.668 | SYSTEM | ms-probe: warn line
+[ERR]  2026/10/09 - 12:45:09.668 | SYSTEM | ms-probe: err line
+[GIN]  2026/10/09 - 12:45:09.670 | web |  | 200 |  6.7µs | 127.0.0.1 | GET /probe
+────────────────────────────────
+ms 命中 = 6   秒级行 = 0   → RESULT=MS_CONFIRMED
+```
+
+其中 `[GIN]` 行是经 `middleware.SetUpLogger` 的**真实 formatter**（含 `redactTaskArtifactAccessQuery` 中间件）
+发真实 HTTP 请求产生的 ⇒ **6/6 行带 `.mmm`、0 行秒级**，改动确认生效。
+
+用法：`go run ./ours_likha/code/cmd/logms-check`（已并入 `UPSTREAM_CHANGES.md` 的同步流程第 4 步与「相关文档」）。
+`go vet ./ours_likha/...`、`go test ./ours_likha/...` 均通过；`local-ci.sh` 仍 **PASS=5 FAIL=0**（backend 全绿）。
+
+#### 二、构建卡点：是**高并发出网塌陷**，不是随机抖动（修正「追加 4」结论）
+
+「追加 4」把两次构建失败归为「间歇抖动」。追加 5 用**隔离复现**把口径收紧为**确定性**结论：
+
+| 实验 | 结果 | 排除的可能 |
+|---|---|---|
+| 脱离 BuildKit、不用 cache mount，容器内用**仓库真实 `bun.lock`** 跑 `bun install` | **稳定复现卡死**（240s 无进展、无输出） | ❌ 不是 BuildKit / cache mount 死锁 |
+| 同一次复现中采样容器 netns 的 `/proc/<pid>/net/tcp` | **SYN_SENT ≈ 211，ESTABLISHED 仅 13~25**，且 200 条长挂 SYN_SENT 不消退 | ❌ 不是 DNS、不是"墙" |
+| `nf_conntrack_count / max` | `112 / 262144` | ❌ 不是 conntrack 表满 |
+| 全新容器 `bun add lodash`（4 个请求） | **391ms 成功** | ❌ 容器出网**本身**没坏 |
+| `go mod download`（aliyun goproxy） | **2.7s 成功** | ❌ Go 侧无问题 |
+
+⇒ **根因**：本仓库 `web/` 有 800+ 依赖，`bun install` 会一次性开出 **200+ 并发 TCP**；
+**WSL2 的 NAT 在此时刻只能建立十几条、其余 SYN 永久无应答** → bun 永久等齐 → 卡死。
+低并发（`lodash`）与主机侧 `curl`（单连接）都正常，所以此前的"探针一正一反"其实是**并发度差异**，
+并非源站差异。
+
+⇒ **结论（收紧）**：**本机 Windows/WSL2 环境不适合构建本仓库镜像**（并发出网受限），
+与我们的代码 / Dockerfile 无关。可选出路：
+1. **CI 构建**（首选，符合规范 §7.1「集群变更走仓库」）：但注意 fork 现有
+   `.github/workflows/docker-image-branch.yml` / `docker-build.yml` **推的是 Docker Hub `calciumion/new-api`**，
+   **没有**推我们 ACR 的 workflow ⇒ 需新增一个「推 `acr-newapi-mnl-registry.../newapi-prod/newapi-master`」的 workflow。
+2. **在 macOS（日常主力机，网络正常）执行**：`bash push.sh -n prod -t 20261009-373c1d580`（需 ACR 密码）。
+3. 本机降并发重试（降低 `bun install` 并发度 / 预热全量 bun 缓存后再构建）——属绕行，不推荐作为发版通道。
+
+#### 三、状态汇总
+
+| 环节 | 状态 |
+|---|---|
+| 代码改动（5 处毫秒） | ✅ 已提交 `9fff2aa47` / 收尾 `a6af4ae85`，分支 `feature/log-ms-precision` |
+| 运行时自检 | ✅ `RESULT=MS_CONFIRMED`（6/6 带 ms、0 秒级） |
+| 静态在位校验 | ✅ `verify-upstream-changes.sh` PASS=6 FAIL=0 |
+| 本地全量后端 CI | ✅ `local-ci.sh` PASS=5 FAIL=0（frontend 因无 bun 计 FAIL，由 PR CI 覆盖） |
+| 补丁可干净回放 | ✅ `git apply --check` on `main` 通过 |
+| 两站点 SLS pipeline | ✅ `success: true`（回读一致） |
+| 镜像构建 | ⛔ 本机 WSL2 并发出网受限（见上），改走 CI 或 macOS |
+| 推 ACR / 部署 | ⛔ 待用户提供 ACR 密码；部署按规范 §7.1 走 release（或先 canary） |
+
+
