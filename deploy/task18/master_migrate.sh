@@ -4,7 +4,7 @@
 # -----------------------------------------------------------------------------
 # 权威卡片：deploy/docs/阿里云国际站菲律宾部署_详细操作指南-v2.0.md:2958-3061（任务 18，2026-10-05 已按实测改写过）
 # 清单：    deploy/aliyun/ph/master-deployment.yaml
-# 执行通道：deploy/ack_remote.sh（两集群 endpoint_public_access=false，本机无 kubeconfig，
+# 执行通道：deploy/lib/ack_remote.sh（两集群 endpoint_public_access=false，本机无 kubeconfig，
 #           全部 kubectl 经云助手在 VPC 节点内执行；ACKCTL_DIR 独立，避免与并行任务串台）
 #
 # 幂等的判定口径（与卡片的差异，先讲清）：
@@ -42,7 +42,7 @@ MODE="${1:---status}"
 shift || true
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-ACK="$HERE/../ack_remote.sh"
+ACK="$HERE/../lib/ack_remote.sh"
 MANIFEST="$HERE/../aliyun/ph/master-deployment.yaml"
 LOGDIR="$HERE/../logs/task18_${MODE#--}_$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$LOGDIR"

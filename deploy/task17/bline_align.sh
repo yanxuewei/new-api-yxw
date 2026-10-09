@@ -93,7 +93,7 @@ for site in mnl sg; do
   chmod 600 "$b"
   tag=$([ "$MODE" = "--apply" ] && echo apply || echo check)
   echo "########## $site （$MODE） ##########"
-  bash "$HERE/../ack_remote.sh" "$site" "$b" > "$LOGDIR/${site}_${tag}.out" 2>&1
+  bash "$HERE/../lib/ack_remote.sh" "$site" "$b" > "$LOGDIR/${site}_${tag}.out" 2>&1
   sed -n '/BODY START/,$p' "$LOGDIR/${site}_${tag}.out"
   grep -qiE 'error|forbidden|panic|exit code' "$LOGDIR/${site}_${tag}.out" \
     && echo "  [!!] $site 输出含错误关键字，详见 $LOGDIR/${site}_${tag}.out"

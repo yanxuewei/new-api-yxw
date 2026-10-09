@@ -186,10 +186,10 @@ $AL ram DeletePolicy --PolicyName newapi-prod-oss-guard --PolicyType Custom --re
 
 | 文件 | 说明 |
 | --- | --- |
-| `ram_dev_program_onboard.sh` | 开发程序身份开户，幂等，`check` / `apply` / `verify` |
-| `probe_boundary_v2.sh` | boundary v2 生效性验证（临时挂载 + 自动回滚） |
-| `probe_rg_condition.sh` | `acs:ResourceGroupId` 条件键验证（首轮） |
-| `probe_dev_program.sh` | 开发 AK 权限边界全量验证，`smoke` / `crosscheck`（三层对照） |
+| `deploy/ops/ram_dev_program_onboard.sh` | 开发程序身份开户，幂等，`check` / `apply` / `verify` |
+| `deploy/ops/probe_boundary_v2.sh` | boundary v2 生效性验证（临时挂载 + 自动回滚） |
+| `deploy/ops/probe_rg_condition.sh` | `acs:ResourceGroupId` 条件键验证（首轮） |
+| `deploy/ops/probe_dev_program.sh` | 开发 AK 权限边界全量验证，`smoke` / `crosscheck`（三层对照） |
 | `.workbuddy/dev_program_probe.txt` | 原始实测输出 |
 | `.workbuddy/boundary_v2_probe.txt`、`.workbuddy/rg_condition_probe.txt` | 原始实测输出 |
 | `~/.aliyun/newapi-dev-secrets.json` | 开发 AK（600，明文，需安全分发） |

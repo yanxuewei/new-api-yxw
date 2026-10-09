@@ -2,7 +2,7 @@
 
 - **任务**：Day 2 · 任务 17 收尾项「把 `LOG_SQL_DSN` 注进集群」（任务 41 I-1 的 (a) 路线前置；任务 9 卡 S-4 销账项）→ **§七 起为本卡完整复核**（卡片判据 vs 实况）与 **B 线收口**（2026-10-05 项目负责人裁定：**全线不使用 KMS**）
 - **日期**：2026-10-05（复核 + 1 次 sg Secret 修正写操作 + 1 批两地 ConfigMap/SA 配置对齐 + 1 次 mnl master 滚动重启）
-- **通道**：`deploy/ack_remote.sh`（云助手 → worker 节点内 kubectl）· 两地（mnl `cd57e40c…` / sg `ca75829e…`）
+- **通道**：`deploy/lib/ack_remote.sh`（云助手 → worker 节点内 kubectl）· 两地（mnl `cd57e40c…` / sg `ca75829e…`）
 - **结论**：✅ **本卡闭合**（按 §七 的实测口径判据）。两地 `Secret/new-api-secrets` 均含 `LOG_SQL_DSN` 且端到端鉴权通过；同时**修正 sg 侧一处端点错误**（原指 CK 私网 VPC 端点 → 跨区不可达）；RRSA/KMS/ExternalSecret **按裁定不实施**；`SQL_MAX_OPEN_CONNS` 150→**100** 两地落地并确认生效。**遗留三项**（§九）：Cookie `Secure` 缺项、DSN 证书校验档位、`SESSION_SECRET` 轮换待核准。
 
 ---
@@ -49,7 +49,7 @@
 ## 五、本次踩到的坑（已固化）
 
 1. **远端 curl `-w '%{http_code}'` 可能不回显**（得空串），导致"响应体正常但判定失败"的假阴性 ⇒ 改用 `curl -fsS -m 10 -o file` + 退出码 + 响应体判定。
-2. **`ack_remote.sh` 的 body 是「不带引号的 heredoc」**：正文里出现**反引号**会被本地 shell 当命令替换执行（实测报 `-w: command not found`）；出现未转义 `$1/$2` 会被本地 `set -u` 打成 `unbound variable` ⇒ 正文一律 `\$` 转义、注释里别写 `$1`/反引号。
+2. **`deploy/lib/ack_remote.sh` 的 body 是「不带引号的 heredoc」**：正文里出现**反引号**会被本地 shell 当命令替换执行（实测报 `-w: command not found`）；出现未转义 `$1/$2` 会被本地 `set -u` 打成 `unbound variable` ⇒ 正文一律 `\$` 转义、注释里别写 `$1`/反引号。
 3. **mnl VPC 端点 8123 偶发超时**（同秒内另一次直连成功）—— 与项目「VPC 端点两端皆抖动」一致 ⇒ 鉴权检查必须带重试。
 4. **SDK 参数差异**：`aliyun cas` 不带 `--region` 会报 `unknown endpoint for region ap-southeast-6`（CAS 该地域无端点），查证书须显式 `--region ap-southeast-1`。
 5. **`patch secret --type merge` 用 `stringData`** 可直接传明文，避免手工 base64；配合 `--patch-file` 规避口令出现在 `ps` 参数里。
@@ -64,7 +64,7 @@
 
 ## 七、卡片判据复核（2026-10-05 21:1x，只读）
 
-> 复核对象：指南 v2.0 任务 17 卡 + xlsx `落地计划` row20（判据「密钥不落 Git，注入后应用可正常启动」）。取证脚本 `deploy/task17/bodies/cardcheck_body.sh`（经 `ack_remote.sh` 在节点内跑），日志 `deploy/logs/task17_cardcheck_20261005-211402/mnl.out`。
+> 复核对象：指南 v2.0 任务 17 卡 + xlsx `落地计划` row20（判据「密钥不落 Git，注入后应用可正常启动」）。取证脚本 `deploy/task17/bodies/cardcheck_body.sh`（经 `deploy/lib/ack_remote.sh` 在节点内跑），日志 `deploy/logs/task17_cardcheck_20261005-211402/mnl.out`。
 
 | # | 卡片原判据 | 实况 | 判定 |
 | --- | --- | --- | --- |
@@ -148,7 +148,7 @@
    - mnl 分支未动（同区走 VPC 是正确口径，`SQL_DSN`/`SQL_DSN_MIGRATE` 无 `sslmode` 与 §九 实测一致）。指南卡片已登记为**坑 12**，通则写进任务 17 卡。
 4. **一处更根本的处置（未做，留待裁定）**：上面是"把真源追上集群"，但正确顺序应是**先改保管文件、再注入**。`LOG_SQL_DSN` 的保管文件至今是 VPC 口径，脚本里的 sed 只是补丁；若下一张卡又直接 patch 集群，同类回退会第三次发生。建议二选一：① 保管文件按站点拆成 `LOG_SQL_DSN.mnl` / `LOG_SQL_DSN.sg`；② 在脚本里把"整键覆盖"改为"只覆盖本次要补的键"。本轮**未擅自改动保管目录**（它在执行机上，且改真源属变更操作）。
 
-**验证（本地哑值夹具，未接触生产凭据与集群）**：`bash -n` 通过；把脚本复制到临时目录、`VAULT`/`ENVFILE`/`HERE` 指向哑值与桩 `ack_remote.sh` 跑 `--apply`：
+**验证（本地哑值夹具，未接触生产凭据与集群）**：`bash -n` 通过；把脚本复制到临时目录、`VAULT`/`ENVFILE`/`HERE` 指向哑值与桩 `deploy/lib/ack_remote.sh` 跑 `--apply`：
 
 | 断言 | 结果 |
 | --- | --- |

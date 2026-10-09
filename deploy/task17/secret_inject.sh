@@ -152,11 +152,11 @@ case "$MODE" in
     fi
     if [ "$SITE" != "sg" ]; then
       build_body mnl
-      bash "$HERE/../ack_remote.sh" mnl /tmp/t17_secret_body.sh >&3 2>&3 || die "马尼拉注入失败"
+      bash "$HERE/../lib/ack_remote.sh" mnl /tmp/t17_secret_body.sh >&3 2>&3 || die "马尼拉注入失败"
     fi
     if [ "$SITE" != "mnl" ]; then
       build_body sg
-      bash "$HERE/../ack_remote.sh" sg /tmp/t17_secret_body.sh >&3 2>&3 || die "新加坡注入失败"
+      bash "$HERE/../lib/ack_remote.sh" sg /tmp/t17_secret_body.sh >&3 2>&3 || die "新加坡注入失败"
     fi
     shred -u /tmp/t17_secret_body.sh 2>/dev/null || rm -f /tmp/t17_secret_body.sh
     ok "注入完成（site=$SITE，含密码的 body 已销毁）"

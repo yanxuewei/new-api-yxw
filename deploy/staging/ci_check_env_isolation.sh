@@ -2,7 +2,7 @@
 # ci_check_env_isolation.sh — 非生产清单不得指向生产资源（硬门禁）
 #
 # 来源：任务45:380 的 CI 规则「DSN 含 pgm-5tstdhko64x2c01w 且 ns≠new-api 即 fail」的实现，
-#       外加 4 条本仓实测出来的坑。风格对齐 deploy/ci_check_migrate_versioned.sh。
+#       外加 4 条本仓实测出来的坑。风格对齐 deploy/ops/ci_check_migrate_versioned.sh。
 #
 # usage:
 #   bash deploy/staging/ci_check_env_isolation.sh            # 检查 staging 清单目录

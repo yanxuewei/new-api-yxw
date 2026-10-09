@@ -79,7 +79,7 @@
 ## 五、回滚
 
 ```bash
-bash ram_user_detach.sh rollback     # 读最近一次 apply 的清单，把 10 条策略绑回用户级
+bash deploy/ops/ram_user_detach.sh rollback     # 读最近一次 apply 的清单，把 10 条策略绑回用户级
 ```
 
 清单：`.workbuddy/ram_detach/rollback_manifest_20260925_212947.tsv`（10 行，含 user/policy/type）。
@@ -128,7 +128,7 @@ bash ram_user_detach.sh rollback     # 读最近一次 apply 的清单，把 10 
 
 ## 九、交付物
 
-- `ram_user_detach.sh` — 幂等，支持 `check` / `apply` / `verify` / `rollback` / `smoke`
+- `deploy/ops/ram_user_detach.sh` — 幂等，支持 `check` / `apply` / `verify` / `rollback` / `smoke`
 - `.workbuddy/ram_detach/rollback_manifest_20260925_212947.tsv` — 回滚清单
 - `.workbuddy/ram_detach_smoke_before.txt` / `_after.txt` — 前后实测原始输出
 - `.workbuddy/ram_detach/` — 全部原始 JSON 证据

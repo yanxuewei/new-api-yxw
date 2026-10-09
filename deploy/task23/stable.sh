@@ -4,7 +4,7 @@
 # -----------------------------------------------------------------------------
 # 权威卡片：deploy/docs/阿里云国际站菲律宾部署_详细操作指南-v2.0.md:3419-3553
 # 清单：    deploy/aliyun/ph/stable-deployment.yaml
-# 执行通道：deploy/ack_remote.sh（集群 endpoint_public_access=false，本机无 kubeconfig，
+# 执行通道：deploy/lib/ack_remote.sh（集群 endpoint_public_access=false，本机无 kubeconfig，
 #           全部 kubectl 经云助手在 VPC 节点内执行；ACKCTL_DIR 独立，避免与并行任务串台）
 #
 # 与卡片的差异只有清单里写明的两条（PDB 沿用现网 70%、清单保留 spec.replicas），
@@ -40,7 +40,7 @@ MODE="${1:---status}"
 shift || true
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-ACK="$HERE/../ack_remote.sh"
+ACK="$HERE/../lib/ack_remote.sh"
 MANIFEST="$HERE/../aliyun/ph/stable-deployment.yaml"
 LOGDIR="$HERE/../logs/task23_${MODE#--}_$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$LOGDIR"

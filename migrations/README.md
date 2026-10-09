@@ -56,7 +56,7 @@ Contract 的 PR 标题强制带 `[N+1]`，评审门禁核对「线上是否 100%
 
 - down 必须是 up 的**对称逆操作**，且在 staging 真跑过（本目录每周自动 `up → down 1 → up` 一轮，纳入 §12 证据）。
 - 确实不可逆的迁移（如 Contract 删列、`DROP TABLE`），必须在文件头**显式标注**
-  `⚠ 不可逆 / 仅前滚修复` 并过评审；`ci_check_migrate_versioned.sh` 会检查该标注是否存在。
+  `⚠ 不可逆 / 仅前滚修复` 并过评审；`deploy/ops/ci_check_migrate_versioned.sh` 会检查该标注是否存在。
 - 数据类迁移（回填）的 down 要求「可推导还原」或先建归档表。
 
 ## 5. 执行方式

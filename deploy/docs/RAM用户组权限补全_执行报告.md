@@ -62,5 +62,5 @@ iac-terraform_group 策略: newapi-audit-protect,newapi-iac-terraform           
 
 ## 五、交付物
 
-- `attach_group_policies.sh` —— 幂等脚本，`check` 预演 / `apply` 执行；重跑全 `[SKIP]` 已验证。
+- `deploy/ops/attach_group_policies.sh` —— 幂等脚本，`check` 预演 / `apply` 执行；重跑全 `[SKIP]` 已验证。
 - 本报告。

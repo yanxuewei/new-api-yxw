@@ -4,7 +4,7 @@
 #
 # 权威卡片：deploy/docs/阿里云国际站菲律宾部署_详细操作指南-v2.0.md（任务 53 卡）
 # 执行体：  deploy/task53/bodies/observer.sh（节点侧观测/写入器，参数由本脚本以 env 头注入）
-# 通道：    deploy/ack_remote.sh <mnl|sg>（两集群 endpoint_public_access=false）
+# 通道：    deploy/lib/ack_remote.sh <mnl|sg>（两集群 endpoint_public_access=false）
 #           ⚠ 卡片写的 `kubectl --context mnl/sg` 在本环境不可执行。
 #
 # 代码事实（本仓实测，决定判据；详见 observer.sh 头注释与本卡报告）：
@@ -33,14 +33,14 @@ MODE="${1:---status}"
 shift || true
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-ACK="$HERE/../ack_remote.sh"
+ACK="$HERE/../lib/ack_remote.sh"
 BODY_SRC="$HERE/../task53/bodies/observer.sh"
 NS=new-api
 PROBE=t53-pg
 RUN_ID="t53-$(date +%Y%m%d-%H%M%S)-$$"
 SENTINEL="T53PROBE-$(date +%s)-${RANDOM}"
 LOGDIR="$HERE/../logs/task53_${MODE#--}_$(date +%Y%m%d-%H%M%S)"
-# ⚠ 严禁把 ACKCTL_DIR 指成两地共用一个目录：ack_remote.sh 的 kubeconfig 缓存键是
+# ⚠ 严禁把 ACKCTL_DIR 指成两地共用一个目录：deploy/lib/ack_remote.sh 的 kubeconfig 缓存键是
 #   $KCDIR/kubeconfig（不含站点），2026-10-06 15:42 的 precheck 就是这么把 **mnl** 的
 #   kubeconfig（server=https://10.0.22.182:6443）喂给了 sg 节点，表现为跨区 i/o timeout
 #   而不是认证失败。⇒ 这里显式不覆盖，走默认 /tmp/ackctl-<site>（按站点隔离，两地并发安全）。

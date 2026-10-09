@@ -1,6 +1,6 @@
 #!/bin/bash
 # 11-sg-verifyfull.sh — 任务 30 缺口②：SG 侧 verify-full 落地与复验
-# 执行位：deploy/ack_remote.sh sg deploy/task30/bodies/11-sg-verifyfull.sh <node_id> 40
+# 执行位：deploy/lib/ack_remote.sh sg deploy/task30/bodies/11-sg-verifyfull.sh <node_id> 40
 # 步骤：① 落地 RDS CA（根 + ap-southeast-6 中间）为 Secret rds-ca-apse6
 #       ② 建一次性探针 Pod 挂载 Secret 到 /etc/ssl/rds
 #       ③ 正例 verify-full @6432 与 @5432；负例（无 rootcert / 错 rootcert / system）

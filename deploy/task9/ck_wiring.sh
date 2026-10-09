@@ -263,7 +263,7 @@ do_apply() {
     sleep 3
     ok "ckadmin 已创建（DSN 入保管目录）"
   fi
-  # GRANT 必须从 VPC 内发起（CK 仅内网）→ 复用 ack_remote.sh 云助手通道
+  # GRANT 必须从 VPC 内发起（CK 仅内网）→ 复用 deploy/lib/ack_remote.sh 云助手通道
   GRANT_BODY="/tmp/ck_grant_body.$$.sh"
   cat > "$GRANT_BODY" <<GBEOF
 #!/usr/bin/env bash
@@ -274,7 +274,7 @@ qa "SHOW GRANTS FOR ${ACCOUNT}" | head -3
 echo GRANT-DONE
 GBEOF
   chmod 600 "$GRANT_BODY"
-  bash "$HERE/../ack_remote.sh" mnl "$GRANT_BODY" >&3 2>&3 || { shred -u "$GRANT_BODY" 2>/dev/null; die "GRANT 执行失败"; }
+  bash "$HERE/../lib/ack_remote.sh" mnl "$GRANT_BODY" >&3 2>&3 || { shred -u "$GRANT_BODY" 2>/dev/null; die "GRANT 执行失败"; }
   shred -u "$GRANT_BODY" 2>/dev/null || rm -f "$GRANT_BODY"
   ok "数据层授权完成（body 已销毁）"
   unset PW_APP PW_ADM
@@ -344,7 +344,7 @@ qn "SELECT count() FROM logs"
 echo "VERIFY-DONE"
 VEOF
   chmod 600 "$VBODY"
-  bash "$HERE/../ack_remote.sh" mnl "$VBODY" >&3 2>&3 || { shred -u "$VBODY" 2>/dev/null; die "verify 执行失败"; }
+  bash "$HERE/../lib/ack_remote.sh" mnl "$VBODY" >&3 2>&3 || { shred -u "$VBODY" 2>/dev/null; die "verify 执行失败"; }
   shred -u "$VBODY" 2>/dev/null || rm -f "$VBODY"
   unset PW_APP
   ok "verify 完成（body 已销毁）"

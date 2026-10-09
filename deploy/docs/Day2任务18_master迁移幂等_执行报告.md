@@ -2,7 +2,7 @@
 
 - **卡片**：`deploy/docs/阿里云国际站菲律宾部署_详细操作指南-v2.0.md` §Day2 任务 18（单人，2 人时，13:30–15:30）
 - **执行日期**：2026-10-05
-- **执行通道**：`deploy/ack_remote.sh mnl`（云助手 `ecs RunCommand` → worker 节点内 kubectl，admin 私网 kubeconfig；`ACKCTL_DIR=/tmp/ackctl-mnl-t18` 与并行的任务 17 会话隔离）
+- **执行通道**：`deploy/lib/ack_remote.sh mnl`（云助手 `ecs RunCommand` → worker 节点内 kubectl，admin 私网 kubeconfig；`ACKCTL_DIR=/tmp/ackctl-mnl-t18` 与并行的任务 17 会话隔离）
 - **产物**：`deploy/aliyun/ph/master-deployment.yaml`、`deploy/task18/master_migrate.sh`（`--precheck/--apply/--verify/--status/--cleanup`）、`deploy/logs/task18_*_20261005-*/`（body.sh + remote.out 全量留存）
 - **结论**：✅ **完成**。空库首启建出 36 表 / 177 索引 / 0 ERROR；第 2 次冷启动 schema 指纹与首启**逐字相同**（幂等成立）；master 红线、不接流量、迁移账号边界三项验收全过。收口后追加一项修复：**master 的镜像拉取路径由公网域名改为 ACR 企业版 VPC 内网域名（`-vpc`），并在零缓存节点完成全量冷拉复测**（§十）。
 - **授权留痕**：① 拉取凭据修复方式 = 「装 credential-helper 组件」；② 生产 DDL 门禁 = 「一次核准，apply+verify 连着跑」（项目负责人 IM 会话内答复，2026-10-05）。
@@ -173,10 +173,10 @@ FPB = 36|e0573c6f2c3aef3bcfd8f9297f6a2948|8a088809e6f2eaa5d3d484efb8a67127
 - 挂载点 `/app/data`：镜像 `ENTRYPOINT=/new-api`、`WORKDIR=/data`，应用根本不写 `/app/data`；改挂 `/data` 会盖掉工作目录。
 - 本站主库是 PG（`SQL_DSN` 非空 ⇒ 不走 SQLite），master Pod **无本地持久状态**；而 RWO 云盘是单 AZ 资源，`Recreate` 换 AZ 时正是卡片「PVC Multi-Attach」的成因。⇒ 不建 PVC，卡片该条修复项对本卡不适用（留作 stable 若引入本地盘时的参考）。
 
-### ④ 执行通道 `ack_remote.sh` 的两个真 bug（曾造成本卡一次假成功）
+### ④ 执行通道 `deploy/lib/ack_remote.sh` 的两个真 bug（曾造成本卡一次假成功）
 - **空 `InvokeId` 被当成成功**：`aliyun` CLI 出错时返回的是 `{"message":…,"error_code":…}` 这类**合法 JSON**，`json.load(...).get('InvokeId','')` 静默返回空串；旧守卫只判字面量 `FAIL`。随后 `DescribeInvocationResults --InvokeId ''` 回的是**上一次调用**的输出 ⇒ 日志里出现「BODY END · Success」+ 旧 body 内容，而 `--apply` 从未执行（复测：`kubectl get deploy new-api-master` → `No resources found`）。现已：空值即硬失败 + 把 stderr 原始响应打出来。
 - **PATH**：`aliyun` 由 `~/.zshrc` 追加，非交互 shell 不 source ⇒ 命令找不到。脚本已自行补 PATH 并前置存在性检查。
-- ~~附带澄清：卡片/报告担心的「命令内容超长」**不是**本次原因~~ ⇒ **本条已被 18:51 的现测推翻，更正如下**：`ecs RunCommand` 的 `CommandContent` **Base64 编码后不得超过 24 KB**（官方 API 文档原文 "The command content cannot exceed 24 KB after Base64 encoding"，见 https://www.alibabacloud.com/help/en/ecs/developer-reference/api-ecs-2014-05-26-runcommand ）。§五 的 `--apply` body 加长后 raw 22.7 KB → 注入 kubeconfig + base64 = **30.3 KB ⇒ `403 {"error_code":"CmdContent.ExceedLimit"}`**（原始响应留存 `deploy/logs/task18_apply_20261005-185149/remote.out`）。先前"24.5 KB 实测可下发"只落在 <24 KB 边界内，属把边界内样本外推成"无上限"的推理错误——而且正是坑 6/§四-① 那一类"空/异常响应被当成成功"的同源问题：这次的守卫（空 `InvokeId` 即硬失败 + 打印 stderr 原文）让 403 当场暴露，否则又会是一次假成功。**处置**：`ack_remote.sh` 改为「外层只传解压器」——body 先 `gzip -9` 再 base64 内嵌 bootstrap，节点侧 `base64 -d | gzip -dc` 还原执行；切换后同一 body 的体积链是 `raw 23,499 B → gzip+b64 17,080 B → 外层命令 b64 23,132 B` ⇒ 落在 24 KB 内，18:53 下发成功（`logs/task18_apply_20261005-185315/`）。附带两处可移植性修正：bootstrap 先做 `command -v gzip` 存在性检查；编码统一用 `python3`，**不用 `base64 -w0`**（BSD/macOS 不认 `-w`，会静默产出空 Body）。
+- ~~附带澄清：卡片/报告担心的「命令内容超长」**不是**本次原因~~ ⇒ **本条已被 18:51 的现测推翻，更正如下**：`ecs RunCommand` 的 `CommandContent` **Base64 编码后不得超过 24 KB**（官方 API 文档原文 "The command content cannot exceed 24 KB after Base64 encoding"，见 https://www.alibabacloud.com/help/en/ecs/developer-reference/api-ecs-2014-05-26-runcommand ）。§五 的 `--apply` body 加长后 raw 22.7 KB → 注入 kubeconfig + base64 = **30.3 KB ⇒ `403 {"error_code":"CmdContent.ExceedLimit"}`**（原始响应留存 `deploy/logs/task18_apply_20261005-185149/remote.out`）。先前"24.5 KB 实测可下发"只落在 <24 KB 边界内，属把边界内样本外推成"无上限"的推理错误——而且正是坑 6/§四-① 那一类"空/异常响应被当成成功"的同源问题：这次的守卫（空 `InvokeId` 即硬失败 + 打印 stderr 原文）让 403 当场暴露，否则又会是一次假成功。**处置**：`deploy/lib/ack_remote.sh` 改为「外层只传解压器」——body 先 `gzip -9` 再 base64 内嵌 bootstrap，节点侧 `base64 -d | gzip -dc` 还原执行；切换后同一 body 的体积链是 `raw 23,499 B → gzip+b64 17,080 B → 外层命令 b64 23,132 B` ⇒ 落在 24 KB 内，18:53 下发成功（`logs/task18_apply_20261005-185315/`）。附带两处可移植性修正：bootstrap 先做 `command -v gzip` 存在性检查；编码统一用 `python3`，**不用 `base64 -w0`**（BSD/macOS 不认 `-w`，会静默产出空 Body）。
 
 ## 七、与本卡相关的口径冲突（供指南/xlsx 回改）
 

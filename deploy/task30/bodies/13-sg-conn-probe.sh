@@ -1,6 +1,6 @@
 #!/bin/bash
 # 13-sg-conn-probe.sh — 任务 30 V4 拔线自愈：SG 节点侧到 RDS 公网串的 TCP 连通率探测
-# 由 deploy/ack_remote.sh sg 执行；TAG 由调用方 sed 注入（baseline / broken / recovered）
+# 由 deploy/lib/ack_remote.sh sg 执行；TAG 由调用方 sed 注入（baseline / broken / recovered）
 # 说明：节点在 VPC 内，出网经 NAT SNAT 到 4 个 sg_standby_eip 之一（per-flow 哈希）
 #       ⇒ 白名单里移除 1 个 /32 后，命中该 EIP 的连接会被丢弃（表现为超时）。
 #       ICMP 不受 RDS 白名单管辖 ⇒ 同时 ping 作「链路未坏、仅白名单拦截」的区分证据。

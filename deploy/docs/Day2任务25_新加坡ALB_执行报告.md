@@ -154,7 +154,7 @@ k8s 侧 spec 保留该字段  ✅
 
 ## 七、附带发现（非本任务范围）
 
-1. **任务 28 已由并行会话完成**：`Deployment/new-api-ph-standby` 2/2 Running（双节点跨 AZ），`Service` 2 个 ready endpoint，镜像 `acr-newapi-mnl-registry.ap-southeast-6.…:20260928-26ac63233`（**跨区拉取成功**，建 Pod 33 分钟前）。本次执行开始时的勘察（13:47）该资源尚不存在，属并发写入 —— `ack_remote.sh` 已有的 RUN_ID 隔离机制未见异常。
+1. **任务 28 已由并行会话完成**：`Deployment/new-api-ph-standby` 2/2 Running（双节点跨 AZ），`Service` 2 个 ready endpoint，镜像 `acr-newapi-mnl-registry.ap-southeast-6.…:20260928-26ac63233`（**跨区拉取成功**，建 Pod 33 分钟前）。本次执行开始时的勘察（13:47）该资源尚不存在，属并发写入 —— `deploy/lib/ack_remote.sh` 已有的 RUN_ID 隔离机制未见异常。
 2. 集群内存在任务 28 的临时依赖 Pod `t28-pg`（`postgres:17`，反复重启，29m 前最后一次 Started）——**非任务 25 产物，未处理**，建议任务 28 收口时清理。
 3. `ns new-api` 有 `ResourceQuota new-api-quota`，**强制要求**临时 Pod 声明 `limits.cpu/memory` + `requests.*`（本次 `kubectl run` 调试被拦，改用节点直连 curl）。
 

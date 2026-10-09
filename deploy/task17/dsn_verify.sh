@@ -14,13 +14,13 @@
 # 用法：
 #   bash deploy/task17/dsn_verify.sh            # 两地
 #   bash deploy/task17/dsn_verify.sh mnl|sg     # 单站
-# 前置：deploy/ack_remote.sh（云助手通道）可用；本机无需 kubeconfig。
+# 前置：deploy/lib/ack_remote.sh（云助手通道）可用；本机无需 kubeconfig。
 # 退出码：0 全通过 / 1 有 FAIL
 # =============================================================================
 set -uo pipefail
 MODE="${1:-both}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
-ACK="$HERE/../ack_remote.sh"
+ACK="$HERE/../lib/ack_remote.sh"
 [[ -x "$ACK" || -f "$ACK" ]] || { echo "缺 $ACK"; exit 2; }
 
 build_body() { # $1=mnl|sg

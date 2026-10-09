@@ -18,7 +18,7 @@
 #   （10.0.22.182:6443，endpoint_public_access=false），本机在 VPC 外无法直连。
 #   项目负责人已定：**运维通道必须走任务 46 的自建跳板机（方案 B），不接受临时公网端点、
 #   不把云助手作为默认通道**。故本脚本：
-#   EXEC_MODE=ack-remote（2026-09-30 起默认）→ 经 deploy/ack_remote.sh（云助手 + worker 节点内 kubectl）
+#   EXEC_MODE=ack-remote（2026-09-30 起默认）→ 经 deploy/lib/ack_remote.sh（云助手 + worker 节点内 kubectl）
 #     —— 本会话 09-29/30 已用该通道完成任务 17/22/9 的全部集群内操作（RRSA 注入、10250 修复、CK 验证），
 #        事实上的标准通道；任务 46 跳板机交付后可切回 ssh 合规路径。决策留痕：用户知情并默认采纳。
 #     EXEC_MODE=ssh（任务 46 就绪后的合规路径）  → 经跳板机 SSH 执行 kubectl
@@ -118,12 +118,12 @@ say "AccountId=${ACCOUNT:-<失败>}（期望 5108890064395960）"
 
 case "$EXEC_MODE" in
   ack-remote)
-    say "EXEC_MODE=ack-remote（deploy/ack_remote.sh：云助手 → worker 节点内 kubectl，临时 kubeconfig 用完即删）"
-    # ack_remote.sh 自带 worker 枚举（worker-k8s-for-cs- 前缀动态发现），无需实例参数
+    say "EXEC_MODE=ack-remote（deploy/lib/ack_remote.sh：云助手 → worker 节点内 kubectl，临时 kubeconfig 用完即删）"
+    # deploy/lib/ack_remote.sh 自带 worker 枚举（worker-k8s-for-cs- 前缀动态发现），无需实例参数
     ACK_REMOTE=/tmp/ack_remote.sh
-    tr -d '\r' < "$HERE/../ack_remote.sh" > "$ACK_REMOTE" && chmod +x "$ACK_REMOTE" \
-      || { fail "ack_remote.sh 转换失败"; exit 1; }
-    pass "ack_remote.sh 已就位（/tmp/ack_remote.sh）"
+    tr -d '\r' < "$HERE/../lib/ack_remote.sh" > "$ACK_REMOTE" && chmod +x "$ACK_REMOTE" \
+      || { fail "deploy/lib/ack_remote.sh 转换失败"; exit 1; }
+    pass "deploy/lib/ack_remote.sh 已就位（/tmp/ack_remote.sh）"
     ;;
   ssh)
     say "EXEC_MODE=ssh（合规路径：经任务 46 自建跳板机执行，VPC 内 + 私网端点）"
@@ -184,7 +184,7 @@ exec_sh() {
     ack-remote)
       local bodyf="$OUTDIR/$name.body.sh" try rc
       printf '%s' "$script" > "$bodyf"
-      # ⚠ VPC 端点偶发抖动（项目铁律：写操作重试 ≥3 次）；ack_remote.sh 内部无重试 → 此处兜底
+      # ⚠ VPC 端点偶发抖动（项目铁律：写操作重试 ≥3 次）；deploy/lib/ack_remote.sh 内部无重试 → 此处兜底
       for try in 1 2 3; do
         printf '+ [ack-remote %s] 第 %s 次尝试 …\n' "$name" "$try" >&3
         # 第 4 参 LOOPS=100（500s）：apply-main 内部等 AlbConfig ready 最长 300s，默认 24×5=120s 必超时（2026-09-30 实测）
@@ -229,14 +229,14 @@ run_cloud_assistant() {
 }
 
 # kubectl_prelude —— 注入临时 kubeconfig 的固定前置（umask 077，用完删除）
-# ⚠ ack-remote 模式：ack_remote.sh 已在节点注入 KUBECONFIG（/tmp/k8s/kubeconfig），
+# ⚠ ack-remote 模式：deploy/lib/ack_remote.sh 已在节点注入 KUBECONFIG（/tmp/k8s/kubeconfig），
 #   body 内再嵌一份既冗余又会撑爆 RunCommand 16KB 级内容上限（CmdContent.ExceedLimit，2026-09-30 实测）
 kubectl_prelude() {
   if [[ "$EXEC_MODE" == "ack-remote" ]]; then
     cat <<'PRE'
 set -u
 um=$(umask)
-printf '[prelude] KUBECONFIG is provided by ack_remote.sh\n'
+printf '[prelude] KUBECONFIG is provided by deploy/lib/ack_remote.sh\n'
 PRE
     return 0
   fi

@@ -1,7 +1,7 @@
 # VPC + vSwitch 落地执行报告（对应操作指南 §2.2 / §4.1 / §5.2）
 
 - 账号：`5108890064395960`；执行时间：2026-09-25 19:0x（GMT+8）
-- 工具：`~/.workbuddy/binaries/aliyun-cli/aliyun`（v3.5.1）+ 幂等脚本 `create_vswitch.sh`
+- 工具：`~/.workbuddy/binaries/aliyun-cli/aliyun`（v3.5.1）+ 幂等脚本 `deploy/ops/create_vswitch.sh`
 - 原始输出归档：`.workbuddy/vswitch_out/{vpcs,vswitches}_<region>.json`
 
 ## 一、结果总览（10 个 vSwitch / 2 个 VPC，全部 `Available`）
@@ -51,12 +51,12 @@
 
 ## 五、执行脚本（可重复执行）
 
-`create_vswitch.sh`（幂等）：
+`deploy/ops/create_vswitch.sh`（幂等）：
 
 ```bash
-bash create_vswitch.sh            # 全量：马尼拉 6 + 新加坡 4
-bash create_vswitch.sh mnl|sg     # 单站点
-bash create_vswitch.sh baseline   # 仅打印可用 IP 基线并归档 JSON
+bash deploy/ops/create_vswitch.sh            # 全量：马尼拉 6 + 新加坡 4
+bash deploy/ops/create_vswitch.sh mnl|sg     # 单站点
+bash deploy/ops/create_vswitch.sh baseline   # 仅打印可用 IP 基线并归档 JSON
 ```
 
 - 幂等逻辑：按 `VpcName` / `VSwitchName` 先查后建，已存在则 `[SKIP]`，不覆盖、不改网段（**vSwitch CIDR 创建后不可修改**）。
@@ -171,4 +171,4 @@ aliyun cr ChangeResourceGroup --ResourceRegionId ap-southeast-6 \
 | 路由表 / 自定义路由 | 使用 VPC 默认路由表（本次未建自定义） |
 | 安全组（`sg-mnl-app` 等） | 未建，属 D1 后续任务 |
 | NAT / EIP / ALB | 未建，属 §5.1 |
-| Terraform 纳管 | 脚本 `create_vswitch.sh` 为 CLI 版；IaC 用户后续需 `terraform import` 这 12 个资源 |
+| Terraform 纳管 | 脚本 `deploy/ops/create_vswitch.sh` 为 CLI 版；IaC 用户后续需 `terraform import` 这 12 个资源 |

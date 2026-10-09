@@ -4,7 +4,7 @@
 #
 # 权威卡片：deploy/docs/阿里云国际站菲律宾部署_详细操作指南-v2.0.md 3606-3688
 # 清单：    deploy/aliyun/ph/standby-deployment.yaml（与卡片的 5 处差异及依据写在该文件头）
-# 通道：    deploy/ack_remote.sh sg —— SG 集群 endpoint_public_access=false，本机无 kubeconfig，
+# 通道：    deploy/lib/ack_remote.sh sg —— SG 集群 endpoint_public_access=false，本机无 kubeconfig，
 #           所有 kubectl 经云助手在 VPC worker 内执行。
 #
 # 模式：
@@ -26,7 +26,7 @@ MODE="${1:---status}"
 shift || true
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-ACK="$HERE/../ack_remote.sh"
+ACK="$HERE/../lib/ack_remote.sh"
 MANIFEST="$HERE/../aliyun/ph/standby-deployment.yaml"
 NS=new-api
 APP=new-api-ph-standby

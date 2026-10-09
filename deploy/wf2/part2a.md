@@ -234,7 +234,7 @@ kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.metadata
 > | 节点（2 台） | `g9ae.2xlarge`@**1a** + `g8ine.2xlarge`@**1b**（**勿硬编码机型分布** —— 1b 没有 g9i） |
 > | 终验 | 集群 12/12 + 节点池 **17/17 PASS**；集群内 2/2 `Ready`、`site=sg`、nofile=**200000**、Terway CNI、300G 盘已挂 `/var/lib/containerd` |
 >
-> 完整台账 → **`deploy/nodepool_ledger_sg.md`**；脚本 `deploy/task24/ack_sg.sh`（建集群）+ `deploy/task24/nodepool_sg.sh`（**复用任务 11 同一份逻辑与 user_data**）+ `deploy/nodepool_azbalance_fix.sh`（跨区均衡断言）。
+> 完整台账 → **`deploy/nodepool_ledger_sg.md`**；脚本 `deploy/task24/ack_sg.sh`（建集群）+ `deploy/task24/nodepool_sg.sh`（**复用任务 11 同一份逻辑与 user_data**）+ `deploy/ops/nodepool_azbalance_fix.sh`（跨区均衡断言）。
 >
 > **★ 建完集群第 1 件事：核对控制面安全组有没有 6443。** 新加坡**同构复现**了马尼拉那条缺陷（见下方坑 6）；本卡已在**建节点池之前**补上，所以 2 台节点**首次引导即成功**，完全没重演马尼拉那条 6 小时排障链。
 
@@ -267,7 +267,7 @@ export ID_SG=c<sg_cluster_id>
 envsubst < nodepool-sg.json > nodepool-sg.rendered.json
 aliyun cs CreateClusterNodePool --ClusterId $ID_SG --body "$(cat nodepool-sg.rendered.json)"
 # ★ 建池后【两件事必做】：
-#   ① bash deploy/nodepool_azbalance_fix.sh sg        # ESS 跨区均衡，否则全落一个区（坑 5）
+#   ① bash deploy/ops/nodepool_azbalance_fix.sh sg        # ESS 跨区均衡，否则全落一个区（坑 5）
 #   ② 核对控制面安全组有无 6443，没有就补（坑 6）
 ```
 
@@ -307,7 +307,7 @@ kubectl --context sg debug node/${NODE} -it --image=busybox -- sh -c \
 - 坑 2｜两集群 SA/KMS/RRSA 角色串用：OIDC Provider 是 region+cluster 维度 → 新加坡 Pod 拿不到马尼拉的 Secret → Pod env 核对 `OIDC_PROVIDER_ARN`（任务 17 V4）。
 - 坑 3｜把常态 2 副本 + 冷备池当"热备"：接管要等扩容 90–180s，RTO 掉到分钟级，M4 不过 → desired=2 常跑、`NODE_TYPE=slave` 且保持连接池 warm，GTM 备地址池只在压测通过后加入。
 - 坑 4｜节点标签/污点不统一 → 主备反亲和失效 → 两集群统一 `site`/`env`/`track`，`topologySpreadConstraints` 用 `DoNotSchedule`（软约束会让 4 副本挤一个 AZ）。
-- 坑 5｜**`multi_az_policy: BALANCE` ≠ 开启跨区均衡（2026-09-29 实测，两地同源）**。现象：建池 body 写了 `BALANCE`、`DescribeScalingGroups` 也回读 `MultiAZPolicy=BALANCE`，但 desired=2 建出来是 **1a:2 / 1b:0**。根因：ESS 有**独立的 `AzBalance` 开关**，**ACK 不设置它** → 实例创建阶段不做跨区均衡，顺着「能买到机型 / 有库存」的交换机把实例全塞一个区。佐证：把 `instance_types` 首位换成两区都在售的 `g9ae` **仍然全落 1a** → 与机型无关。修复：`aliyun ess ModifyScalingGroup --ScalingGroupId <asg> --AzBalance true --BalanceMode BalancedBestEffort [--AutoRebalance true]`（幂等脚本 `deploy/nodepool_azbalance_fix.sh mnl|sg`），生效后 ESS 会先在另一区补 1 台再削掉多余的那台，收敛 1:1。**⚠️ 该字段 `DescribeScalingGroups` 不回读，且经 ACK 侧改池后可能被覆盖 → 每次改完节点池都要重跑断言。** `BalanceMode` 取 `BalancedBestEffort`（可用性优先）而非 `BalancedOnly`（目标区没货则整个伸缩活动失败）—— 备站扩不出容比短暂失衡危险得多。
+- 坑 5｜**`multi_az_policy: BALANCE` ≠ 开启跨区均衡（2026-09-29 实测，两地同源）**。现象：建池 body 写了 `BALANCE`、`DescribeScalingGroups` 也回读 `MultiAZPolicy=BALANCE`，但 desired=2 建出来是 **1a:2 / 1b:0**。根因：ESS 有**独立的 `AzBalance` 开关**，**ACK 不设置它** → 实例创建阶段不做跨区均衡，顺着「能买到机型 / 有库存」的交换机把实例全塞一个区。佐证：把 `instance_types` 首位换成两区都在售的 `g9ae` **仍然全落 1a** → 与机型无关。修复：`aliyun ess ModifyScalingGroup --ScalingGroupId <asg> --AzBalance true --BalanceMode BalancedBestEffort [--AutoRebalance true]`（幂等脚本 `deploy/ops/nodepool_azbalance_fix.sh mnl|sg`），生效后 ESS 会先在另一区补 1 台再削掉多余的那台，收敛 1:1。**⚠️ 该字段 `DescribeScalingGroups` 不回读，且经 ACK 侧改池后可能被覆盖 → 每次改完节点池都要重跑断言。** `BalanceMode` 取 `BalancedBestEffort`（可用性优先）而非 `BalancedOnly`（目标区没货则整个伸缩活动失败）—— 备站扩不出容比短暂失衡危险得多。
 - 坑 6｜**ACK 建集群漏放行控制面 6443 —— 两个地域都复现，是平台缺陷不是个案**。现象：集群 `security_group_id`（名 `alicloud-cs-auto-created-security-group-<集群ID>`）入向**只有 ICMP 一条**，**没有任何 6443** → 节点 bootstrap 用**内网域名**连 API Server 报 `curl (7) Connection timed out`，重试 120 次 × 2s、卡满 **10 分钟**才放弃 → 节点不注册 / Terway 起不来 / 节点永久 `NotReady`（完整故障链见 `deploy/nodepool_ledger.md` §7）。**易误判点**：错误码是 `curl (7)` **不是** `(6)` —— DNS 是通的、TCP 连不上；且 `ping` 能通（ICMP 恰在白名单里）。**SOP**：建完集群先查该 SG 有无 6443，没有就 `AuthorizeSecurityGroup` 放行 `TCP 6443 ← <VPC 段>`，**再**建节点池。**新加坡实测**：`sg-t4nevyfflaeo3tdvi510` 建出时同样只有 ICMP。
 - 坑 7｜**删节点池必须等 ESS 真正清零，否则必得 `delete_failed`**。现象：`--MinSize 0 --MaxSize 0 --DesiredCapacity 0` 之后立刻 `DeleteClusterNodepool` → ACK 任务报 **`ScalingGroup's instances not empty`**，池变 `delete_failed`（该状态下连 `RemoveNodePoolNodes` 也被拒，报 `InvalidNodePoolStatus.Forbidden`）。根因：容量归零是**异步**的，实例先进入 `Removing:Wait`，**实测约 6–7 分钟**才真正释放。修复：**轮询 `DescribeScalingGroups.TotalCapacity == 0`** 再删；若已 `delete_failed`，清零后**重发一次删除**即可恢复（无需重建集群）。
 
@@ -324,7 +324,7 @@ aliyun cs DescribeClusterNodePools --ClusterId $ID_MNL \
   | jq '.nodepools[]|{name:.nodepool_info.name,enable:.auto_scaling.enable,min:.auto_scaling.min_instances,max:.auto_scaling.max_instances}'
 # 期望：np-mnl-app enable=true min=4 max=8；对新加坡同跑，期望 np-sg-ph-standby enable=true min=2 max=12
 # ⚠️ 除 min/max 外还必须断言 ESS 的**跨区均衡开关**（该字段不回读，同任务 24 坑 5）：
-#    bash deploy/nodepool_azbalance_fix.sh mnl     # 再对 sg 跑一遍
+#    bash deploy/ops/nodepool_azbalance_fix.sh mnl     # 再对 sg 跑一遍
 #    实测：马尼拉此前 `AzBalance` 也是关的 —— 它的 6a:2/6b:2 只是「运气好」，本次已补正。
 ```
 
@@ -376,7 +376,7 @@ kubectl get nodes -o custom-columns=NAME:.metadata.name,CREATING:.metadata.creat
 - 坑 1｜HPA max 16 看似 ≤ 池容量（8 台×~3 副本），但按 limit 4C 实际每节点只塞得下 1–2 个 → HPA 显示"副本已达标"而 Pod 全 Pending = 扩容失败假象 → 按 request 规划 + 「Pending>0 持续 3 分钟」做 P1 告警。
 - 坑 2｜`PDB minAvailable: 3` 硬挡缩容，autoscaler 驱逐重试刷屏 → 低峰允许 2（百分比口径）。
 - 坑 3｜自动伸缩的新节点不带手工调优：只有初始 4 台"是对的" → 一切节点调优必须进节点池 User Data。
-- 坑 4｜**`MultiAZPolicy=BALANCE` ≠ 已开跨区均衡**：ACK 不设 ESS 独立的 `AzBalance`，伸缩时会把新节点**全塞进有库存的那个可用区**（实测 1a:2 / 1b:0）→ 可用区级故障会一次打掉整个节点池。**改进**：每池建后 / **每次经 ACK 改池后**都跑 `deploy/nodepool_azbalance_fix.sh <mnl|sg>` 断言，并用「实例的可用区分布」间接验证（`AzBalance` 不可回读）。
+- 坑 4｜**`MultiAZPolicy=BALANCE` ≠ 已开跨区均衡**：ACK 不设 ESS 独立的 `AzBalance`，伸缩时会把新节点**全塞进有库存的那个可用区**（实测 1a:2 / 1b:0）→ 可用区级故障会一次打掉整个节点池。**改进**：每池建后 / **每次经 ACK 改池后**都跑 `deploy/ops/nodepool_azbalance_fix.sh <mnl|sg>` 断言，并用「实例的可用区分布」间接验证（`AzBalance` 不可回读）。
 
 ### Day 2 · 任务 17｜RRSA + KMS + Secret 注入链路 + Namespace/ConfigMap/Secret（人员B，3 人时，09:00–12:00，合并预置与正式两段）
 

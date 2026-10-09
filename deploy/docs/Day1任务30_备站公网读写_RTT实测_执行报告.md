@@ -2,7 +2,7 @@
 
 - **卡片**：`Day 1 · 任务 30｜备 region → 马尼拉 RDS 公网读写打通与 RTT 实测（单人，2 人时，S5）`
 - **复核/执行时间**：2026-10-05 21:02–21:21（GMT+8）
-- **执行方式**：`deploy/ack_remote.sh`（云助手 + 节点内 kubectl）→ 两地集群各建**一次性探针 Pod**（`postgres:17`，凭据走 `secretKeyRef` 注入，口令不进命令行、不出集群）
+- **执行方式**：`deploy/lib/ack_remote.sh`（云助手 + 节点内 kubectl）→ 两地集群各建**一次性探针 Pod**（`postgres:17`，凭据走 `secretKeyRef` 注入，口令不进命令行、不出集群）
 - **证据目录**：`deploy/logs/task30_drill_20261005-211909/`（10 文件）
 - **判定**：**❌ 未完成（不可销账）** —— 4 条量化判据中 **2 条达标、1 条不达标、1 条口径不合**，另 V4 未做、SLA 回填未做
 
@@ -98,7 +98,7 @@
 | `deploy/task30/bodies/10-sg-verifyfull-path.sh` | `verify-full` 可行路径 + 连接复用对照 + 连接账目 |
 
 > 探针 Pod 标准写法（`new-api` ns 有 `ResourceQuota new-api-quota`，缺 resources 直接 `Forbidden: failed quota`）：见 05 号脚本 YAML 段。
-> `ack_remote.sh` 单次窗口约 5 分钟（`loops×5s`），**测量脚本必须拆段**——本次 `02-sg-net.sh`（50×TCP + 20×TLS）整体超时失败，即为反例。
+> `deploy/lib/ack_remote.sh` 单次窗口约 5 分钟（`loops×5s`），**测量脚本必须拆段**——本次 `02-sg-net.sh`（50×TCP + 20×TLS）整体超时失败，即为反例。
 
 ---
 

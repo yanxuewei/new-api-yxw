@@ -2,7 +2,7 @@
 # task27/canary.sh — Day 3 · 任务 27（canary Deployment + 独立 Service/Ingress，权重 5）执行器
 #
 # 权威卡片：deploy/docs/阿里云国际站菲律宾部署_详细操作指南-v2.0.md（Day 3 · 任务 27）
-# 执行通道：deploy/ack_remote.sh mnl —— 两集群 endpoint_public_access=false、本机零 kubeconfig，
+# 执行通道：deploy/lib/ack_remote.sh mnl —— 两集群 endpoint_public_access=false、本机零 kubeconfig，
 #           所有 kubectl 都要经 ECS RunCommand 在 VPC 节点内跑 ⇒ **连只读 body 也算写类 API，需授权留痕**。
 #
 # usage: task27/canary.sh --precheck|--dryrun|--apply-workload|--apply-ingress|--verify|--status
@@ -21,7 +21,7 @@ MODE="${1:-}"
 [[ -n "$MODE" ]] || { echo "usage: $0 --precheck|--dryrun|--apply-workload|--apply-ingress|--verify|--status|--set-weight <N>|--schema-fp|--teardown"; exit 2; }
 shift || true
 
-ACK="$HERE/../ack_remote.sh"
+ACK="$HERE/../lib/ack_remote.sh"
 [[ -x "$ACK" || -f "$ACK" ]] || { echo "[!] 找不到 $ACK"; exit 1; }
 export ACKCTL_DIR="${ACKCTL_DIR:-/tmp/ackctl-mnl-cy}"   # 并发会话专用目录（卡片口径）
 RUN_TS="$(date +%Y%m%d-%H%M%S)-$$"

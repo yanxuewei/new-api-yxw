@@ -23,7 +23,7 @@
 
 标签（成本归口，任务 52）：`env=dev` `project=new-api` `managed-by=realign_jakarta_dev_cidrs.sh` `isolation=structural-vpc`（七段均已回读确认；`ecs TagResources --ResourceType VSWITCH` 实测报 `InvalidResourceType.NotFound`，必须走 vpc 侧）
 
-脚本：`deploy/realign_jakarta_dev_cidrs.sh`（对齐已执行完毕，重跑会在占用性守卫处中止）；`deploy/provision_jakarta_dev_net.sh`（幂等，已按新偏移回写，重跑=只读校验+补齐，含 CIDR/AZ 漂移检测）
+脚本：`deploy/ops/realign_jakarta_dev_cidrs.sh`（对齐已执行完毕，重跑会在占用性守卫处中止）；`deploy/ops/provision_jakarta_dev_net.sh`（幂等，已按新偏移回写，重跑=只读校验+补齐，含 CIDR/AZ 漂移检测）
 
 ### 1.1 出方向规则（deny 优先于 accept，这是"不能互通"的第二层保险）
 
@@ -93,7 +93,7 @@ aliyun vpc DeleteVpc --region ap-southeast-5 --VpcId vpc-k1ano67avx98nr3n1bg5d
 
 删除顺序必须**倒序**（先建的后删），且只在各段可用 IP 仍为满值（252 / 4092）时安全；一旦 ACK 节点池或 RDS 绑定，`DeleteVSwitch` 会直接报 `DependencyViolation`，这层保护不依赖人工记忆。
 
-⚠ **对齐前的那套 CIDR 已不可回滚**：§10 的「删 7 建 7」是单向操作，旧七段的 ID 已销毁。若要恢复到对齐前的布局，只能再执行一轮同规格的删建（把 `realign_jakarta_dev_cidrs.sh` 里的 `TARGET` 换成旧 CIDR 表），成本仍为零，但会再次改变全部资源 ID —— 届时必须先确认没有任何资源绑定。
+⚠ **对齐前的那套 CIDR 已不可回滚**：§10 的「删 7 建 7」是单向操作，旧七段的 ID 已销毁。若要恢复到对齐前的布局，只能再执行一轮同规格的删建（把 `deploy/ops/realign_jakarta_dev_cidrs.sh` 里的 `TARGET` 换成旧 CIDR 表），成本仍为零，但会再次改变全部资源 ID —— 届时必须先确认没有任何资源绑定。
 
 只撤销 pub / data 四段（保留 app 三段）：把上面 `for` 循环里的 ID 换成 `vsw-k1at4vt7fg8v4umkh9lg3 vsw-k1aqa1ose29nuq92hcvyt vsw-k1a9u8pkwwkc6z0x6g0kc vsw-k1auat3gn6iagfg7by4sz`；但这会破坏 §10 建立的三站点逐槽同构，不建议。
 
@@ -182,7 +182,7 @@ app 三段沿用已建成资源，未动 CIDR；新增四段顺延到 48 / 49 / 
 结论两条：
 
 1. **新加坡表缺 2 行**：`vsw-sg-data-a 10.1.48.0/20`、`vsw-sg-data-b 10.1.64.0/20` 在云上早已存在（可用 IP 4092 = 未挂任何资源），原表只记了 pub/app 四行。已按实测补录进方案表 R16–R17，并给 R12–R15 补上真实 ID 与占用数；E11 的「不含数据库」改为「数据库段已按偏移预留、未挂实例」，避免下一个人误判规划漏项。
-2. **生产两站点偏移逐槽同构**（pub=.0/.1 的 /24、app=16/32 的 /20、data=48/64 的 /20），dev 不同构：app 段占了 `10.2.0.0/20` 这个 pub 槽，pub/data 顺延到 48/49/64/80。vSwitch 的 CIDR 与可用区均不可修改，对齐只能删建；七段当时全部零绑定（可用 IP = 满值，仅系统路由表关联，无网络 ACL），所以**只有那时能免费做**，ACK / RDS 一落地就永久锁死。方案与脚本见 `deploy/realign_jakarta_dev_cidrs.sh`（Step 0 会逐段复校占用，非满即 ABORT）；**已于 2026-09-30 经项目负责人核准执行完毕，全过程见 §10**。
+2. **生产两站点偏移逐槽同构**（pub=.0/.1 的 /24、app=16/32 的 /20、data=48/64 的 /20），dev 不同构：app 段占了 `10.2.0.0/20` 这个 pub 槽，pub/data 顺延到 48/49/64/80。vSwitch 的 CIDR 与可用区均不可修改，对齐只能删建；七段当时全部零绑定（可用 IP = 满值，仅系统路由表关联，无网络 ACL），所以**只有那时能免费做**，ACK / RDS 一落地就永久锁死。方案与脚本见 `deploy/ops/realign_jakarta_dev_cidrs.sh`（Step 0 会逐段复校占用，非满即 ABORT）；**已于 2026-09-30 经项目负责人核准执行完毕，全过程见 §10**。
 
 另记一处命名事实：生产 VPC 实名带 `newapi` 段（`vpc-newapi-mnl-prod` / `vpc-newapi-sg-prod`，形态为 `vpc-newapi-<site>-<env>`）。负责人 2026-09-30 定口径：dev 也按同构形态走，VPC 已改回 `vpc-newapi-jkt-dev`（见 §10）；vSwitch / SG 仍保持 §7 确立的 `vsw-jkt-dev-<role>-<az>` / `sg-jkt-dev-app` 形态，因为生产侧这两类资源的名称本身就不带 `newapi` 段。
 
@@ -194,7 +194,7 @@ app 三段沿用已建成资源，未动 CIDR；新增四段顺延到 48 / 49 / 
 
 ### 10.1 执行时间线（含一次真实故障与恢复）
 
-1. `bash deploy/realign_jakarta_dev_cidrs.sh`：Step 0 逐段复校通过 → 删除 7 段 → 依次建成 `pub-5a`、`pub-5b`、`app-5a`、`app-5b`。
+1. `bash deploy/ops/realign_jakarta_dev_cidrs.sh`：Step 0 逐段复校通过 → 删除 7 段 → 依次建成 `pub-5a`、`pub-5b`、`app-5a`、`app-5b`。
 2. **第 5 段创建时报错中断**：`ERROR: request to vpc.ap-southeast-5.aliyuncs.com failed: read tcp …: read: connection reset by peer`（瞬时网络抖动，非权限/配额/库存问题）；脚本 `set -euo pipefail` 如期在 data-5a 处退出 —— 此时 VPC 处于**四段在线、三段缺失**的半程态。
 3. 恢复方式：**按名称幂等续跑**（先 `DescribeVSwitches --VpcId` 按 `VSwitchName` 查，存在则复用、缺失才建），补齐 `data-5a`、`data-5b`、`app-5c` 并逐段打标签。未产生重复段、未产生半途 CIDR。
 4. `vpc ModifyVpcAttribute --VpcName vpc-newapi-jkt-dev`（纯元数据、零成本）。
@@ -232,7 +232,7 @@ ACK  节点池 vswitch_ids = app 三段（10.2.16.0/20 · 10.2.32.0/20 · 10.2.8
 ALB  公网子网 = pub 两段（10.2.0.0/24 · 10.2.1.0/24）
 ```
 
-方案表同步：sheet「网络与安全规划」R18–R25 + R62 共 17 个单元格按新偏移重写，旧 vsw-id 残留 **0** 处；改前快照 `菲律宾部署方案-v2.3-修订版.xlsx.bak-before-realign`，校验后包内仅 `xl/worksheets/sheet5.xml` 变化、64249 字节。脚本同步：`realign_jakarta_dev_cidrs.sh` 头部标注已执行 + 只读复查命令；`provision_jakarta_dev_net.sh` 的 `VPC_NAME` / `VSWITCHES` / `APP_CIDRS` 全部按新偏移回写，并新增复用分支的 CIDR/AZ 漂移检测（`bash -n` 通过）。
+方案表同步：sheet「网络与安全规划」R18–R25 + R62 共 17 个单元格按新偏移重写，旧 vsw-id 残留 **0** 处；改前快照 `菲律宾部署方案-v2.3-修订版.xlsx.bak-before-realign`，校验后包内仅 `xl/worksheets/sheet5.xml` 变化、64249 字节。脚本同步：`deploy/ops/realign_jakarta_dev_cidrs.sh` 头部标注已执行 + 只读复查命令；`deploy/ops/provision_jakarta_dev_net.sh` 的 `VPC_NAME` / `VSWITCHES` / `APP_CIDRS` 全部按新偏移回写，并新增复用分支的 CIDR/AZ 漂移检测（`bash -n` 通过）。
 
 ## 11. Phase 2 建设（2026-09-30 18:00–18:35 UTC+8，**已产生费用**）
 

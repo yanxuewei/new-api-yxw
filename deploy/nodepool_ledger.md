@@ -2,7 +2,7 @@
 
 > 任务 11（马尼拉）/ 后续任务 24（新加坡）的唯一真源。
 > 配套脚本：`deploy/task11/nodepool_mnl.sh`（幂等，`--dry-run` / `--verify` / `--enable-autoscaling` / `--delete`）
-> 共享 user_data：`deploy/nodepool-userdata-nofile.sh`（马尼拉/新加坡**同一份**，禁止手工点两遍）
+> 共享 user_data：`deploy/ops/nodepool-userdata-nofile.sh`（马尼拉/新加坡**同一份**，禁止手工点两遍）
 > 证据目录：`deploy/logs/task11_<ts>/`
 
 ---
@@ -28,7 +28,7 @@
 | 登录 | `key_pair=newapi-mnl`（无密码） |
 | Worker RAM 角色 | `KubernetesWorkerRole-4f4f9191-362f-4e36-8420-a41375ef1183` |
 | 节点池托管 | **关闭**（`management.enable=false`：无自愈 / 无 CVE 自动修复 / 无 OS 自动升级） |
-| user_data | `nodepool-userdata-nofile.sh`，b64 3600 B，已注入 ✅ |
+| user_data | `deploy/ops/nodepool-userdata-nofile.sh`，b64 3600 B，已注入 ✅ |
 | 标签（ECS 资源） | `site=ph-mnl` · `env=prod` · `track=stable` |
 | 标签（K8s Node） | `site=ph-mnl` · `track=stable`（已写进节点池 `kubernetes_config.labels`，后续扩缩容节点自带） |
 
@@ -161,7 +161,7 @@ please complete the AliyunOOSLifecycleHook4CSRole ramrole authorization
 
 ## 6. 文档回写（2026-09-29，**已完成**）
 
-脚本：`deploy/patch_task11_nodepool.py`（幂等，`--check` / `--apply`，自动 `.bak-np11-<ts>`）。
+脚本：`deploy/ops/patch_task11_nodepool.py`（幂等，`--check` / `--apply`，自动 `.bak-np11-<ts>`）。
 
 覆盖 **5 份文件**：`deploy/docs/阿里云国际站菲律宾部署_详细操作指南-v2.0.md`（52 行）、`…指南.md`（52）、`…指南-ch.md`（52）、`wf2/part2a.md`（33）、`wf2/part5.md`（7）。
 
@@ -377,8 +377,8 @@ aliyun cs DescribeClusterUserKubeconfig --ClusterId <cid> --region ap-southeast-
 - ACK 建节点池只设 ESS 的 `MultiAZPolicy=BALANCE`，**不设独立的 `AzBalance`**。仅前者时，ESS 在**实例创建阶段不做跨区均衡**，会顺着「有库存的交换机」把实例全塞进去 —— 新加坡 desired=2 建出来是 **1a:2 / 1b:0**（先把首位机型换成两区都在售的 `g9ae` 仍全落 1a，证明与机型无关）。
 - 修复与断言（**幂等，两地通用**）：
   ```bash
-  bash deploy/nodepool_azbalance_fix.sh mnl     # 马尼拉 asg-5tsd68ew4u0wutaqk5cy
-  bash deploy/nodepool_azbalance_fix.sh sg      # 新加坡 asg-t4ngzbg7m9u84y59dkxl
+  bash deploy/ops/nodepool_azbalance_fix.sh mnl     # 马尼拉 asg-5tsd68ew4u0wutaqk5cy
+  bash deploy/ops/nodepool_azbalance_fix.sh sg      # 新加坡 asg-t4ngzbg7m9u84y59dkxl
   ```
 - ⚠️ `AzBalance` **`DescribeScalingGroups` 不回读**；且**任何经 ACK 侧改节点池后都要重跑断言**（可能被覆盖）。
 - 马尼拉处置结果：`AzBalance=true` 已断言，分布仍 **6a:2 / 6b:2**（未开 `AutoRebalance`，不动现有节点）。
@@ -398,7 +398,7 @@ aliyun cs DescribeClusterUserKubeconfig --ClusterId <cid> --region ap-southeast-
 ## 11. ✅ 任务 42 收尾（2026-09-30，PDB 已建，本卡全部落地）
 
 - `pdb-new-api-stable`（ns `new-api`，`minAvailable: 70%`，selector `app=new-api,track=stable`）**已创建**（此前因任务 17 未建 ns 而顺延）。当前 `ALLOWED DISRUPTIONS=0` 属预期——匹配 Pod 为 0，stable Deployment（任务 23）上线后随副本数变化。
-- **AzBalance 复断言（2026-09-30）**：两池均重跑 `nodepool_azbalance_fix.sh`（幂等），分布 **6a:2/6b:2**、**1a:1/1b:1**，与 09-29 一致，无漂移。
+- **AzBalance 复断言（2026-09-30）**：两池均重跑 `deploy/ops/nodepool_azbalance_fix.sh`（幂等），分布 **6a:2/6b:2**、**1a:1/1b:1**，与 09-29 一致，无漂移。
 - 配额不变量复核：马尼拉 8×8=64 / 新加坡 12×8=96，均顶满已批配额（64/96，工单 Agree）——`max_size` 不可再调大，除非先提配额。
 
 **⛔ 仍挂账：伸缩压测验证（卡片「验证方法」整段）**——唯一前置：`new-api-stable` Deployment 尚未部署（任务 23/24），无从 scale。
@@ -422,4 +422,4 @@ aliyun cs DescribeClusterUserKubeconfig --ClusterId <cid> --region ap-southeast-
 - ~~**B. 补执行转包年**~~（否决）：基线 4 台走 ECS `ModifyInstanceChargeType`；节点池 `instance_charge_type` 改 PrePaid 让扩容走包年 → 回到坑 7"扩容即预付、缩容不退款"的成本刚性。
 - ~~**C. 混合**~~（否决）：马尼拉基线转包年 + 新加坡保持按量；成本表需分列两种口径。
 
-**文档回写**：v2.0 指南共 **38 处**已按本裁定订正（`deploy/patch_prepaid_to_postpaid_20260930.py`，幂等，含建池 body/配额口径/成本表/坑 7·7b 状态标记），备份 `*.bak-prepaid2postpaid-20260930-180320`；另见 `deploy/docs/付费方式修订记录-2026-09-28.md` 追加的 2026-09-30 节。
+**文档回写**：v2.0 指南共 **38 处**已按本裁定订正（`deploy/ops/patch_prepaid_to_postpaid_20260930.py`，幂等，含建池 body/配额口径/成本表/坑 7·7b 状态标记），备份 `*.bak-prepaid2postpaid-20260930-180320`；另见 `deploy/docs/付费方式修订记录-2026-09-28.md` 追加的 2026-09-30 节。

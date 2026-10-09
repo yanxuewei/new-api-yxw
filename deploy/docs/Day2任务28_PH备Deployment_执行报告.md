@@ -2,7 +2,7 @@
 
 - **判定**：**⚠ 部分交付，不计闭合**。V1/V2/V3 **✅ 实测通过**；**V4 ⛔ 阻塞**（卡片判据要"主站 token 打 SG ALB"，而 SG 侧 ALB/Ingress 属任务 25，实测集群内 `AlbConfig` 与 `Ingress` 均为 0、云侧 ap-southeast-1 ALB 实例数 **0**）。
 - **卡片窗口**：D2 上午 11:00–13:00（单人 2 人时）。**实际执行 13:42–14:00**（顺延，原因：先完成 10-06 F13/F14 裁定回写）。
-- **通道**：`deploy/ack_remote.sh sg`（SG 集群 `ca75829e3492d491d9d434de087913798`，`endpoint_public_access=false`，全部 kubectl 经云助手在 VPC worker `10.1.x` 节点内执行；`ACKCTL_DIR=/tmp/ackctl-sg-t28`）。
+- **通道**：`deploy/lib/ack_remote.sh sg`（SG 集群 `ca75829e3492d491d9d434de087913798`，`endpoint_public_access=false`，全部 kubectl 经云助手在 VPC worker `10.1.x` 节点内执行；`ACKCTL_DIR=/tmp/ackctl-sg-t28`）。
 - **写操作清单**：`Deployment/new-api-ph-standby`、`Service/new-api-ph-standby`（**均为新建**，SG `ns/new-api` 此前实测**无任何业务对象**，不覆盖、不修改既有对象）；另有两个**临时探针 Pod**（`t28-pg`/`t28-pg2`，`postgres:17`，用完即删，实测已删）。**未新增任何云资源、未产生云费用**（跑在既有 2 台按量节点上）。
 - **产物**：`deploy/aliyun/ph/standby-deployment.yaml`、`deploy/task28/standby.sh`、`deploy/task28/bodies/{00-recon,01-recon2,02-mnl-check,03-ingressclass,04-verify-extra}.sh`、`deploy/logs/task28_*`（11 个目录）。
 

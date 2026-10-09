@@ -1,7 +1,7 @@
 #!/bin/bash
 # 12-sg-dsn-verifyfull.sh — 任务 30 缺口②第二步：SG SQL_DSN 切 verify-full 并复验
 # 前置：11-sg-verifyfull.sh 已建 Secret rds-ca-apse6（含 根CA + ap-southeast-6 中间CA）
-# 执行位：bash deploy/ack_remote.sh sg <node_id> /tmp/body12.sh 40
+# 执行位：bash deploy/lib/ack_remote.sh sg <node_id> /tmp/body12.sh 40
 # ⚠ 副作用：备站 Deployment 未来部署时【必须】把 rds-ca-apse6 挂到 /etc/ssl/rds，
 #   否则 sslrootcert 路径不存在 → 连接失败。回滚 = sed 换回 sslmode=require。
 set -uo pipefail

@@ -2,7 +2,7 @@
 #
 # 权威卡片：deploy/docs/阿里云国际站菲律宾部署_详细操作指南-v2.0.md:3419-3553
 # 执行器：  deploy/task23/stable.sh（--precheck / --dryrun / --apply / --verify / --status / --wire-alb / --cleanup）
-# 通道：    deploy/ack_remote.sh（两集群 endpoint_public_access=false，本机无 kubeconfig，
+# 通道：    deploy/lib/ack_remote.sh（两集群 endpoint_public_access=false，本机无 kubeconfig，
 #           全部 kubectl 经云助手在 VPC 节点内执行）
 #
 # 与卡片的差异**只有两处**，都有实测依据（详见 deploy/docs/Day2任务23_stable部署_执行报告.md）：

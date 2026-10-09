@@ -132,7 +132,7 @@
 
 ### 7.5 回收与验证
 
-- `ops-access.sh --gc`：撤销 `sg-mnl-alb-edge` 2 条**过期临时 SSH**（`temp-ssh-exp=1790686620`，fanyan，09-29 到期）→ 现 0 条 ✅
+- `deploy/ops/ops-access.sh --gc`：撤销 `sg-mnl-alb-edge` 2 条**过期临时 SSH**（`temp-ssh-exp=1790686620`，fanyan，09-29 到期）→ 现 0 条 ✅
 - V1 ✅ 4 节点无公网 IP ｜ V3 ✅ 跳板机→RDS 5432/6432/6379 全 BLOCKED ｜ V4 ✅ 跨节点 22/网关 22/5432 blocked，10250 open（规则内）｜ V5 ✅ 业务组零命中
 - V2 ✅（HTTP:80，随任务 19 ALB 切流销项；443 待 G5）
 - 附注（非缺口）：同节点内 pod→节点 primary IP:22 可连（同实例 ENI 间不受 SG 约束）；跨实例一律不可达

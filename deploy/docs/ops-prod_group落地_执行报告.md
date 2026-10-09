@@ -139,7 +139,7 @@ super_group          [20 条托管含 AdministratorAccess] ← yanxuewei，未�
 ## 六、回滚
 
 ```bash
-bash ram_ops_prod_group.sh rollback
+bash deploy/ops/ram_ops_prod_group.sh rollback
 ```
 
 顺序：移除全部成员 → 解绑 3 条策略 → 删组。组有成员时 `DeleteGroup` 会失败，脚本已先清成员。
@@ -152,7 +152,7 @@ bash ram_ops_prod_group.sh rollback
 | --- | --- | --- |
 | 1 | 成员：**暂不加人**（2026-09-25 决定） | 组与策略已就位、护栏已验证。需要时执行 `aliyun ram AddUserToGroup --GroupName ops-prod_group --UserName <u> --region ap-southeast-1` |
 | 2 | 将来加入者**保留 `ops_group` 身份**（已定） | 权限取并集 = 非生产写 + 生产写 = 全量运维。两组并存不冲突 |
-| 3 | MFA 前置 | `enforce-mfa` 生效期间，未绑 MFA 的人登录后除自助动作全 Deny → 进组前先绑 MFA（`bind_mfa.sh`） |
+| 3 | MFA 前置 | `enforce-mfa` 生效期间，未绑 MFA 的人登录后除自助动作全 Deny → 进组前先绑 MFA（`deploy/ops/bind_mfa.sh`） |
 | 4 | 与 IaC 的关系 | 上一轮定「生产变更走 `iac-terraform`」。本组是**有意例外**（应急手工通道），日常仍应优先 IaC；每次手工变更需补回 Terraform |
 | 5 | 无临时提权机制 | 当前为常驻生产写。若需更严，可改为「审批 → 加组 → 到期移除」流程 |
 | 6 | `power_user_group` 空壳 | 仍 0 成员，建议清理或明确用途 |
@@ -162,7 +162,7 @@ bash ram_ops_prod_group.sh rollback
 
 ## 八、脚本
 
-`ram_ops_prod_group.sh`（幂等）
+`deploy/ops/ram_ops_prod_group.sh`（幂等）
 
 | 子命令 | 作用 |
 | --- | --- |

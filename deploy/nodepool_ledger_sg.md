@@ -108,7 +108,7 @@ aliyun ecs AuthorizeSecurityGroup --RegionId ap-southeast-1 --SecurityGroupId sg
 - **修复**：`aliyun ess ModifyScalingGroup --GroupId <asg> --AzBalance true --BalanceMode BalancedBestEffort [--AutoRebalance true]` → 立即生效：ESS 先在 1b 补 1 台（total 2→3），再削掉 1a 一台（3→2），收敛 **1a:1 / 1b:1**。
 - **⚠️ 不可回读**：`AzBalance` **不出现在 `DescribeScalingGroups` 返回里** → 「是否已开启」只能靠实例的可用区分布间接证明，或幂等重设。
 - **⚠️ 会被覆盖**：任何经 ACK 侧（`ModifyClusterNodePool` / 控制台）改节点池后，**必须重跑断言**。
-- **工具**：`deploy/nodepool_azbalance_fix.sh mnl|sg| <region> <asg_id> [--rebalance]`（幂等）
+- **工具**：`deploy/ops/nodepool_azbalance_fix.sh mnl|sg| <region> <asg_id> [--rebalance]`（幂等）
 - **`BalanceMode` 取值**：`BalancedBestEffort`（默认，可用性优先：目标区无货时会在别区补足）/ `BalancedOnly`（均衡优先：目标区创建失败则**整个伸缩活动失败**）。本项目选 **BestEffort** —— 备站扩不出容比短暂失衡危险得多。
 
 ### 坑 B｜机型候选顺序会决定可用区落点（1b 没有 g9i）
@@ -166,8 +166,8 @@ aliyun ecs AuthorizeSecurityGroup --RegionId ap-southeast-1 --SecurityGroupId sg
 | --- | --- |
 | `deploy/task24/ack_sg.sh` | 建集群：`--check` / `--keypair` / `--create` / `--wait` / `--verify` / `--all`（幂等） |
 | `deploy/task24/nodepool_sg.sh` | 节点池薄封装，**复用** `deploy/task11/nodepool_mnl.sh`（两地同一份 user_data / 逻辑） |
-| `deploy/nodepool_azbalance_fix.sh` | ESS `AzBalance` 断言/修复（**两地通用**，改完节点池必跑） |
-| `deploy/nodepool-userdata-nofile.sh` | 节点 user_data（两地共用，2700 B → b64 3600 B） |
+| `deploy/ops/nodepool_azbalance_fix.sh` | ESS `AzBalance` 断言/修复（**两地通用**，改完节点池必跑） |
+| `deploy/ops/nodepool-userdata-nofile.sh` | 节点 user_data（两地共用，2700 B → b64 3600 B） |
 | `deploy/logs/task24_*` | 建集群 / 建池 / 终验原始证据 |
 
 **被拆掉的一次性产物**（仅留档，勿再引用）：`np2a1f97d36e2947899d11a90d32f8ceb9` / `asg-t4njdtaf52bj8lg1gfcz`（跨区失衡的那一版）。

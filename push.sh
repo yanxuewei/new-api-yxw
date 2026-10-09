@@ -548,7 +548,7 @@ acr_precheck() {
         die "创建仓库失败（AutoCreateRepo=false 时须显式建仓）"
       fi
     else
-      warn "  CI/推送前需先建仓：加 --create-repo，或用 deploy/acr_namespace_init.sh / 控制台创建"
+      warn "  CI/推送前需先建仓：加 --create-repo，或用 deploy/ops/acr_namespace_init.sh / 控制台创建"
     fi
     return 0
   fi

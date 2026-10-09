@@ -4,7 +4,7 @@
 #       不是马尼拉生产集群 cd57e40ce9a634c1698c2f5c5e09bd93c。
 # 口径：任务45:3（禁止 staging 落生产集群）+ VPC与vSwitch落地:120（namespace 命名沿用
 #       new-api-staging / new-api-perf，但归属改为非生产集群）。
-# 执行：kubectl apply -f 本文件（经 deploy/ack_remote.sh，雅加达侧当前无公网 kubeconfig）
+# 执行：kubectl apply -f 本文件（经 deploy/lib/ack_remote.sh，雅加达侧当前无公网 kubeconfig）
 ---
 apiVersion: v1
 kind: Namespace

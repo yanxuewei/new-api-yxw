@@ -100,12 +100,12 @@
 | `admin` | `acs:ram::5108890064395960:mfa/newapi-admin-mfa` | VMFA | ✅ 已绑定 |
 | `ops` | `acs:ram::5108890064395960:mfa/newapi-ops-mfa` | VMFA | ✅ 已绑定 |
 
-**后续重复执行 `bind_mfa.sh` 会报 `EntityAlreadyExists.User.MFADevice`** —— 这是幂等提示而非故障。脚本已改造：
+**后续重复执行 `deploy/ops/bind_mfa.sh` 会报 `EntityAlreadyExists.User.MFADevice`** —— 这是幂等提示而非故障。脚本已改造：
 
 | 命令 | 行为 |
 | --- | --- |
-| `bash bind_mfa.sh status` | 查询 admin/ops 绑定状态（新增） |
-| `bash bind_mfa.sh admin <码1> <码2>` | 调用前先查状态；已绑同设备 → 直接报 `[OK] 无需重复绑定`（exit 0） |
+| `bash deploy/ops/bind_mfa.sh status` | 查询 admin/ops 绑定状态（新增） |
+| `bash deploy/ops/bind_mfa.sh admin <码1> <码2>` | 调用前先查状态；已绑同设备 → 直接报 `[OK] 无需重复绑定`（exit 0） |
 | 同上（已绑其他设备） | 报 `[WARN]` + 给出 `UnbindMFADevice` 换绑命令 |
 | 调用瞬间竞态命中 | 捕获 `EntityAlreadyExists` → 回读真实状态报 `[OK]` |
 
@@ -128,7 +128,7 @@ T=677064 窗口:  admin -> 740510   ops -> 024432
 **校验工具**（随时核对手机上的码是否正确）：
 
 ```bash
-bash mfa_check.sh 123456
+bash deploy/ops/mfa_check.sh 123456
 ```
 
 输出会指出该码属于 admin 还是 ops、以及手机时间是否偏移（已用你提交的两码验证：正确识别为 `admin / ops`，偏移 `-240s`）。
@@ -210,7 +210,7 @@ aliyun ram ListAccessKeys --UserName yanxuewei --region ap-southeast-6
 4. **把两个 AK 移入 CI 的 Secret 管理**，从本机明文中删除
 5. 删除 `~/.aliyun/config.json.bak`
 
-注意：第 2 步删除 seed 后 `mfa_check.sh` 将无法工作（它依赖 `virtual_mfa` 段）—— 属预期，校验工具只在绑定期需要。
+注意：第 2 步删除 seed 后 `deploy/ops/mfa_check.sh` 将无法工作（它依赖 `virtual_mfa` 段）—— 属预期，校验工具只在绑定期需要。
 
 ---
 

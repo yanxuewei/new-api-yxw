@@ -1,8 +1,8 @@
 #!/bin/bash
 # task55_staging_apply.sh — 把 deploy/staging/manifests 下发到雅加达非生产集群
 #
-# 通道：deploy/ack_remote.sh jkt（云助手 RunCommand，节点内 kubectl）
-#   ⚠ 前置：ack_remote.sh 当前只认 mnl|sg，需先打上 deploy/staging/ack_remote_jkt.patch
+# 通道：deploy/lib/ack_remote.sh jkt（云助手 RunCommand，节点内 kubectl）
+#   ⚠ 前置：deploy/lib/ack_remote.sh 当前只认 mnl|sg，需先打上 deploy/staging/ack_remote_jkt.patch
 #   ⚠ RunCommand 载荷上限 24KB ⇒ 逐文件下发，不合并
 #
 # usage（WSL Ubuntu）：
@@ -10,7 +10,7 @@
 #   bash deploy/staging/task55_staging_apply.sh --plan         # 渲染 + server-side dry-run
 #   bash deploy/staging/task55_staging_apply.sh --apply        # 按序 apply
 #   bash deploy/staging/task55_staging_apply.sh --verify       # 回读断言
-#   可选：JKT_NODE=i-5ts... （不填由 ack_remote.sh 自动取节点）、IMAGE=repo/tag:rc.N
+#   可选：JKT_NODE=i-5ts... （不填由 deploy/lib/ack_remote.sh 自动取节点）、IMAGE=repo/tag:rc.N
 set -uo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -113,7 +113,7 @@ for f in "${ORDER[@]}"; do
 done
 
 if [ "$MODE" = "--precheck" ]; then
-  step "2 - 集群侧只读体检（经 ack_remote.sh jkt）"
+  step "2 - 集群侧只读体检（经 deploy/lib/ack_remote.sh jkt）"
   cat > /tmp/t55_precheck_body.sh <<EOF
 #!/bin/bash
 set -uo pipefail
@@ -131,7 +131,7 @@ echo "-- 出网与拉镜像（O2 断言点）--"
 kubectl run t55-netcheck --rm -i --restart=Never --image=busybox:1.36 --image-pull-policy=IfNotPresent -- \
   sh -c 'nslookup registry.cn-hangzhou.aliyuncs.com || echo DNS_FAIL' 2>&1 | tail -3 || echo "  PULL/网络未验证 ⇒ 先解 O2"
 EOF
-  bash "$DEPLOY/ack_remote.sh" "$SITE" /tmp/t55_precheck_body.sh $NODE || die "jkt 通道不可用：先打 ack_remote_jkt.patch，或确认集群 2 节点已就绪（jakarta_dev_ledger §11.4）"
+  bash "$DEPLOY/lib/ack_remote.sh" "$SITE" /tmp/t55_precheck_body.sh $NODE || die "jkt 通道不可用：先打 ack_remote_jkt.patch，或确认集群 2 节点已就绪（jakarta_dev_ledger §11.4）"
   exit 0
 fi
 
@@ -152,7 +152,7 @@ apply_one(){
   } > "$body"
   local sz; sz=$(wc -c < "$body")
   [ "$sz" -le 24576 ] || die "$f 载荷 ${sz}B 超 24KB RunCommand 上限 ⇒ 拆分该清单"
-  bash "$DEPLOY/ack_remote.sh" "$SITE" "$body" $NODE || return 1
+  bash "$DEPLOY/lib/ack_remote.sh" "$SITE" "$body" $NODE || return 1
   rm -f "$out" "$body"
 }
 
@@ -204,7 +204,7 @@ kubectl -n \$NS run t55-netdeny --rm -i --restart=never --image=busybox:1.36 -- 
 echo "-- SessionSecret 指纹（与 prod 不得同值）--"
 kubectl -n \$NS get secret new-api-staging-secrets -o jsonpath='{.data.SESSION_SECRET}' | base64 -d | sha256sum | cut -c1-12
 EOF
-    bash "$DEPLOY/ack_remote.sh" "$SITE" /tmp/t55_verify_body.sh $NODE || die "verify 通道失败"
+    bash "$DEPLOY/lib/ack_remote.sh" "$SITE" /tmp/t55_verify_body.sh $NODE || die "verify 通道失败"
     printf '\n人工比对：prod 现为 c5fbe2dbc89b（len 42，两地域同值，属既有偏差 C3）⇒ staging 指纹必须不同\n'
     ;;
   *) die "unknown mode $MODE" ;;

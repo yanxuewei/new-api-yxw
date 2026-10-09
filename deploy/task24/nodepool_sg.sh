@@ -42,7 +42,7 @@ export MIN_NODES="${MIN_NODES:-2}"
 export MAX_NODES="${MAX_NODES:-12}"
 export SITE_TAG="${SITE_TAG:-sg}"                                       # tags site=sg
 export MANAGED="${MANAGED:-0}"
-export USERDATA_SRC="${USERDATA_SRC:-$REPO_ROOT/deploy/nodepool-userdata-nofile.sh}"
+export USERDATA_SRC="${USERDATA_SRC:-$REPO_ROOT/deploy/ops/nodepool-userdata-nofile.sh}"
 export TASK_LABEL="${TASK_LABEL:-任务 24｜新加坡备站节点池}"
 export AZ_A_LABEL="${AZ_A_LABEL:-1a}"
 export AZ_B_LABEL="${AZ_B_LABEL:-1b}"

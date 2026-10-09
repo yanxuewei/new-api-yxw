@@ -282,28 +282,28 @@ curl -sS "https://www.likha.hk/api/log/?request_id=<RID>" -H "Authorization: Bea
 
 本机（办公网）**连不上**：白名单只有 `mnl_app` 两段 + `sg_eip` ⇒ 必须**从集群内**发起。
 
-#### 通道 A（推荐）—— 仓内脚本 `deploy/ck_query.sh`
+#### 通道 A（推荐）—— 仓内脚本 `deploy/ops/ck_query.sh`
 
 已封装：取 Secret 凭据 → 端点口径断言 → 只读白名单 → SQL 经 base64 传递（引号/反引号/中文都不会被 shell 吃掉）→ HTTP 8123 重试 3 次 → 证据落 `deploy/logs/ck_query_<ts>/<site>.log`。
 
 ```bash
-bash deploy/ck_query.sh <mnl|sg|both> [options] "<SQL>"
+bash deploy/ops/ck_query.sh <mnl|sg|both> [options] "<SQL>"
 
 # 常用
-bash deploy/ck_query.sh mnl --show-dsn                      # 只打印脱敏 DSN + 端点口径
-bash deploy/ck_query.sh mnl "SELECT count() FROM logs"      # 默认 TSV（带表头）
-bash deploy/ck_query.sh both --json "SELECT ... LIMIT 5"    # JSONEachRow
-bash deploy/ck_query.sh mnl -f query.sql                    # 从文件读 SQL
-bash deploy/ck_query.sh mnl --print-body "SELECT 1"         # 离线看远端脚本，不连集群
+bash deploy/ops/ck_query.sh mnl --show-dsn                      # 只打印脱敏 DSN + 端点口径
+bash deploy/ops/ck_query.sh mnl "SELECT count() FROM logs"      # 默认 TSV（带表头）
+bash deploy/ops/ck_query.sh both --json "SELECT ... LIMIT 5"    # JSONEachRow
+bash deploy/ops/ck_query.sh mnl -f query.sql                    # 从文件读 SQL
+bash deploy/ops/ck_query.sh mnl --print-body "SELECT 1"         # 离线看远端脚本，不连集群
 
 # options: -f/--file · --json · --raw · --db NAME · --timeout SEC · --show-dsn · --print-body
 ```
 
 - **只读守卫**：首关键字白名单 `SELECT|WITH|SHOW|DESCRIBE|DESC|EXISTS|EXPLAIN`；`ALTER/DELETE/INSERT/...` 在 **HTTP 之前**就被拒（带 `[XX]`、退出码 1）；
-- 它内部复用 `deploy/ack_remote.sh`（云助手 + admin 私网 kubeconfig，在节点内执行）；
+- 它内部复用 `deploy/lib/ack_remote.sh`（云助手 + admin 私网 kubeconfig，在节点内执行）；
 - 退出码：`0` 全 `[OK]` / `1` 出现 `[XX]`/`[!!]` / `2` 用法或环境错误。
 
-> **环境前置**：`/tmp/ackctl-<site>` 若被历史 root 运行创建成 `root:root`，所有走 `ack_remote.sh` 的脚本会写 body 失败（`PermissionError`）。脚本已自动降级到 `/tmp/ackctl-<site>-<user>`；永久修复：`sudo chown -R $USER /tmp/ackctl-mnl /tmp/ackctl-sg`。
+> **环境前置**：`/tmp/ackctl-<site>` 若被历史 root 运行创建成 `root:root`，所有走 `deploy/lib/ack_remote.sh` 的脚本会写 body 失败（`PermissionError`）。脚本已自动降级到 `/tmp/ackctl-<site>-<user>`；永久修复：`sudo chown -R $USER /tmp/ackctl-mnl /tmp/ackctl-sg`。
 
 #### 通道 B（可选）—— 原生 9000 + `clickhouse-client`
 
@@ -440,8 +440,8 @@ ORDER BY created_at DESC LIMIT 50;
 跑法：
 
 ```bash
-bash deploy/ck_query.sh mnl "SELECT count() FROM logs"
-bash deploy/ck_query.sh mnl --json "SELECT fromUnixTimestamp(created_at) ts, model_name, quota FROM logs WHERE type=2 ORDER BY created_at DESC LIMIT 5"
+bash deploy/ops/ck_query.sh mnl "SELECT count() FROM logs"
+bash deploy/ops/ck_query.sh mnl --json "SELECT fromUnixTimestamp(created_at) ts, model_name, quota FROM logs WHERE type=2 ORDER BY created_at DESC LIMIT 5"
 ```
 
 ---
@@ -473,7 +473,7 @@ bash deploy/ck_query.sh mnl --json "SELECT fromUnixTimestamp(created_at) ts, mod
 
 ## 12. 附录：2026-10-08 实测记录
 
-用 `deploy/ck_query.sh` 对主站做的只读验证（证据 `deploy/logs/ck_query_20261008-*/mnl.log`）：
+用 `deploy/ops/ck_query.sh` 对主站做的只读验证（证据 `deploy/logs/ck_query_20261008-*/mnl.log`）：
 
 | 用例 | 结果 |
 |---|---|
@@ -494,7 +494,7 @@ bash deploy/ck_query.sh mnl --json "SELECT fromUnixTimestamp(created_at) ts, mod
 | `deploy/docs/阿里云国际站菲律宾部署_详细操作指南-v2.0.md` | 任务 9（日志库决策 F9）、任务 17（DSN 注入）、任务 29（CK 接线四步）、任务 41（连接预算 I-1/I-2/I-3）、F9/F10/F11/F12 |
 | `deploy/docs/Day1任务9_日志库CK决策_执行报告.md` | 为什么是"马尼拉企业版单 AZ"、三处口径收紧、成本与资源包 |
 | `deploy/docs/Day2任务17_DSN注入_执行报告.md` | 两地 DSN 端点（VPC vs PUBLIC）与鉴权证据 |
-| `deploy/ck_query.sh` | 只读查询脚本（本手册 §7.2 通道 A） |
+| `deploy/ops/ck_query.sh` | 只读查询脚本（本手册 §7.2 通道 A） |
 | `deploy/task17/dsn_verify.sh` | 只读核验：Secret 键清单 + DSN 结构 + 端点口径 + 端到端鉴权 |
 | `deploy/task9/ck_decision.sh` | CK 可购性/成本探针（`verify\|probe\|cost\|create\|check`） |
 | `deploy/docs/风险_ALB健康检查被限流429_2026-10-06.md` | 与"日志库无关但与日志观测相关"的 429 事件（健康检查路径撞全局限流） |

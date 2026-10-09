@@ -300,5 +300,5 @@ python3 lib/aliyun_rpc.py alb ListRules --region ap-southeast-6 --version 2020-0
   ListenerIds.1=lsn-ihrgkty2sjdy8s5p4h
 
 # AlbConfig / Ingress 声明
-bash ack_remote.sh mnl task_alb_url/bodies/27-albconfig-inspect.sh
+bash deploy/lib/ack_remote.sh mnl task_alb_url/bodies/27-albconfig-inspect.sh
 ```

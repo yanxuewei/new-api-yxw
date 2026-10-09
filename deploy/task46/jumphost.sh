@@ -135,7 +135,7 @@ jq -e --arg k "$KEYPAIR" '[.KeyPairs.KeyPair[]?|select(.KeyPairName==$k)]|length
 
 # 入口策略（2026-09-29 修订）：办公/VPN 出口为**动态 IP** → 固定白名单不可维护。
 #   默认 ENABLE_SSH_ALLOWLIST=0：**零入向端口**，入口走 ECS 会话管理（RAM 身份 + 会话录制到 OSS）。
-#   需要原生 ssh/scp 时用 deploy/ops-access.sh --allow-ssh（按需放行当前出口 IP，带过期标记）。
+#   需要原生 ssh/scp 时用 deploy/ops/ops-access.sh --allow-ssh（按需放行当前出口 IP，带过期标记）。
 if [[ "${ENABLE_SSH_ALLOWLIST:-0}" == "1" ]]; then
   if [[ -z "$OFFICE_CIDR" ]]; then
     fail "ENABLE_SSH_ALLOWLIST=1 但未提供 OFFICE_CIDR —— 拒绝（禁止 0.0.0.0/0）"
@@ -150,7 +150,7 @@ if [[ "${ENABLE_SSH_ALLOWLIST:-0}" == "1" ]]; then
   esac
 else
   warn "ENABLE_SSH_ALLOWLIST!=1 → 不建固定 IP 白名单（应对动态出口）；入口走 ECS 会话管理（零入向端口）"
-  say "  临时需要原生 SSH/SCP 时：bash deploy/ops-access.sh --allow-ssh [--ttl-min 120]"
+  say "  临时需要原生 SSH/SCP 时：bash deploy/ops/ops-access.sh --allow-ssh [--ttl-min 120]"
 fi
 [[ "$FAIL" -eq 0 ]] || { say "!! 前置失败，终止"; exit 1; }
 
@@ -469,7 +469,7 @@ if [[ -n "$EDGE_SG" && "$DRY_RUN" != "1" && "$VERIFY_ONLY" != "1" ]]; then
     [[ "${N_ING:-0}" -ge 2 ]] && pass "入向规则已落地（SSH 白名单模式）" || fail "入向规则缺失（跳板机不可 SSH）"
   else
     [[ "${N_ING:-1}" == "0" ]] && pass "零入向端口（入口由会话管理+RAM 身份承担）" \
-      || warn "入向规则数=${N_ING}（期望 0；若为 ops-access.sh 的临时 SSH 规则属预期）"
+      || warn "入向规则数=${N_ING}（期望 0；若为 deploy/ops/ops-access.sh 的临时 SSH 规则属预期）"
   fi
   [[ "${N_OPEN:-1}" == "0" ]] && pass "无 0.0.0.0/0 入向" || fail "存在 0.0.0.0/0 入向（违反最小开放原则）"
 fi
@@ -483,11 +483,11 @@ say "人工运维入口（动态出口 IP 下的推荐方式）："
 say "  ① 主通道 · ECS 会话管理（零入向端口 / RAM 身份 / 会话录制→OSS）："
 say "     控制台 → 云服务器 ECS → 实例 ${JUMP_ID:-<id>} → 远程连接 → 会话管理"
 say "     登录后：newapi-kube && kubectl get pods -n new-api"
-say "     状态复核：bash deploy/ops-access.sh --status"
+say "     状态复核：bash deploy/ops/ops-access.sh --status"
 say "  ② 辅通道 · 按需临时 SSH（仅需原生 ssh/scp 时）："
-say "     bash deploy/ops-access.sh --allow-ssh --ttl-min 120   # 放行本机当前出口 IP 的 22"
+say "     bash deploy/ops/ops-access.sh --allow-ssh --ttl-min 120   # 放行本机当前出口 IP 的 22"
 say "     ssh -i <newapi-mnl.pem> root@${JUMP_PUB:-<公网IP>}"
-say "     bash deploy/ops-access.sh --deny-ssh                  # 用完立即回收"
+say "     bash deploy/ops/ops-access.sh --deny-ssh                  # 用完立即回收"
 say ""
 say "回跑任务 19（经跳板机执行，SSH 模式）："
 say "  JUMP_HOST=<跳板机公网IP> JUMP_KEY=<私钥> OFFICE_CIDR 内的机器上执行："

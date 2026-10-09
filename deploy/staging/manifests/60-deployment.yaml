@@ -1,6 +1,6 @@
 # staging · 60 Deployment（rc 镜像，2 副本）
 #
-# 通道：deploy/ack_remote.sh（雅加达集群侧执行 kubectl）；RunCommand 载荷上限 24KB ⇒ 分文件
+# 通道：deploy/lib/ack_remote.sh（雅加达集群侧执行 kubectl）；RunCommand 载荷上限 24KB ⇒ 分文件
 # 与 prod aliyun/ph/stable-deployment.yaml 的**刻意差异**（其余按 prod 口径收缩）：
 #   ① NODE_TYPE 显式 "slave"。common/init.go:89 是 `!= "slave"` 字符串比较，留空即 master
 #      ⇒ 启动就跑 GORM AutoMigrate（36 表/177 索引）。Day2任务23:67 / Day2任务18 坑 1。

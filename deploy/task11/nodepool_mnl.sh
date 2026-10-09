@@ -47,7 +47,7 @@ MAX_NODES="${MAX_NODES:-8}"      # auto_scaling.max_instances
 SITE_TAG="${SITE_TAG:-ph-mnl}"
 MANAGED="${MANAGED:-0}"          # 1=开启节点池托管（需 ack-node-problem-detector addon）
 REPO_ROOT="${REPO_ROOT:-/mnt/e/git_code/new-api-yxw}"
-USERDATA_SRC="${USERDATA_SRC:-$REPO_ROOT/deploy/nodepool-userdata-nofile.sh}"
+USERDATA_SRC="${USERDATA_SRC:-$REPO_ROOT/deploy/ops/nodepool-userdata-nofile.sh}"
 # 展示用标签（供 task24 复用同一脚本时覆盖，不影响逻辑）
 TASK_LABEL="${TASK_LABEL:-任务 11｜马尼拉节点池}"
 AZ_A_LABEL="${AZ_A_LABEL:-6a}"

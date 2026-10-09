@@ -52,7 +52,7 @@ apply_one() {  # apply_one <site> <stdout|file>
   { echo "kubectl apply -f - <<'YAMLEOF'"; tr -d '\r' < "$manifest"; echo "YAMLEOF"
     echo "kubectl -n new-api delete aliyunlogconfig $(target_oldcrd "$site" "$target") --ignore-not-found"
     echo "sleep 40"; } > "$body"
-  bash "$REPO/deploy/ack_remote.sh" "$site" "$body" || echo "[!] $site/$target 远端执行异常"
+  bash "$REPO/deploy/lib/ack_remote.sh" "$site" "$body" || echo "[!] $site/$target 远端执行异常"
   rm -f "$body"
   echo "-- [$site/$target] SLS 侧复核（global / processors）"
   aliyun sls GetLogtailPipelineConfig --region "$region" --project "k8s-log-$cid" \

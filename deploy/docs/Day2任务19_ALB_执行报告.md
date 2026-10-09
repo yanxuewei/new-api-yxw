@@ -2,7 +2,7 @@
 
 - **卡片**：`deploy/docs/阿里云国际站菲律宾部署_详细操作指南-v2.0.md` §6.3 Day2 任务 19（单人，2 人时）
 - **复核日期**：2026-10-05（只读复核，未做任何写操作）
-- **复核执行环境**：macOS 宿主 + `deploy/ack_remote.sh`（云助手 → worker 内 kubectl，admin 私网 kubeconfig）
+- **复核执行环境**：macOS 宿主 + `deploy/lib/ack_remote.sh`（云助手 → worker 内 kubectl，admin 私网 kubeconfig）
 - **结论**：❌ **任务 19 未完成（部分交付）**。2026-09-30 已落地 ALB 骨架，但 V1b/V2/V3/V4 + HTTP→HTTPS 301 均未达标，且复核发现 3 项新问题（含 1 项阻断）。
   **⚠ 2026-10-06 更新（结论由「4 项未达标」改为「V2 已闭环，余 3 项待 G5 证书」）**：**V2 健康检查已销项**——`Ingress/new-api-verify` 后端经核准切到 `svc/new-api-stable`（任务 23 `--wire-alb`），经 ALB `GET /api/status → 200`、`GET / → 200`，ServerGroup `sgp-tqgwt413t19mum8oa9`（`HealthCheckEnabled=true`）4 条 ENI 全 `Available` 且与 `endpoints/new-api-stable` 逐一对应；阻断项 ③（控制器）10-05 22:08 重装后于 10-06 08:5x 复核确认活着（`lease/alb` `renewTime` 与节点侧 `date -u` 同秒 + `SuccessfullyReconciled`），**但 ③ 的原始判据已收回**（见 §三 更正框）。**仍阻塞**：V1b（`IdleTimeout/RequestTimeout` 60/600）、HTTP→HTTPS 301、V3 443+TLS 策略、V4 证书链/SNI —— 全部依赖 G5 证书（唯一硬阻塞）。证据 `deploy/logs/task23_wire-alb_20261006-082013/`、`deploy/logs/task23_ingress_be_20261006-085337/`。本卡仍**不计入闭合卡数**（V1b/V3/V4 未过）。
 - **2026-10-05 22:12 更新**：3 项新问题中的**阻断项 ③「控制器未运行」已修复**（卸载 stale 记录 + 重装 v3.1.1，调谐恢复，见 §七）；G4 的 NS 已迁阿里云（DCV 可用）；**G5 证书仍为唯一硬阻塞** ⇒ 任务 19 保持"未完成"。
@@ -69,7 +69,7 @@
 
 ## 四、本次为执行通道修复的问题（前置）
 
-- `deploy/ack_remote.sh`：`base64 -w0 <file>` 在 **BSD/macOS** 上不可用（报 `invalid argument`，**静默产出空 Body**，远端只回显 BODY START/END 而无内容）→ 已改为 python3 编码 + 空值校验。此坑之前在 WSL（GNU base64）下不会触发。
+- `deploy/lib/ack_remote.sh`：`base64 -w0 <file>` 在 **BSD/macOS** 上不可用（报 `invalid argument`，**静默产出空 Body**，远端只回显 BODY START/END 而无内容）→ 已改为 python3 编码 + 空值校验。此坑之前在 WSL（GNU base64）下不会触发。
 
 ## 五、待办与解除条件
 
@@ -85,7 +85,7 @@
 ## 六、证据
 
 - 本地只读命令输出（本次）：`aliyun alb ListLoadBalancers / GetLoadBalancerAttribute / ListListeners / GetListenerAttribute / ListServerGroups --ServerGroupIds.1`、`aliyun ram GetRole AliyunServiceRoleForAlb`（已存在，CreateDate `2026-09-30T08:50:51Z`）、`aliyun ecs DescribeSecurityGroups`（`sg-5tsaatp5w68w2st9r1pn sg-mnl-alb-edge`、`sg-5tsj1epvcjjv6jkg3zks sg-mnl-alb`、`sg-5ts4en91lowbzluabchr ALB_SYSTEM_SECURITY_GROUP-alb-1riqckb1h8ezm0y7s9`）。
-- 集群内只读命令（经 `deploy/ack_remote.sh mnl`）：`kubectl get albconfig -A -o wide`、`get ingressclass`、`-n new-api get svc,ingress -o wide`、`describe ingress new-api-verify`、`get endpoints`、`get pods/deploy -A`、`get endpointslice -n kube-system`。
+- 集群内只读命令（经 `deploy/lib/ack_remote.sh mnl`）：`kubectl get albconfig -A -o wide`、`get ingressclass`、`-n new-api get svc,ingress -o wide`、`describe ingress new-api-verify`、`get endpoints`、`get pods/deploy -A`、`get endpointslice -n kube-system`。
 - 脚本产物时间戳：AlbConfig `2026-09-30T10:23:40Z` / ALB `2026-09-30T10:23:46Z`（相差 6s，控制器创建）→ 佐证 09-30 确有控制器在运行，其后消失。
 
 ## 七、2026-10-05 22:06–22:12：阻断项 ③ 修复（卸载 + 重装）+ G4 复测（含云写）
@@ -97,7 +97,7 @@
 
 | 步骤 | 命令/API | 结果 |
 | --- | --- | --- |
-| 快照 | `ack_remote.sh mnl body_snapshot.sh` | AlbConfig/IngressClass/Ingress/Service 全量 YAML → `snapshot_before_reinstall.out` |
+| 快照 | `deploy/lib/ack_remote.sh mnl body_snapshot.sh` | AlbConfig/IngressClass/Ingress/Service 全量 YAML → `snapshot_before_reinstall.out` |
 | 升级（试） | `cs UpgradeClusterAddons v3.1.1` | 任务 `T-6ac3adaeb451ea0108000263` success 但**空操作**（`parameters.can_upgrade=false`，集群内零变化）⇒ 同版本升级不具修复能力 |
 | 卸载 | `cs UnInstallClusterAddons` | 任务 `T-6ac3aed78de2a001030002a9`（22:06 提交）；组件记录移除，`ReconcileAddon` 清理陈旧 headless svc/rolebinding |
 | 重装 | `cs InstallClusterAddons v3.1.1` | 任务 `T-6ac3af17b44e950103000293`，22:08 success，addon 回 `active v3.1.1` |

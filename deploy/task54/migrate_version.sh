@@ -307,4 +307,4 @@ if [ "${T54_BODY_ONLY:-0}" = "1" ]; then
   echo "[i] T54_BODY_ONLY=1，跳过下发"; exit 0
 fi
 
-bash "$HERE/../ack_remote.sh" mnl "$BODY" "$NODE" "$LOOPS"
+bash "$HERE/../lib/ack_remote.sh" mnl "$BODY" "$NODE" "$LOOPS"
