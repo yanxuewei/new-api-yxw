@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 # Day 2 · 任务 19｜马尼拉 ALB + AlbConfig + 健康检查
-# 参考：deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md §6.3（L2263-2358）
+# 参考：deploy/docs/阿里云国际站菲律宾部署_详细操作指南-v2.0.md §6.3（L2263-2358）
 # 渲染件：deploy/aliyun/ph/albconfig.rendered.yaml
 #         deploy/aliyun/ph/placeholder-svc-ingress.yaml
 #
@@ -35,7 +35,7 @@
 #   ✅ vsw-mnl-pub-a vsw-5ts9tgdq1xz3picjgoqyu (6a, free=251) / pub-b vsw-5ts1dygyh2x0daspwny2r (6b, free=252)
 #   ✅ alb-ingress-controller 曾于 2026-09-30 运行并成功建出 ALB；⚠ **2026-10-05 复测：集群内已无任何
 #      alb Pod/Deployment（云端 addon 元数据仍报 active v3.1.1，实际未运行）→ 本卡执行前须先修复组件**，
-#      否则 443 监听/健康检查注解无人 reconcile（详见 deploy/Day2任务19_ALB_执行报告.md §三③）
+#      否则 443 监听/健康检查注解无人 reconcile（详见 deploy/docs/Day2任务19_ALB_执行报告.md §三③）
 #   ✅ AlbConfig/ALB CRD 就绪；⚠ 09-30 已建出 AlbConfig `mnl-alb` + ALB `alb-1riqckb1h8ezm0y7s9`
 #      （Active，双 AZ，访问日志 sls-newapi-mnl/alb_access）+ IngressClass `alb` + 占位 svc/ingress
 #      ⇒ **非干净底座**：脚本 apply 会就地更新既有 AlbConfig（幂等），勿当成"全新建"

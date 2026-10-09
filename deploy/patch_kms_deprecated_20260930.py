@@ -8,7 +8,7 @@
 # ==============================================================================
 import sys, shutil, time
 
-FILE = "deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md"
+FILE = "deploy/docs/阿里云国际站菲律宾部署_详细操作指南-v2.0.md"
 
 PAIRS = [
 ("| 17  | RRSA+KMS+ExternalSecret+ConfigMap/Secret |",
@@ -33,7 +33,7 @@ PAIRS = [
  "私钥本地加密保管（KMS 已弃用；ALB 引用 CAS 证书 ID）；到期告警已建",
  "G0 证书"),
 ("真实值只进**密钥管理服务（凭据管家）**，经 ExternalSecret 注入集群，严禁落盘 Git/CI 变量。",
- "真实值**只进本地加密保管（密码管理器 / 0600 临时文件，用完销毁）**，经**手工 `kubectl create secret`**（`new-api-secret`，helper：`deploy/task17_manual_secret.sh`）注入集群，严禁落盘 Git/CI 变量/镜像。（2026-09-30 裁定弃用 KMS/ExternalSecret，全文见 `deploy/KMS弃用_手工Secret注入_裁定_2026-09-30.md`）",
+ "真实值**只进本地加密保管（密码管理器 / 0600 临时文件，用完销毁）**，经**手工 `kubectl create secret`**（`new-api-secret`，helper：`deploy/task17_manual_secret.sh`）注入集群，严禁落盘 Git/CI 变量/镜像。（2026-09-30 裁定弃用 KMS/ExternalSecret，全文见 `deploy/docs/KMS弃用_手工Secret注入_裁定_2026-09-30.md`）",
  "密钥纪律"),
 ("（密码一律来自本地环境变量/KMS，**不写明文**）",
  "（密码一律来自本地环境变量/密码管理器，**不写明文**；KMS 已弃用）",

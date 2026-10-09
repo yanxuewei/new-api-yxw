@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ==============================================================================
 # 任务 4｜马尼拉 RDS PostgreSQL 高可用版（计费：包年包月）
-#   指南：deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md § Day1 任务 4
+#   指南：deploy/docs/阿里云国际站菲律宾部署_详细操作指南-v2.0.md § Day1 任务 4
 #   基线：pg.x4.2xlarge.2c（16C64G）· HA 主 6a/备 6b · 100G ESSD PL1 · PG 16.0
 #         包年包月 12 个月 · env=prod / site=ph-mnl / project=new-api
 #

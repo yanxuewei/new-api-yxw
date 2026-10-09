@@ -12,7 +12,7 @@
 # 后果：cicd-push 身份下 PushRepository / PullRepository / GetNamespace / ListNamespace 全部 DENY，
 #       CI 推镜像会被 ACR 拒（denied: requested access to the resource is denied）。
 #
-# 用法: bash .deploy/ram_cicd_acr_fix.sh [check|apply|verify|rollback] [版本号]
+# 用法: bash deploy/ram_cicd_acr_fix.sh [check|apply|verify|rollback] [版本号]
 #   check     只读，判定当前默认版本的 ACR ARN
 #   apply     备份现有文档 → 新建策略版本并设为默认（拆 2 条 statement，见下）
 #   verify    回读默认版本逐条判定

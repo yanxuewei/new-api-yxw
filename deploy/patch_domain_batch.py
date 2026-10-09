@@ -18,7 +18,7 @@ REPO = Path(r"E:\git_code\new-api-yxw")
 TARGETS = []
 for pat in [
     "deploy/wf2/*.md", "deploy/aliyun/ph/*.md", "deploy/aliyun/ph/*.yaml",
-    "deploy/*.md", "deploy/*.sh", ".ch-parts/*.md",
+    "deploy/docs/*.md", "deploy/*.sh", ".ch-parts/*.md",
 ]:
     for p in REPO.glob(pat):
         if p.name == "patch_domain_likha_hk.py":

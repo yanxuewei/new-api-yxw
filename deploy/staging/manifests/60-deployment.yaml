@@ -1,0 +1,112 @@
+# staging · 60 Deployment（rc 镜像，2 副本）
+#
+# 通道：deploy/ack_remote.sh（雅加达集群侧执行 kubectl）；RunCommand 载荷上限 24KB ⇒ 分文件
+# 与 prod aliyun/ph/stable-deployment.yaml 的**刻意差异**（其余按 prod 口径收缩）：
+#   ① NODE_TYPE 显式 "slave"。common/init.go:89 是 `!= "slave"` 字符串比较，留空即 master
+#      ⇒ 启动就跑 GORM AutoMigrate（36 表/177 索引）。Day2任务23:67 / Day2任务18 坑 1。
+#   ② MEMORY_CACHE_ENABLED "false"。wf2/part2a.md:481：多副本留 true ⇒ 余额随机跳变；
+#      仅单副本 staging 允许，本清单是 2 副本。
+#   ③ 镜像走 ACR EE **公网端点**（无 `-vpc`）。任务45:E17 实测 EE 的 VPC 端点只接受实例所在地域
+#      的 VPC ⇒ 雅加达无法内网拉马尼拉 EE。需把雅加达 NAT EIP 加进 EE 公网 ACL，
+#      并同步把现网失效的 0.0.0.0/1 + 128.0.0.0/1 收口（O2/C4）。
+#   ④ envFrom 用 staging 独立的 CM/Secret，**不引用** prod 的 new-api-config / new-api-secrets。
+#   ⑤ 无 HPA、无 PDB、无拓扑硬约束：雅加达当前只有 2 台小规格节点，DoNotSchedule 会直接 Pending。
+#   ⑥ SA 必须是 new-api-app：ACR 免密由 managed-aliyun-acr-credential-helper 挂载，
+#      用 default 必 ImagePullBackOff（任务16 坑 5 / Day2任务18）。
+#      ★ 前置：acr-configuration ConfigMap 需把 new-api-staging 纳管（见 41-acr-pull-secret.yaml 注）。
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: new-api-staging
+  namespace: new-api-staging
+  labels:
+    app: new-api
+    project: new-api
+    site: jkt
+    track: staging
+    env: staging
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: new-api
+      track: staging
+  template:
+    metadata:
+      labels:
+        app: new-api
+        project: new-api
+        site: jkt
+        track: staging
+        env: staging
+      annotations:
+        # 占位符由 task55_staging_apply.sh 用集群现值 sha256[:12] 渲染，清单里不写死
+        checksum/config: "__CONFIG_CHECKSUM__"
+        checksum/secret: "__SECRET_CHECKSUM__"
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "3000"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: new-api-app
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: new-api
+          # REPLACE_ME：与 prod 同一 digest（一次构建、多环境复用；git开发-发布-值班规范.md:607）
+          image: acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com/newapi-prod/newapi-master:REPLACE_ME-rc.N
+          imagePullPolicy: IfNotPresent
+          # 与 prod 一致：文件日志走 CLI `-log-dir`，没有 LOG_DIR 环境变量（common/init.go:22）
+          args:
+            - "-log-dir=/data/logs"
+          ports:
+            - name: http
+              containerPort: 3000
+          volumeMounts:
+            - name: app-logs
+              mountPath: /data/logs
+          env:
+            - name: NODE_TYPE
+              value: "slave"
+            - name: MEMORY_CACHE_ENABLED
+              value: "false"
+            # 显式钉死 = CPU limit，避免容器内按宿主机核数起 worker 被 throttle（Day2任务23 坑 2）
+            - name: GOMAXPROCS
+              value: "2"
+          envFrom:
+            - configMapRef:
+                name: new-api-staging-config
+            - secretRef:
+                name: new-api-staging-secrets
+          # ⚠ /api/status 不查 DB/Redis ⇒ 冷 Pod 可能"过早 ready"（prod 同一坑，/readyz 属 G8）。
+          #   staging 反而是更好的验证场：这里先按 prod 口径，G8 合并后两边一起换。
+          startupProbe:
+            httpGet: {path: /api/status, port: http}
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            httpGet: {path: /api/status, port: http}
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: {path: /api/status, port: http}
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 5
+          resources:
+            requests:
+              cpu: "1"
+              memory: 2Gi
+            limits:
+              cpu: "2"
+              memory: 4Gi
+      volumes:
+        - name: app-logs
+          emptyDir:
+            sizeLimit: 1Gi

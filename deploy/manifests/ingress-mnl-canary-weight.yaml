@@ -1,6 +1,6 @@
 # Day 3 · 任务 27｜canary Ingress（权重 5）—— 马尼拉（主站）
 #
-# 权威卡片：deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md（Day 3 · 任务 27）
+# 权威卡片：deploy/docs/阿里云国际站菲律宾部署_详细操作指南-v2.0.md（Day 3 · 任务 27）
 #
 # == 官方约束（2026-10-08 取《在ACK集群中通过ALB Ingress实现灰度发布》）==
 #   · `canary: "true"` 必须写在**灰度件**上；正式件（`new-api-stable-ip`）**不加任何 canary 注解**。
@@ -30,7 +30,7 @@
 #   （回读命令：`aliyun alb ListRules --ListenerIds.1 "$LID" --region ap-southeast-6`，
 #     `--ListenerId` 不是合法参数，CLI 会直接拒。）
 #
-# ⚠ 健康检查：ENI 型后端**必须开启**（Pod IP 会被回收复用，deploy/ALB后端类型选型_Eni-vs-NodePort型.md:91）；
+# ⚠ 健康检查：ENI 型后端**必须开启**（Pod IP 会被回收复用，deploy/docs/ALB后端类型选型_Eni-vs-NodePort型.md:91）；
 #   interval 沿用 20s（2026-10-06 429 处置后的现值，别回 6s）。两件 canary 件同指一个 Service
 #   ⇒ 2026-10-08 实测**确认各派生一个同质组**（两个 `new-api-new-api-canary-80`，Tag 的 ingress_name
 #   分别是 `-weight` / `-header`，配置完全一致：enabled/`/api/status`/GET/20s/3s/2/3/http_2xx，StickySession=false）

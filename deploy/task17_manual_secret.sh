@@ -4,7 +4,7 @@
 #
 # 背景：KMS/凭据管家/ExternalSecret 链路因成本被整体弃用（太贵：凭据管家需购
 #   软件密钥管理实例），改为操作员**手工**在集群内创建/更新 Secret。
-#   裁定与补偿控制全文：`deploy/KMS弃用_手工Secret注入_裁定_2026-09-30.md`
+#   裁定与补偿控制全文：`deploy/docs/KMS弃用_手工Secret注入_裁定_2026-09-30.md`
 #
 # 交付物：在目标集群 `new-api` 命名空间创建/更新 generic Secret `new-api-secret`，
 #   7 个键（与原 RRSA 策略 ARN 的键名严格一致，Pod 侧 secretKeyRef 无需改）：

@@ -9,8 +9,8 @@
   TODO  —— 官网未公开单价，须登录购买页复核
 
 用法：
-    python3 .deploy/gen_cost_table.py            # 打印 markdown
-    python3 .deploy/gen_cost_table.py --apply    # 回写两份方案文档（自动备份）
+    python3 deploy/gen_cost_table.py            # 打印 markdown
+    python3 deploy/gen_cost_table.py --apply    # 回写两份方案文档（自动备份）
 """
 
 import argparse

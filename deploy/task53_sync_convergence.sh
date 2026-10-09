@@ -2,7 +2,7 @@
 # =============================================================================
 # Day 2 · 任务 53｜配置热更新跨节点收敛验证 SYNC_FREQUENCY=30 —— 驱动脚本
 #
-# 权威卡片：deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md（任务 53 卡）
+# 权威卡片：deploy/docs/阿里云国际站菲律宾部署_详细操作指南-v2.0.md（任务 53 卡）
 # 执行体：  deploy/task53_bodies/observer.sh（节点侧观测/写入器，参数由本脚本以 env 头注入）
 # 通道：    deploy/ack_remote.sh <mnl|sg>（两集群 endpoint_public_access=false）
 #           ⚠ 卡片写的 `kubectl --context mnl/sg` 在本环境不可执行。

@@ -5,11 +5,11 @@ patch_task24_sg.py —— 任务 24 / 42 实测结论回写（幂等）
 
 覆盖文件：
   A 组（同源，逐字相同）：
-    deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md
+    deploy/docs/阿里云国际站菲律宾部署_详细操作指南-v2.0.md
     deploy/wf2/part2a.md
   B 组（旧修订，任务 24 段逐字相同）：
-    deploy/阿里云国际站菲律宾部署_详细操作指南.md
-    deploy/阿里云国际站菲律宾部署_详细操作指南-ch.md
+    deploy/docs/阿里云国际站菲律宾部署_详细操作指南.md
+    deploy/docs/阿里云国际站菲律宾部署_详细操作指南-ch.md
 
 用法：
   python3 deploy/patch_task24_sg.py --check     # 只报告命中情况
@@ -176,10 +176,10 @@ def pairs_old():
 def main():
     apply = "--apply" in sys.argv
     targets = [
-        (ROOT / "阿里云国际站菲律宾部署_详细操作指南-v2.0.md", lambda: pairs_v2(A_HEAD_OLD)),
+        (ROOT / "docs" / "阿里云国际站菲律宾部署_详细操作指南-v2.0.md", lambda: pairs_v2(A_HEAD_OLD)),
         (ROOT / "wf2" / "part2a.md", lambda: pairs_v2(A_HEAD_OLD_2A)),
-        (ROOT / "阿里云国际站菲律宾部署_详细操作指南.md", pairs_old),
-        (ROOT / "阿里云国际站菲律宾部署_详细操作指南-ch.md", pairs_old),
+        (ROOT / "docs" / "阿里云国际站菲律宾部署_详细操作指南.md", pairs_old),
+        (ROOT / "docs" / "阿里云国际站菲律宾部署_详细操作指南-ch.md", pairs_old),
     ]
     for path, fn in targets:
         print(patch(path, fn(), apply))

@@ -4,15 +4,15 @@
 patch_g9i_and_sec34.py —— 一次性回写两类修正（幂等：已改则 0 匹配，不重复写）
 
 A. 机型修正：g8i → g9i
-   依据 `.deploy/控制台核实四问_结论.md` §3（2026-09-25 API 实测：g8i 全系未在马尼拉上架；
+   依据 `deploy/docs/控制台核实四问_结论.md` §3（2026-09-25 API 实测：g8i 全系未在马尼拉上架；
    g9i 全系 12 档 6a/6b 均有库存，g9i.2xlarge = 8C32G 与 g8i.2xlarge 同核数同内存比）
    范围：指南（英/中文界面两版）、impl_deploy.md、impl_tech.md、方案 xlsx（仅 v2.1 修订版）
 
 B. 指南 §3.4 认知修正（4 处 + 补实测结论）
-   依据 `.deploy/资源配额申请_执行报告.md` §1.2 / §2.2
+   依据 `deploy/docs/资源配额申请_执行报告.md` §1.2 / §2.2
    general-purpose 族不存在 / --DesireValue（无 d）无 --Version / 地域用 --Dimensions / 状态是 Agree
 
-用法：cd <repo> && python3 .deploy/patch_g9i_and_sec34.py
+用法：cd <repo> && python3 deploy/patch_g9i_and_sec34.py
 备份：.workbuddy/backup/docfix_<ts>/
 """
 import os
@@ -26,11 +26,11 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TS = time.strftime("%Y%m%d_%H%M%S")
 BK = os.path.join(ROOT, ".workbuddy", "backup", f"docfix_{TS}")
 
-GUIDE_A = ".deploy/阿里云国际站菲律宾部署_详细操作指南.md"
-GUIDE_B = ".deploy/阿里云国际站菲律宾部署_详细操作指南-ch.md"
+GUIDE_A = "deploy/docs/阿里云国际站菲律宾部署_详细操作指南.md"
+GUIDE_B = "deploy/docs/阿里云国际站菲律宾部署_详细操作指南-ch.md"
 IMPL_D = "impl_deploy.md"
 IMPL_T = "impl_tech.md"
-XLSX = ".deploy/菲律宾部署方案-v2.1-修订版.xlsx"
+XLSX = "deploy/菲律宾部署方案-v2.1-修订版.xlsx"
 
 # ---------------------------------------------------------------- 机型修正
 MACHINE = [
@@ -146,7 +146,7 @@ aliyun quotas ListQuotaApplications --ProductCode ecs-spec   # 轮询审批状�
      1),
     # 补实测结论
     ("- **坑｜配额是按 region 独立的**。马尼拉批了 ≠ 新加坡有。**改进**：两批工单分开提，**先马尼拉后新加坡但同日发起**。",
-     "- **坑｜配额是按 region 独立的**。马尼拉批了 ≠ 新加坡有。**改进**：两批工单分开提，**先马尼拉后新加坡但同日发起**。\n\n> **2026-09-26 实测闭环**：批次 1/2 的 ECS vCPU 申请（马尼拉 **50 → 64**、新加坡 **50 → 96**）均 **`Agree`**，约 **2 分钟**生效；其余 7 类资源现值已 ≥ 需求、**无需申请**。工单号与原始证据见 `.deploy/资源配额申请_执行报告.md`。",
+     "- **坑｜配额是按 region 独立的**。马尼拉批了 ≠ 新加坡有。**改进**：两批工单分开提，**先马尼拉后新加坡但同日发起**。\n\n> **2026-09-26 实测闭环**：批次 1/2 的 ECS vCPU 申请（马尼拉 **50 → 64**、新加坡 **50 → 96**）均 **`Agree`**，约 **2 分钟**生效；其余 7 类资源现值已 ≥ 需求、**无需申请**。工单号与原始证据见 `deploy/docs/资源配额申请_执行报告.md`。",
      1),
     # 备站容量式口径澄清（原「192 vCPU Pod 需求」维度不清）
     ("备 region 接管上限 = 主站峰值 16 × 1.5 = **24 副本 = 192 vCPU Pod 需求**（按 request 2 vCPU 时是 48 vCPU，按 limit 4 vCPU 时是 96 vCPU）。",

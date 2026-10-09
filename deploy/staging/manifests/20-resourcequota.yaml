@@ -1,0 +1,28 @@
+# staging · 20 ResourceQuota
+#
+# 与 prod 的差异（prod：requests.cpu 48 / requests.memory 96Gi / limits.cpu 64 / limits.memory 128Gi）：
+# staging 用**小规格独立节点池**，配额必须与节点可分配量对齐，否则 Pending 或把 dev 挤走。
+# 容量算法（雅加达 2×u1-c1m2.large 2C4G 或 2×g9i.large 2C8G）：
+#   可分配 ≈ 2 × (1.9 CPU / 3.6 Gi) = 3.8 CPU / 7.2 Gi  （系统 Pod 预留另计）
+#   本 Quota 给 requests 3C，留 ~0.8C 给 kube-system/节点守护；limits 6C 允许 burst 2:1。
+# ★ 马尼拉生产侧配额余量为 0（任务45:E6：企业级按量 vCPU total=64 / prod max 8×8C=64）
+#   ⇒ staging 节点池**在马尼拉落不下**，这不是可选项。
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: new-api-staging-quota
+  namespace: new-api-staging
+spec:
+  hard:
+    requests.cpu: "3"
+    requests.memory: 6Gi
+    limits.cpu: "6"
+    limits.memory: 12Gi
+    pods: "20"
+    services: "10"
+    configmaps: "20"
+    secrets: "20"
+    persistentvolumeclaims: "4"
+    count/deployments.apps: "5"
+    count/jobs.batch: "10"

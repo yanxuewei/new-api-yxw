@@ -1,9 +1,9 @@
 # Day 2 · 任务 18｜master Deployment（只跑 AutoMigrate，不接流量）
 #
-# 配套：deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md「任务 18」
+# 配套：deploy/docs/阿里云国际站菲律宾部署_详细操作指南-v2.0.md「任务 18」
 #       deploy/task18_master_migrate.sh（--precheck / --apply / --verify / --status / --cleanup）
 #
-# 三份与文档卡片的最小差异，全部有实测依据（详见 deploy/Day2任务18_master迁移幂等_执行报告.md）：
+# 三份与文档卡片的最小差异，全部有实测依据（详见 deploy/docs/Day2任务18_master迁移幂等_执行报告.md）：
 #   ① 镜像走 **VPC 内网域名** `acr-newapi-mnl-registry-vpc.ap-southeast-6.cr.aliyuncs.com`
 #      （2026-10-05 18:48 零缓存探针实测 → 18:53 `kubectl apply` 生效 → 18:55 节点清缓存后
 #       Deployment 级复测）：GetInstanceVpcEndpoint → LinkedVpcs 已含本站 VPC

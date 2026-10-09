@@ -1,0 +1,74 @@
+# staging · 62 迁移执行 Job（对 newapi_staging 跑 golang-migrate）
+#
+# 与 prod 的关系（Day2任务18 / Day2任务54）：
+#   prod 仍走 master Pod 的 GORM AutoMigrate（36 表/177 索引，4 次冷启动指纹一致=幂等），
+#   **本卡不改 prod**。staging 是唯一可以引入版本化迁移的环境 ⇒ 任务54 的复验载体。
+#   ⚠ 任务54 当时用马尼拉生产 RDS 上的 `newapi_stage` 库做验证（Day2任务54:29），
+#     与任务45:3 冲突 ⇒ 见隔离方案 §2 C2：雅加达 newapi_staging 建好后在此重跑，再 DROP newapi_stage。
+#
+# 设计口径沿用 aliyun/ph/migrate-job.yaml：
+#   backoffLimit: 0        迁移失败不重试（半途失败 + 自动重试 = 状态更脏）
+#   DSN 取 SQL_DSN_MIGRATE（5432 直连，不经连接池），只有 *_migrate 账号持 DDL
+#   resources 必须显式     本 ns 有 ResourceQuota + LimitRange
+#   与业务 Pod 不同时启动：先 scale 0，或等 staging 首次 bootstrap
+# ★ 镜像同样要走公网 ACR 端点（见 41 / O2）；migrate/migrate 在 Docker Hub，VPC 内不可达，
+#   必须先推到 newapi-prod 命名空间。
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: new-api-staging-migrate
+  namespace: new-api-staging
+  labels:
+    app: new-api-migrate
+    track: migrate
+    env: staging
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app: new-api-migrate
+        track: migrate
+        project: new-api        # 让 30-networkpolicy.yaml 的 egress 白名单对它生效（要连 RDS）
+    spec:
+      restartPolicy: Never
+      serviceAccountName: new-api-app
+      containers:
+        - name: migrate
+          image: acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com/newapi-prod/migrate:v4.19.1
+          args:
+            - "-path=/migrations"
+            - "-database=$(DSN_MIGRATE)"
+            - "up"
+          env:
+            - name: DSN_MIGRATE
+              valueFrom:
+                secretKeyRef:
+                  name: new-api-staging-secrets
+                  key: SQL_DSN_MIGRATE
+          volumeMounts:
+            - name: migrations
+              mountPath: /migrations
+              readOnly: true
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+      volumes:
+        - name: migrations
+          configMap:
+            name: new-api-staging-migrations
+# 前置（下发 migrations/，与 prod 同名不同 ns）：
+#   kubectl -n new-api-staging create configmap new-api-staging-migrations \
+#     --from-file=migrations/ --dry-run=client -o yaml | kubectl apply -f -
+# 用法：
+#   kubectl -n new-api-staging delete job new-api-staging-migrate --ignore-not-found
+#   kubectl -n new-api-staging apply -f 62-migrate-job.yaml
+#   kubectl -n new-api-staging logs job/new-api-staging-migrate -f
+# 复验序列（任务54 口径，脚本 deploy/task54_migrate_version.sh 改 STAGE_DB=newapi_staging）：
+#   version → up → down 1 → up → up(no change)，并在 down3→up 期间开并发 writer + pg_stat_activity 锁采样

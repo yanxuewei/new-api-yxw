@@ -29,10 +29,10 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 D = ROOT / "deploy"
 
-GUIDE_V2 = D / "阿里云国际站菲律宾部署_详细操作指南-v2.0.md"
+GUIDE_V2 = D / "docs" / "阿里云国际站菲律宾部署_详细操作指南-v2.0.md"
 GUIDES_OLD = [
-    D / "阿里云国际站菲律宾部署_详细操作指南.md",
-    D / "阿里云国际站菲律宾部署_详细操作指南-ch.md",
+    D / "docs" / "阿里云国际站菲律宾部署_详细操作指南.md",
+    D / "docs" / "阿里云国际站菲律宾部署_详细操作指南-ch.md",
 ]
 PART2A = D / "wf2" / "part2a.md"
 PART5 = D / "wf2" / "part5.md"

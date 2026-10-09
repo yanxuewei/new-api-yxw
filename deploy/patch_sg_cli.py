@@ -18,9 +18,9 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 TARGETS = [
-    ROOT / "deploy" / "阿里云国际站菲律宾部署_详细操作指南-v2.0.md",
-    ROOT / "deploy" / "阿里云国际站菲律宾部署_详细操作指南.md",
-    ROOT / "deploy" / "阿里云国际站菲律宾部署_详细操作指南-ch.md",
+    ROOT / "deploy" / "docs" / "阿里云国际站菲律宾部署_详细操作指南-v2.0.md",
+    ROOT / "deploy" / "docs" / "阿里云国际站菲律宾部署_详细操作指南.md",
+    ROOT / "deploy" / "docs" / "阿里云国际站菲律宾部署_详细操作指南-ch.md",
     ROOT / "deploy" / "wf2" / "part3a.md",
     ROOT / "deploy" / "aliyun" / "ph" / "security-groups.md",
 ]

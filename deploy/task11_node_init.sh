@@ -1,7 +1,7 @@
 #!/bin/bash
 # =============================================================================
 # 任务 11 Step 3 —— ACK 节点初始化（user_data）
-# 依据：deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md
+# 依据：deploy/docs/阿里云国际站菲律宾部署_详细操作指南-v2.0.md
 #
 # 作用（三段，全部幂等）：
 #   1) nofile=200000：systemd Manager + kubelet/containerd drop-in + limits.d 三处

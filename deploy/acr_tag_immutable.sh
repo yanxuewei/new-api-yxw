@@ -14,7 +14,7 @@
 #   all  → newapi-prod / newapi-pre / newapi-test / newapi-dev
 #   注：pre/test/dev 默认不开（需要反复覆盖 tag 做回归）；显式传 all 才会动。
 #
-# 用法: bash .deploy/acr_tag_immutable.sh [check|apply|verify|all] [prod|all]
+# 用法: bash deploy/acr_tag_immutable.sh [check|apply|verify|all] [prod|all]
 #   check   只读：打印命名空间配置 + 仓库逐条 tag 不可变状态
 #   apply   打开 tag 不可变（幂等：已是 true 则跳过）
 #   verify  回读断言：命名空间默认 true 且范围内每个仓库 true

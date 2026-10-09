@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # acr_namespace_init.sh — 在马尼拉 ACR 实例中创建 new-api 四套环境的命名空间
 #
-# 用法: bash .deploy/acr_namespace_init.sh [check|apply|verify|all]
+# 用法: bash deploy/acr_namespace_init.sh [check|apply|verify|all]
 #   check   只列出缺失/已存在，不写
 #   apply   创建缺失的命名空间（已存在则跳过）
 #   verify  逐个回读核对（含默认仓库类型）
