@@ -2,7 +2,7 @@
 
 > 状态：**业务安全组已提前落地（2026-09-29，早于任务 22 排期 D5）**。
 > 落地脚本：`deploy/task22_sg_bootstrap.sh`（幂等，支持 `--verify` / `--dry-run` / `--office-cidr`）。
-> 依据：`deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md` §8.1 / 任务 22；`deploy/aliyun/ph/security-groups.md`。
+> 依据：`deploy/docs/阿里云国际站菲律宾部署_详细操作指南-v2.0.md` §8.1 / 任务 22；`deploy/aliyun/ph/security-groups.md`。
 > 提前落地的理由：ACK 节点池**必须显式**指定 `scaling_group.security_group_ids`，否则 ACK 会自建 `sg-` 前缀托管组（任务 22 坑 2）；把 ID 先定死可杜绝"改了另一个安全组"的排查陷阱。
 
 ## 1. SG ID 台账（回填 IaC / 节点池）
@@ -99,7 +99,7 @@
 
 ## 7. 2026-10-06 收口（任务 22 出口）——现网 = 24 条规则
 
-> 完整报告：`deploy/Day3任务22_安全组_执行报告.md`；证据：`deploy/logs/task22_20261006-134417/`
+> 完整报告：`deploy/docs/Day3任务22_安全组_执行报告.md`；证据：`deploy/logs/task22_20261006-134417/`
 
 ### 7.1 本次新增（3 条，补卡内"5432 与 6432"缺口）
 

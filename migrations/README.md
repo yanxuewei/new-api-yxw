@@ -1,7 +1,7 @@
 # migrations/ —— 版本化 DDL（golang-migrate）
 
 > 任务 54 产物。**本目录是 schema 的唯一真相来源**；`migrations/` 一旦启用，应用侧 GORM
-> AutoMigrate 必须整体关闭（`MIGRATE_MODE=off`，见 `deploy/G8代码补项_交付说明_2026-09-28.md`）。
+> AutoMigrate 必须整体关闭（`MIGRATE_MODE=off`，见 `deploy/docs/G8代码补项_交付说明_2026-09-28.md`）。
 > 两条路径并存 = 回滚永远不干净（坑 2），所以切换是**一次性**的。
 
 ## 1. 命名与结构

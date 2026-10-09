@@ -24,9 +24,9 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 D = ROOT / "deploy"
 
 GUIDES = [
-    D / "阿里云国际站菲律宾部署_详细操作指南-v2.0.md",
-    D / "阿里云国际站菲律宾部署_详细操作指南.md",
-    D / "阿里云国际站菲律宾部署_详细操作指南-ch.md",
+    D / "docs" / "阿里云国际站菲律宾部署_详细操作指南-v2.0.md",
+    D / "docs" / "阿里云国际站菲律宾部署_详细操作指南.md",
+    D / "docs" / "阿里云国际站菲律宾部署_详细操作指南-ch.md",
 ]
 PARTS = [D / "wf2" / "part2a.md"]
 

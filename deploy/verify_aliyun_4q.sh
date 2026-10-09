@@ -275,7 +275,7 @@ main() {
 
   hr
   echo "原始输出已保存: $OUTDIR/"
-  echo "汇总: 见同目录《控制台核实四问_结论.md》"
+  echo "汇总: 见 docs/《控制台核实四问_结论.md》"
   return $failed
 }
 

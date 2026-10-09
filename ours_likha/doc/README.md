@@ -6,7 +6,7 @@
 |---|---|
 | `ADR-0001-naming-and-internal-visibility.md` | 自研目录命名（下划线）与 `internal` 可见性边界的决策与依据 |
 | （见根目录 `UPSTREAM_CHANGES.md`） | 上游定制清单（权威） |
-| （见 `deploy/Day3任务26_SLS与可观测_执行报告.md`） | SLS 毫秒/纳秒落地全过程与判据 |
+| （见 `deploy/docs/Day3任务26_SLS与可观测_执行报告.md`） | SLS 毫秒/纳秒落地全过程与判据 |
 
 ## 约定
 

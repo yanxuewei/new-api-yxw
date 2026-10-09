@@ -491,10 +491,10 @@ bash deploy/ck_query.sh mnl --json "SELECT fromUnixTimestamp(created_at) ts, mod
 
 | 文档 | 内容 |
 |---|---|
-| `deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md` | 任务 9（日志库决策 F9）、任务 17（DSN 注入）、任务 29（CK 接线四步）、任务 41（连接预算 I-1/I-2/I-3）、F9/F10/F11/F12 |
-| `deploy/Day1任务9_日志库CK决策_执行报告.md` | 为什么是"马尼拉企业版单 AZ"、三处口径收紧、成本与资源包 |
-| `deploy/Day2任务17_DSN注入_执行报告.md` | 两地 DSN 端点（VPC vs PUBLIC）与鉴权证据 |
+| `deploy/docs/阿里云国际站菲律宾部署_详细操作指南-v2.0.md` | 任务 9（日志库决策 F9）、任务 17（DSN 注入）、任务 29（CK 接线四步）、任务 41（连接预算 I-1/I-2/I-3）、F9/F10/F11/F12 |
+| `deploy/docs/Day1任务9_日志库CK决策_执行报告.md` | 为什么是"马尼拉企业版单 AZ"、三处口径收紧、成本与资源包 |
+| `deploy/docs/Day2任务17_DSN注入_执行报告.md` | 两地 DSN 端点（VPC vs PUBLIC）与鉴权证据 |
 | `deploy/ck_query.sh` | 只读查询脚本（本手册 §7.2 通道 A） |
 | `deploy/task17_dsn_verify.sh` | 只读核验：Secret 键清单 + DSN 结构 + 端点口径 + 端到端鉴权 |
 | `deploy/task9_ck_decision.sh` | CK 可购性/成本探针（`verify\|probe\|cost\|create\|check`） |
-| `deploy/风险_ALB健康检查被限流429_2026-10-06.md` | 与"日志库无关但与日志观测相关"的 429 事件（健康检查路径撞全局限流） |
+| `deploy/docs/风险_ALB健康检查被限流429_2026-10-06.md` | 与"日志库无关但与日志观测相关"的 429 事件（健康检查路径撞全局限流） |

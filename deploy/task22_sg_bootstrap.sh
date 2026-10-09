@@ -3,7 +3,7 @@
 # 任务 22 前置｜业务安全组「提前落地」幂等脚本  (v2 — 2026-09-29 修实跑缺陷)
 #   马尼拉：sg-mnl-alb / sg-mnl-app / sg-mnl-db
 #   新加坡：sg-sg-alb / sg-sg-app
-# 依据：deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md §8.1 / 任务 22
+# 依据：deploy/docs/阿里云国际站菲律宾部署_详细操作指南-v2.0.md §8.1 / 任务 22
 #       deploy/aliyun/ph/security-groups.md
 #
 # 用法：

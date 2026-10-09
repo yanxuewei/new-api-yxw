@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 2026-09-30 fanyan 裁定：likha.com 域名被占用 → 正式环境域名改为 www.likha.hk。
-范围：deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md（用户指定仅此 + xlsx v2.3）
+范围：deploy/docs/阿里云国际站菲律宾部署_详细操作指南-v2.0.md（用户指定仅此 + xlsx v2.3）
 规则（按序应用，幂等）：
   R1  api.likha.com  -> www.likha.hk        （生产域名换 host + 换域）
   R2  likha.com      -> likha.hk             （其余全域家族：ops/static/internal/media/通配证书/裸域）
@@ -14,7 +14,7 @@ import sys, shutil, re
 from pathlib import Path
 
 REPO = Path(r"E:\git_code\new-api-yxw")
-TARGET = REPO / "deploy" / "阿里云国际站菲律宾部署_详细操作指南-v2.0.md"
+TARGET = REPO / "deploy" / "docs" / "阿里云国际站菲律宾部署_详细操作指南-v2.0.md"
 
 PAIRS = [
     # tag, old, new

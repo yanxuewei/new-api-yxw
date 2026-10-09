@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 任务 45 方案 A —— 雅加达 dev 环境「零成本网络层」provision（幂等，可重复执行）
-# 依据：deploy/任务45环境隔离修订_2026-09-29.md §5.3 / §7
+# 依据：deploy/docs/任务45环境隔离修订_2026-09-29.md §5.3 / §7
 # 只创建不计费资源：VPC / vSwitch / 安全组 / 出方向 deny 规则。
 # 计费资源（NAT+EIP、ACK 节点池、RDS）需单独授权，见文末「Phase 2 待办」。
 set -euo pipefail

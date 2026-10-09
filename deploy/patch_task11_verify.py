@@ -38,7 +38,7 @@ R_DONE_NEW = """终验 **配置 17/17 + 功能 8/8 PASS**（功能层 2026-09-29
 > 2. 节点可用性**必须用 `kubectl get nodes` 验证**（私网端点用云助手直连，不必等堡垒机），不能只看节点池配置项；
 > 3. 排查口径：**`ping` 通 ≠ 端口通**（ICMP 恰在白名单里）；**`curl (7) timed out` ≠ DNS 问题**（`(6)` 才是解析失败）。
 >
-> 完整证据与 11 个坑（I–S）→ `deploy/nodepool_ledger.md` §7；工单文本 → `deploy/工单_ACK马尼拉控制面安全组缺失.md`。"""
+> 完整证据与 11 个坑（I–S）→ `deploy/nodepool_ledger.md` §7；工单文本 → `deploy/docs/工单_ACK马尼拉控制面安全组缺失.md`。"""
 
 R_LB_OLD = '"labels":[{"key":"track","value":"stable"}],'
 R_LB_NEW = '"labels":[{"key":"site","value":"ph-mnl"},{"key":"track","value":"stable"}],'
@@ -49,9 +49,9 @@ R_T10_NEW = ("**已解除**：`kubectl get ns`（实测 6 个 namespace）、Ter
              "`deploy/nodepool_ledger.md` §8.2。8 EIP 出口复验 / Tair 连通性待验证（节点池已就绪，任务 11 已闭合）。")
 
 GUIDES = [
-    HERE / "阿里云国际站菲律宾部署_详细操作指南-v2.0.md",
-    HERE / "阿里云国际站菲律宾部署_详细操作指南.md",
-    HERE / "阿里云国际站菲律宾部署_详细操作指南-ch.md",
+    HERE / "docs" / "阿里云国际站菲律宾部署_详细操作指南-v2.0.md",
+    HERE / "docs" / "阿里云国际站菲律宾部署_详细操作指南.md",
+    HERE / "docs" / "阿里云国际站菲律宾部署_详细操作指南-ch.md",
 ]
 PART = HERE / "wf2" / "part2a.md"
 

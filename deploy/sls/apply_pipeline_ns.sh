@@ -11,7 +11,7 @@
 #   · app-file  ：源=**日志行内容**（需 new-api 日志格式先带毫秒，见 UPSTREAM_CHANGES.md）
 #                 → processor_regex(抓 log_ts) + processor_gotime(SourceKey=log_ts, SetTime)
 #
-# 关键点速查（四处坑见 deploy/Day3任务26_SLS与可观测_执行报告.md「追加 / 追加 4」）：
+# 关键点速查（四处坑见 deploy/docs/Day3任务26_SLS与可观测_执行报告.md「追加 / 追加 4」）：
 #   · __time__ 恒为秒级；ms 靠 __time_ns_part__（0~999999999）
 #   · 必须「global.EnableTimestampNanosecond + 处理器 SetTime」两件套（源码 gotime/processor_gotime.go）
 #   · 开关只有 pipeline 的 global 能持久化；老式 CRD / UpdateConfig / SD 全被剥键

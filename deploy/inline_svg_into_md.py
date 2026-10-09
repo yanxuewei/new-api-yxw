@@ -32,7 +32,7 @@ import sys
 import shutil
 import time
 
-MD = "用户设置指南.md"
+MD = "docs/用户设置指南.md"
 IMG_RE = re.compile(r"^!\[([^\]]*)\]\((user-guide-images/[^)]+\.svg)\)\s*$")
 TAG_RE = re.compile(r"^<!--\s*svg:(.+?\.svg)\s*-->\s*$")
 SIZE_RE = re.compile(r'\swidth="(\d+)"\s+height="(\d+)"')

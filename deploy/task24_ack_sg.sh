@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # task24_ack_sg.sh —— 任务 24：新加坡 ACK Pro 集群 + 常态 2 节点节点池（备站算力底座）
 # 幂等：--check（只读复核） / --keypair / --create / --wait / --verify / --all
-# 依据：deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md 任务 24（与任务 10/11 同构）
+# 依据：deploy/docs/阿里云国际站菲律宾部署_详细操作指南-v2.0.md 任务 24（与任务 10/11 同构）
 set -uo pipefail
 
 REGION="${REGION:-ap-southeast-1}"

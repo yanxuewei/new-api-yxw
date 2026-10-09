@@ -1,7 +1,7 @@
 # 雅加达 dev 环境台账（newapi-dev / 方案 A）
 
 > 建台账口径与 `eip_ledger.md`、`nodepool_ledger_sg.md` 一致：只记录**实测回读值**，不记录计划值。
-> 依据 `任务45环境隔离修订_2026-09-29.md` §5.3 / §7。执行时间 2026-09-30（UTC+0），操作身份 `ram-user yanxuewei`，账号 `5108890064395960`，全程 WSL Ubuntu。
+> 依据 `deploy/docs/任务45环境隔离修订_2026-09-29.md` §5.3 / §7。执行时间 2026-09-30（UTC+0），操作身份 `ram-user yanxuewei`，账号 `5108890064395960`，全程 WSL Ubuntu。
 
 ## 1. Phase 1 —— 零成本网络层（已建成，实测回读）
 

@@ -49,7 +49,7 @@
 
 ## 三、二次开发纪律（2026-10-09 fanyan 下达，全仓库适用）
 
-> 本纪律与 `deploy/git开发-发布-值班规范.md §4.3「二次开发隔离原则」**同源**——
+> 本纪律与 `deploy/docs/git开发-发布-值班规范.md §4.3「二次开发隔离原则」**同源**——
 > 规范文档是**执行细则**（分支模型 / 发布流程 / 值班），本文件是**定制清单**（改了什么）。
 > 二者口径必须一致：任何一条纪律变更，两处同时改（见本仓「口径同源连带扫」约定）。
 
@@ -89,4 +89,4 @@ make test && go vet ./... && go build ./...
 - 复现补丁：`ours_likha/ops/patches/`
 - 在位校验脚本（静态）：`ours_likha/ops/verify-upstream-changes.sh`
 - 运行时自检（动态，期望 `RESULT=MS_CONFIRMED`）：`go run ./ours_likha/code/cmd/logms-check`
-- 部署侧背景（SLS 毫秒落地）：`deploy/Day3任务26_SLS与可观测_执行报告.md`
+- 部署侧背景（SLS 毫秒落地）：`deploy/docs/Day3任务26_SLS与可观测_执行报告.md`

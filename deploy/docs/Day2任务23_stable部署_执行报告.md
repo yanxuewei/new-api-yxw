@@ -1,6 +1,6 @@
 # Day 2 · 任务 23｜stable Deployment（4 副本 + PDB + HPA + 反亲和）—— 执行报告
 
-- **卡片**：`deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md` §Day2 任务 23（第 3419–3553 行，单人 2 人时，D2 上午 09:00–11:00）
+- **卡片**：`deploy/docs/阿里云国际站菲律宾部署_详细操作指南-v2.0.md` §Day2 任务 23（第 3419–3553 行，单人 2 人时，D2 上午 09:00–11:00）
 - **执行日期**：2026-10-05 23:10–23:31（UTC+8；集群侧 UTC 15:2x）**＋ 2026-10-06 07:42–08:40 补测 V3/V4/ALB 与成本复核 ＋ 08:51–08:54 只读复核（托管组件存活 / 切流现状 / 弹性组件实名）**
 - **执行通道**：`deploy/ack_remote.sh mnl`（云助手 `ecs RunCommand` → VPC worker 节点内 kubectl，admin 私网 kubeconfig；10-05 用 `ACKCTL_DIR=/tmp/ackctl-mnl-t23` 固定目录，**10-06 起执行期文件与节点侧目录一律按 `RUN_ID` 唯一**，原因见 §十一-⑦）
 - **产物**：`deploy/aliyun/ph/stable-deployment.yaml`（清单，含差异说明）、`deploy/task23_stable.sh`（`--precheck/--dryrun/--apply/--verify/--status/--wire-alb/--cleanup`）、`deploy/task23_bodies/03b~04c-*.sh`（V3/V4 补测 body）、`deploy/task23_bodies/05-albctrl-lease.sh`/`06-goatscaler-lease.sh`/`07-ingress-backend.sh`（10-06 08:5x 托管组件存活与切流复核，全只读）、`deploy/task23_price_matrix.py`（单价复核）、`deploy/logs/task23_*_2026100{5,6}-*/`（body.sh + remote.out + 实际下发清单全量留存）
@@ -301,7 +301,7 @@ AZ ap-southeast-6b Running pods = 2
 
 ### 已回写的文档位置
 
-`deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md`：成本量化表（4478 行区）、任务 11 卡「前置」付费方式（2508 行）与坑 7（2623 行）、任务 24 卡头机型（3557 行）、验收清单机型判据（3252 行）；`deploy/核心更新总结_2026-10-05.md` 相应段落。**xlsx 侧只列回改清单，不编辑。**
+`deploy/docs/阿里云国际站菲律宾部署_详细操作指南-v2.0.md`：成本量化表（4478 行区）、任务 11 卡「前置」付费方式（2508 行）与坑 7（2623 行）、任务 24 卡头机型（3557 行）、验收清单机型判据（3252 行）；`deploy/docs/核心更新总结_2026-10-05.md` 相应段落。**xlsx 侧只列回改清单，不编辑。**
 
 ---
 

@@ -1,7 +1,7 @@
 #!/bin/bash
 # task27_canary.sh — Day 3 · 任务 27（canary Deployment + 独立 Service/Ingress，权重 5）执行器
 #
-# 权威卡片：deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md（Day 3 · 任务 27）
+# 权威卡片：deploy/docs/阿里云国际站菲律宾部署_详细操作指南-v2.0.md（Day 3 · 任务 27）
 # 执行通道：deploy/ack_remote.sh mnl —— 两集群 endpoint_public_access=false、本机零 kubeconfig，
 #           所有 kubectl 都要经 ECS RunCommand 在 VPC 节点内跑 ⇒ **连只读 body 也算写类 API，需授权留痕**。
 #
@@ -212,7 +212,7 @@ S_EOF
 
 read -r -d '' BODY_SCHEMA_FP <<'S_EOF' || true
 # 口径与任务 18/23 **逐字同构**（同一 SQL、同一 `SQL_DSN_MIGRATE`、同一临时 psql Pod 形态），
-# 否则指纹值不可比。基线 FP0 来自 deploy/Day2任务23_stable部署_执行报告.md §十。
+# 否则指纹值不可比。基线 FP0 来自 deploy/docs/Day2任务23_stable部署_执行报告.md §十。
 # ⚠ 并发写入面：任务 17 实测 `ops_drill_marker`（任务 30 演练表）会让表数 36→37，
 #   所以 FP0 是**含该表**的口径。若本次读到的表数差 1 且差异只落在这一张表上，
 #   属"他人演练面变化"不是 schema 漂移，必须显式写明而不是含糊判过。

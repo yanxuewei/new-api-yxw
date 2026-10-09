@@ -1,11 +1,11 @@
 # Day 2 · 任务 23｜stable Deployment（4 副本 + PDB + HPA + 反亲和）—— 马尼拉
 #
-# 权威卡片：deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md:3419-3553
+# 权威卡片：deploy/docs/阿里云国际站菲律宾部署_详细操作指南-v2.0.md:3419-3553
 # 执行器：  deploy/task23_stable.sh（--precheck / --dryrun / --apply / --verify / --status / --wire-alb / --cleanup）
 # 通道：    deploy/ack_remote.sh（两集群 endpoint_public_access=false，本机无 kubeconfig，
 #           全部 kubectl 经云助手在 VPC 节点内执行）
 #
-# 与卡片的差异**只有两处**，都有实测依据（详见 deploy/Day2任务23_stable部署_执行报告.md）：
+# 与卡片的差异**只有两处**，都有实测依据（详见 deploy/docs/Day2任务23_stable部署_执行报告.md）：
 #
 #   ① PDB 用 **70%**，不是卡片写的 `minAvailable: 3`。
 #      现网 `pdb-new-api-stable` 早在 2026-09-30 08:54 就按 `70%` 建好，selector 与卡片

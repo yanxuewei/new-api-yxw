@@ -1,6 +1,6 @@
 # Day 2 · 任务 19｜马尼拉 ALB + AlbConfig + 健康检查 —— 执行/复核报告
 
-- **卡片**：`deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md` §6.3 Day2 任务 19（单人，2 人时）
+- **卡片**：`deploy/docs/阿里云国际站菲律宾部署_详细操作指南-v2.0.md` §6.3 Day2 任务 19（单人，2 人时）
 - **复核日期**：2026-10-05（只读复核，未做任何写操作）
 - **复核执行环境**：macOS 宿主 + `deploy/ack_remote.sh`（云助手 → worker 内 kubectl，admin 私网 kubeconfig）
 - **结论**：❌ **任务 19 未完成（部分交付）**。2026-09-30 已落地 ALB 骨架，但 V1b/V2/V3/V4 + HTTP→HTTPS 301 均未达标，且复核发现 3 项新问题（含 1 项阻断）。
@@ -41,7 +41,7 @@
 
 > **判定口径**：`WARN ≠ 通过`；本卡无 FAIL 计数意义（未走脚本收口），以"是否有 443 + 健康检查是否可验收"为准 ⇒ **未完成**。
 
-> **同日更正（2026-10-05 晚，任务 18 执行后）**：上表 V2 的依据「任务 18 未部署」**已过时**——任务 18 已落地并跑通 AutoMigrate（`deploy/Day2任务18_master迁移幂等_执行报告.md`）。但**结论不变**：master Pod 标签刻意用 `app=new-api-migrate`，不命中占位 `Service/new-api-master` 的 selector（实测 `endpoints/new-api-master ready=0`），目的是避开任务 18 卡片「坑 1｜master 迁移期被 ALB 引流」⇒ 占位 Service 依旧 0 后端，V2 健康检查**仍然不可验收**。master 上线不构成 ALB 后端，stable 就绪前该项保持 ❌。**→ 10-06 该项已由任务 23 `--wire-alb` 闭环，见上表。**
+> **同日更正（2026-10-05 晚，任务 18 执行后）**：上表 V2 的依据「任务 18 未部署」**已过时**——任务 18 已落地并跑通 AutoMigrate（`deploy/docs/Day2任务18_master迁移幂等_执行报告.md`）。但**结论不变**：master Pod 标签刻意用 `app=new-api-migrate`，不命中占位 `Service/new-api-master` 的 selector（实测 `endpoints/new-api-master ready=0`），目的是避开任务 18 卡片「坑 1｜master 迁移期被 ALB 引流」⇒ 占位 Service 依旧 0 后端，V2 健康检查**仍然不可验收**。master 上线不构成 ALB 后端，stable 就绪前该项保持 ❌。**→ 10-06 该项已由任务 23 `--wire-alb` 闭环，见上表。**
 
 ## 三、复核新发现（3 项）
 

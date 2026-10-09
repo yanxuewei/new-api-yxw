@@ -1,6 +1,6 @@
 # Day 3 · 任务 27｜canary Deployment + 独立 Service —— 马尼拉（主站）
 #
-# 权威卡片：deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md（Day 3 · 任务 27）
+# 权威卡片：deploy/docs/阿里云国际站菲律宾部署_详细操作指南-v2.0.md（Day 3 · 任务 27）
 # 执行器：  deploy/task27_canary.sh（precheck / dryrun / apply-workload / apply-ingress / verify / rollback-zero / restore）
 # 通道：    deploy/ack_remote.sh mnl（两集群 endpoint_public_access=false，本机零 kubeconfig，
 #           全部 kubectl 经云助手 RunCommand 在 VPC 节点内执行 ⇒ 每次调用都是写类 API，需授权留痕）

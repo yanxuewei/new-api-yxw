@@ -260,7 +260,7 @@ processors:
 
 **为什么是"改源码"而非"扩展"**：GIN 访问日志格式由 `middleware.SetUpLogger` 内的**闭包**决定，无 env / 配置项可覆盖；且该函数还承载**私有脱敏** `redactTaskArtifactAccessQuery`（任务产物访问 query 脱敏），在 `main.go` 侧整体替换会**丢脱敏** ⇒ 确无扩展点，按 fork 纪律第 1 条的例外做**最小化原地补丁**（仅动格式串，不碰控制流、无格式化噪音）。
 
-**fork 二次开发纪律落地**（用户 2026-10-09 下达 5 条；与 `deploy/git开发-发布-值班规范.md §4.3` **同源**，两处口径已对齐）：
+**fork 二次开发纪律落地**（用户 2026-10-09 下达 5 条；与 `deploy/docs/git开发-发布-值班规范.md §4.3` **同源**，两处口径已对齐）：
 - 根目录新增 **`UPSTREAM_CHANGES.md`** —— 定制清单（逐条：上游文件/改动/原因/提交号）+ "不动的地方"反例表
 - 新增 **`ours_likha/{code,ops,doc}`** —— 自研与上游**物理隔离**（含 `ours_likha/.gitattributes` 固化行尾）
 - `ours_likha/ops/patches/0001-log-ms-precision.patch` —— 复现补丁（`git apply` 可直接回放）

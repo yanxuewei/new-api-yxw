@@ -2,7 +2,7 @@
 # =============================================================================
 # Day 2 · 任务 23｜stable Deployment（4 副本 + PDB + HPA + 反亲和）—— 马尼拉
 # -----------------------------------------------------------------------------
-# 权威卡片：deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md:3419-3553
+# 权威卡片：deploy/docs/阿里云国际站菲律宾部署_详细操作指南-v2.0.md:3419-3553
 # 清单：    deploy/aliyun/ph/stable-deployment.yaml
 # 执行通道：deploy/ack_remote.sh（集群 endpoint_public_access=false，本机无 kubeconfig，
 #           全部 kubectl 经云助手在 VPC 节点内执行；ACKCTL_DIR 独立，避免与并行任务串台）

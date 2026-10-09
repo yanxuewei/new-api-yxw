@@ -163,7 +163,7 @@ please complete the AliyunOOSLifecycleHook4CSRole ramrole authorization
 
 脚本：`deploy/patch_task11_nodepool.py`（幂等，`--check` / `--apply`，自动 `.bak-np11-<ts>`）。
 
-覆盖 **5 份文件**：`阿里云国际站菲律宾部署_详细操作指南-v2.0.md`（52 行）、`…指南.md`（52）、`…指南-ch.md`（52）、`wf2/part2a.md`（33）、`wf2/part5.md`（7）。
+覆盖 **5 份文件**：`deploy/docs/阿里云国际站菲律宾部署_详细操作指南-v2.0.md`（52 行）、`…指南.md`（52）、`…指南-ch.md`（52）、`wf2/part2a.md`（33）、`wf2/part5.md`（7）。
 
 修正的 8 类错误（均为**实测**推翻原文）：
 
@@ -192,7 +192,7 @@ please complete the AliyunOOSLifecycleHook4CSRole ramrole authorization
 > 根因：**ACK 创建集群时没有在「控制面 ENI 的安全组」放行 TCP 6443** → 节点与 Pod 都无法直连 API Server ENI。
 > 处置：补齐该安全组规则 + 重跑 bootstrap → **4/4 `Ready`，集群可用**。**全程不需要任何 hosts / EndpointSlice hack。**
 >
-> **📌 工单闭环（2026-09-30）**：就"为何控制面 SG 不放行 6443"提的阿里云工单已答复——**平台侧已修复**（对**新建**集群生效）。存量两集群的 6443 仍由我方 09-29 所补规则承担（`CreateTime` 可证），**勿撤**；SOP 维持（新建集群仍先复核 6443，若观察到 ACK 已自动放行即可降级该步骤）。详见 `deploy/工单_ACK马尼拉控制面安全组缺失.md` §7。
+> **📌 工单闭环（2026-09-30）**：就"为何控制面 SG 不放行 6443"提的阿里云工单已答复——**平台侧已修复**（对**新建**集群生效）。存量两集群的 6443 仍由我方 09-29 所补规则承担（`CreateTime` 可证），**勿撤**；SOP 维持（新建集群仍先复核 6443，若观察到 ACK 已自动放行即可降级该步骤）。详见 `deploy/docs/工单_ACK马尼拉控制面安全组缺失.md` §7。
 
 ### 7.1 现象：控制台「失败 2」是失真显示
 
@@ -298,7 +298,7 @@ aliyun ecs AuthorizeSecurityGroup --RegionId ap-southeast-6 \
 
 | # | 项 | 说明 |
 |---|---|---|
-| 1 | **手工补的安全组规则** | 该规则由我方添加，ACK 未建。若 ACK 后续运维重置该 SG，需重加 → **建议提工单要求 ACK 侧补齐**（文本见 `deploy/工单_ACK马尼拉控制面安全组缺失.md`） |
+| 1 | **手工补的安全组规则** | 该规则由我方添加，ACK 未建。若 ACK 后续运维重置该 SG，需重加 → **建议提工单要求 ACK 侧补齐**（文本见 `deploy/docs/工单_ACK马尼拉控制面安全组缺失.md`） |
 | 2 | 源放宽到 `10.0.0.0/16` | 覆盖节点 / Pod / SLB 全部可能源；API Server 仍需 mTLS 客户端证书，风险可控。如需收紧可改为「节点 SG + Pod vSwitch 段」 |
 | 3 | 新加坡同构集群（任务 24） | **建集群后第一件事就是核对控制面 SG 是否有 6443 规则**，否则会原样复现 |
 
@@ -361,7 +361,7 @@ aliyun cs DescribeClusterUserKubeconfig --ClusterId <cid> --region ap-southeast-
 
 ## 9. 待办
 
-- [ ] **提交工单**：要求 ACK 侧补齐控制面安全组 6443 规则（文本 → `deploy/工单_ACK马尼拉控制面安全组缺失.md`）
+- [ ] **提交工单**：要求 ACK 侧补齐控制面安全组 6443 规则（文本 → `deploy/docs/工单_ACK马尼拉控制面安全组缺失.md`）
 - [x] ~~**任务 13**：集群级「节点伸缩」方案配置~~ → **编号更正：文档里「节点伸缩」是任务 42**（任务 13 是 RDS 账号最小化，早已完成）。任务 42 已执行，见 §10
 - [ ] **任务 22 关联**：`sg-mnl-app` 的 3000 端口入向规则已就位（组引用 ALB）；节点侧无需再加
 - [ ] 8 EIP 出口复验、Tair 连通性验证 → 节点已就绪，**现在就能做**（云助手）
@@ -422,4 +422,4 @@ aliyun cs DescribeClusterUserKubeconfig --ClusterId <cid> --region ap-southeast-
 - ~~**B. 补执行转包年**~~（否决）：基线 4 台走 ECS `ModifyInstanceChargeType`；节点池 `instance_charge_type` 改 PrePaid 让扩容走包年 → 回到坑 7"扩容即预付、缩容不退款"的成本刚性。
 - ~~**C. 混合**~~（否决）：马尼拉基线转包年 + 新加坡保持按量；成本表需分列两种口径。
 
-**文档回写**：v2.0 指南共 **38 处**已按本裁定订正（`deploy/patch_prepaid_to_postpaid_20260930.py`，幂等，含建池 body/配额口径/成本表/坑 7·7b 状态标记），备份 `*.bak-prepaid2postpaid-20260930-180320`；另见 `付费方式修订记录-2026-09-28.md` 追加的 2026-09-30 节。
+**文档回写**：v2.0 指南共 **38 处**已按本裁定订正（`deploy/patch_prepaid_to_postpaid_20260930.py`，幂等，含建池 body/配额口径/成本表/坑 7·7b 状态标记），备份 `*.bak-prepaid2postpaid-20260930-180320`；另见 `deploy/docs/付费方式修订记录-2026-09-28.md` 追加的 2026-09-30 节。

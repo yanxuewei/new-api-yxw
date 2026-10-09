@@ -1,6 +1,6 @@
 # Day 2 · 任务 18｜master Deployment 跑通 AutoMigrate，连跑两次验幂等 —— 执行报告
 
-- **卡片**：`deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md` §Day2 任务 18（单人，2 人时，13:30–15:30）
+- **卡片**：`deploy/docs/阿里云国际站菲律宾部署_详细操作指南-v2.0.md` §Day2 任务 18（单人，2 人时，13:30–15:30）
 - **执行日期**：2026-10-05
 - **执行通道**：`deploy/ack_remote.sh mnl`（云助手 `ecs RunCommand` → worker 节点内 kubectl，admin 私网 kubeconfig；`ACKCTL_DIR=/tmp/ackctl-mnl-t18` 与并行的任务 17 会话隔离）
 - **产物**：`deploy/aliyun/ph/master-deployment.yaml`、`deploy/task18_master_migrate.sh`（`--precheck/--apply/--verify/--status/--cleanup`）、`deploy/logs/task18_*_20261005-*/`（body.sh + remote.out 全量留存）

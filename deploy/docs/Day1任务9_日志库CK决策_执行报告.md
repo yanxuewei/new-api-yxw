@@ -1,7 +1,7 @@
 # Day 1 · 任务 9｜日志库 ClickHouse 决策（马尼拉企业版单 AZ）— 执行报告
 
 - 日期：2026-09-29 21:35–21:50（GMT+8）
-- 依据：`deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md` 任务 9（F9）
+- 依据：`deploy/docs/阿里云国际站菲律宾部署_详细操作指南-v2.0.md` 任务 9（F9）
 - 状态：**决策复核完成 ✅ · 云资源零创建**
 - 脚本：`deploy/task9_ck_decision.sh`（`verify|probe|cost|create|check|all`）
 
@@ -75,8 +75,8 @@ F9 决策「日志库收口马尼拉 CK 企业版单 AZ」**立论成立**，但
 | 文件 | 说明 |
 |---|---|
 | `deploy/task9_ck_decision.sh` | 5 步脚本：`verify`（只读复核）· `probe`（零风险探针，末尾强制复核未创建）· `cost [CCU]`（成本换算）· `create --yes`（真实创建，**默认拒绝执行**）· `check`（建后验收清单）· `all`。日志落 `deploy/logs/task9_ck_*.log` |
-| `deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md` | 本轮修订 **10 处**（见下） |
-| `deploy/Day1任务9_日志库CK决策_执行报告.md` | 本文件 |
+| `deploy/docs/阿里云国际站菲律宾部署_详细操作指南-v2.0.md` | 本轮修订 **10 处**（见下） |
+| `deploy/docs/Day1任务9_日志库CK决策_执行报告.md` | 本文件 |
 
 **指南修订清单（10 处）**
 

@@ -141,7 +141,7 @@ aliyun cs ModifyClusterNodePool --ClusterId ${ACK_MNL_ID} --NodepoolId ${NP_MNL}
 
 ### 命令速查
 
-> 以下均为 **v2.0 已实测验证**的命令（配额/机型部分来自 `.deploy/资源配额申请_执行报告.md`、`控制台核实四问_结论.md` 的 2026-09-25/26 实跑结果），与旧版截图/文档不一致处以本速查为准。
+> 以下均为 **v2.0 已实测验证**的命令（配额/机型部分来自 `deploy/docs/资源配额申请_执行报告.md`、`deploy/docs/控制台核实四问_结论.md` 的 2026-09-25/26 实跑结果），与旧版截图/文档不一致处以本速查为准。
 
 ```bash
 # ---- 身份与配额 ----
@@ -247,8 +247,8 @@ kubectl -n new-api get events --sort-by=.lastTimestamp | tail -20
 | --- | --- | --- |
 | 部署清单与计划 | `菲律宾部署方案-v2.1-修订版.xlsx`（7 Sheet 全量解析） | 任务编号、日期、人员、门禁、里程碑、风险、裁剪预案均以该文件为准 |
 | 架构依据 | `impl_deploy.md` 7.1/7.1.1/7.2/7.4.1–7.4.5/7.8/7.9/7.10、8.1–8.6 | 章节号在正文中直接引用 |
-| 评审依据 | `部署方案评审-2026-09-23.md`（v2.1 修订来源） | 21 项差异与其修订要点对应 |
-| 落地执行报告（`.deploy/` 实测） | `VPC与vSwitch落地_执行报告.md`、`OSS_Bucket落地_执行报告.md`、`RAM最小权限落地_执行报告.md`、`资源配额申请_执行报告.md`、`ActionTrail审计与备份桶_落地报告.md` 等 | 含**真实资源 ID 与工单号**：配额工单马尼拉 `b140e263-6857-467a-b245-58d5a5db4bde`（50 → 64，Agree）、新加坡 `e117bf2b-e8e5-4391-817c-86ab71165838`（50 → 96，Agree）；CLI 参数修正（`--DesireValue`、`--Dimensions.1`、状态 `Agree`）均以这些报告为准 |
+| 评审依据 | `deploy/docs/部署方案评审-2026-09-23.md`（v2.1 修订来源） | 21 项差异与其修订要点对应 |
+| 落地执行报告（`deploy/` 实测） | `deploy/docs/VPC与vSwitch落地_执行报告.md`、`deploy/docs/OSS_Bucket落地_执行报告.md`、`deploy/docs/RAM最小权限落地_执行报告.md`、`deploy/docs/资源配额申请_执行报告.md`、`deploy/docs/ActionTrail审计与备份桶_落地报告.md` 等 | 含**真实资源 ID 与工单号**：配额工单马尼拉 `b140e263-6857-467a-b245-58d5a5db4bde`（50 → 64，Agree）、新加坡 `e117bf2b-e8e5-4391-817c-86ab71165838`（50 → 96，Agree）；CLI 参数修正（`--DesireValue`、`--Dimensions.1`、状态 `Agree`）均以这些报告为准 |
 | 代码事实（本仓库实测） | `common/init.go:50-55`（SESSION_SECRET 默认值 Fatal）、`common/init.go:88-89`（`NODE_TYPE != "slave"` 判 master）、`common/init.go:110`（SYNC_FREQUENCY 默认 60）、`common/init.go:123-125`（限流默认 360/180s）、`model/main.go:145`（主库不支持 CK）、`model/main.go:212/259`（`SQL_MAX_OPEN_CONNS` 默认 **1000**）、`router/api-router.go:26`（唯一 `GET /api/status`） | 全仓 grep 确认 `/healthz`、`/readyz`、`/metrics` **未注册** |
 | 云产品能力 | 阿里云国际站帮助中心中文文档（alibabacloud.com/help）+ **API/CLI 实测**，核对时间 **2026-09-25 / 09-26** | 21 项差异（§1）；产品可用性列表会变，动手前一律 `【控制台核实】` |
 

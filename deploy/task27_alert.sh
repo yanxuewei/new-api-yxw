@@ -1,7 +1,7 @@
 #!/bin/bash
 # task27_alert.sh — Day 3 · 任务 27 V6 出口「canary 独立 5xx 告警」的 SLS 控制面执行器
 #
-# 卡片：deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md
+# 卡片：deploy/docs/阿里云国际站菲律宾部署_详细操作指南-v2.0.md
 #   任务 27 V6 = "能按 track 分别统计 5xx"；Day 3 出口清单要求"canary 独立告警（5xx>3 兜底）已建"。
 #   现网取证（2026-10-08）：`sls-newapi-mnl/app-stdout` 的 `content` **无 SQL 索引** ⇒ 按状态码聚合在
 #   应用日志侧写不出来 ⇒ 5xx 门改挂 **`sls-newapi-mnl/alb_access`**（有 `status`/`slb_pool_name` 字段索引）。

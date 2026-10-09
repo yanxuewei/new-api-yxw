@@ -13,7 +13,7 @@
 | 卡片前置 | 实况 | 证据 |
 | --- | --- | --- |
 | 任务 24 SG 集群就绪、**常态 2 节点** | ✅ 2 节点，且**分属 1a/1b**：`ap-southeast-1.10.1.19.103`=**1a**/`ecs.g9ae.2xlarge`、`…10.1.38.113`=**1b**/`ecs.g8ine.2xlarge`；allocatable 各 **7910m / ~29.5Gi**；已请求 1a `3310m/4626Mi`、1b `1400m/2204Mi` ⇒ 单 AZ 放 1 副本（requests 2C/4Gi）绰绰有余 | `logs/task28_recon2_20261006-134525/`、`logs/task28_precheck_20261006-135341/` P4 |
-| 机型口径 | ⚠ **卡片原写 g9i.2xlarge 与实际不符**（两台既非同类、也不是 g9i）⇒ 已在指南卡片前置段落落 10-06 纠偏；成本口径按 `task23_price_matrix.py` 的 1a 三机型含盘包月（g9i 302.10 / g9ae 332.32 / g8ine 362.44） | 同上 + `deploy/Day2任务23_stable部署_执行报告.md` |
+| 机型口径 | ⚠ **卡片原写 g9i.2xlarge 与实际不符**（两台既非同类、也不是 g9i）⇒ 已在指南卡片前置段落落 10-06 纠偏；成本口径按 `task23_price_matrix.py` 的 1a 三机型含盘包月（g9i 302.10 / g9ae 332.32 / g8ine 362.44） | 同上 + `deploy/docs/Day2任务23_stable部署_执行报告.md` |
 | 任务 22 跨区 DSN 路径已定 | ✅ 现网 sg `SQL_DSN` 实测 = `postgres://newapi_sg:***@pgm-5tstdhko64x2c01wpub…:6432/newapi?sslmode=verify-full&sslrootcert=/etc/ssl/rds/ca.crt`（**verify-full 已落**，卡片步骤 2 的"sg 现为 require"**已过时**）；CA 由 `secret/rds-ca-apse6` 提供 | `logs/task28_recon_20261006-134247/` §5（值已脱敏）、`logs/task28_precheck_…-135341/` P1 |
 | 单地域镜像源，两集群同仓同 tag | ✅ 同仓同 tag 同 **digest**：`…newapi-master:20260928-26ac63233`，`imageID=sha256:38fd74feac699a7926378f5bed197fd881409d58dddd2ab56f550ecdd72282b3`（两 Pod 一致），与马尼拉 stable 同 tag | `logs/task28_verifyextra_20261006-135749/` ⑤ |
 | **两地域 `SESSION_SECRET` 必须一致** | ✅ **实测同指纹**：mnl `sha256[:12]=c5fbe2dbc89b`（len 42）、sg `c5fbe2dbc89b`（len 42）⇒ 保管目录单真源生效。⚠ `SESSION_SECRET_OLD` **sg 缺失**（mnl 有，`6b9e5430519c`）⇒ 属任务 17 残留，**不影响本卡**（备站只用现役密钥），但双密钥过渡（任务 55 R40）在 sg 侧尚未武装 | `logs/task28_mnlcheck_20261006-134548/` §A、`logs/task28_recon_…-134247/` §5c |
