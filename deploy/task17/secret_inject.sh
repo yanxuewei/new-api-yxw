@@ -17,7 +17,11 @@
 #           rds-ca-apse6，备站 Deployment 必须挂载该 Secret，否则建连直接失败）
 #           补 SQL_DSN_MIGRATE（2026-10-06 用户核准）：**公网串 5432 直连**，同 verify-full —— 迁移是
 #           DDL，不经 6432 池（任务 41 的兼容性风险），接管态才能在 sg 跑 migrate Job
-#           REDIS 缺 SG Tair，暂不建（本脚本对 sg **不写**该键，非遗漏）；LOG_SQL_DSN 必须走 -public 端点（指南任务 17 坑 12）
+#           REDIS_CONN_STRING（**2026-10-09 起 sg 也写该键**）：值取 deploy/.env 的 `REDIS_CONN_STRING_SG`
+#           （SG Tair `r-gs5ltv3m4i3655besh`，见指南任务 29 执行记录 4/5）。⚠ 口令含保留字符必须
+#           **百分号转义**（`#` → `%23`），否则 go-redis `url.Parse` 把 `#` 当 fragment 起点，
+#           报 `invalid port ":…" after host` 并 FatalLog 退出（任务 29 坑 10，2026-10-09 实踩）；
+#           LOG_SQL_DSN 必须走 -public 端点（指南任务 17 坑 12）
 #   SESSION_SECRET / SESSION_SECRET_OLD 两地必须读同一个保管文件、取同一个值（任务 55 R40：
 #   若各造一个随机值，GTM 接管到备站时全部会话验签失败 ⇒ 全员掉线）
 # Secret 名：<ns>/new-api-secrets；ConfigMap 补 LOG_SQL_CLICKHOUSE_TTL_DAYS=90
@@ -62,6 +66,12 @@ collect_sg() {
   case "$LOG_DSN" in
     *-public.clickhouseserver.*) ;;
     *) die "sg LOG_SQL_DSN 端点不是 -public（跨区必然不可达）：$(printf %s "$LOG_DSN" | sed -E 's#://[^@]*@#://<REDACTED>@#')" ;;
+  esac
+  # SG Tair 连接串（2026-10-09 起 sg 写该键）：来源 deploy/.env 的 REDIS_CONN_STRING_SG
+  REDIS_SG="$(grep '^REDIS_CONN_STRING_SG=' "$ENVFILE" | head -1 | cut -d= -f2- | tr -d '\r\n')"
+  [ -n "$REDIS_SG" ] || die "缺 REDIS_CONN_STRING_SG（$ENVFILE）—— SG Tair 已于 2026-10-09 建成（任务 29），该键必须注入"
+  case "$REDIS_SG" in
+    *'#'*) die "REDIS_CONN_STRING_SG 含未转义的 '#'：go-redis 会把 # 当 fragment 起点 ⇒ 口令必须写成 %23（任务 29 坑 10）" ;;
   esac
   if [ -s "$VAULT/SESSION_SECRET" ]; then SS="$(tr -d '\r\n' < "$VAULT/SESSION_SECRET")"; else collect_mnl >/dev/null 2>&1 || true; SS="$(tr -d '\r\n' < "$VAULT/SESSION_SECRET" 2>/dev/null)"; fi
   if [ -s "$VAULT/SESSION_SECRET_OLD" ]; then SS_OLD="$(tr -d '\r\n' < "$VAULT/SESSION_SECRET_OLD")"; else collect_mnl >/dev/null 2>&1 || true; SS_OLD="$(tr -d '\r\n' < "$VAULT/SESSION_SECRET_OLD" 2>/dev/null)"; fi
@@ -110,8 +120,9 @@ kubectl -n new-api create secret generic new-api-secrets --dry-run=client -o yam
   --from-literal="SQL_DSN_MIGRATE=$SQL_DSN_MIGRATE" \
   --from-literal="SESSION_SECRET=$SS" \
   --from-literal="SESSION_SECRET_OLD=$SS_OLD" \
+  --from-literal="REDIS_CONN_STRING=$REDIS_SG" \
   --from-literal="LOG_SQL_DSN=$LOG_DSN" \
-  | kubectl apply -f - >/dev/null && echo "secret applied (sg, 5 keys — REDIS 等 SG Tair / PAYMENT·TLS 待补；SESSION_SECRET·_OLD 与 mnl 同值)"
+  | kubectl apply -f - >/dev/null && echo "secret applied (sg, 6 keys — PAYMENT_PRIVATE_KEY / TLS_WILDCARD 待补；SESSION_SECRET·_OLD 与 mnl 同值)"
 kubectl -n new-api patch configmap new-api-config --type merge -p '{"data":{"LOG_SQL_CLICKHOUSE_TTL_DAYS":"90"}}' && echo "configmap patched (TTL=90)"
 kubectl -n new-api get secret new-api-secrets -o json | python3 -c "import sys,json;print(chr(10).join('  key: '+k for k in sorted(json.load(sys.stdin)['data'])))"
 echo "SG-SECRET-DONE"
@@ -149,7 +160,7 @@ case "$MODE" in
     fi
     shred -u /tmp/t17_secret_body.sh 2>/dev/null || rm -f /tmp/t17_secret_body.sh
     ok "注入完成（site=$SITE，含密码的 body 已销毁）"
-    say "待补：PAYMENT_PRIVATE_KEY（支付私钥）、TLS_WILDCARD（G5 证书）、SG REDIS（SG Tair 未建，本脚本不写该键）"
+    say "待补：PAYMENT_PRIVATE_KEY（支付私钥）、TLS_WILDCARD（G5 证书）；SG REDIS_CONN_STRING 自 2026-10-09 起已由本脚本写入（值取 deploy/.env 的 REDIS_CONN_STRING_SG）"
     ;;
   *) die "未知参数：$MODE（--check | --apply [mnl|sg|both]）" ;;
 esac
