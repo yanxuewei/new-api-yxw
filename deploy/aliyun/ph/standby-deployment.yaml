@@ -47,11 +47,13 @@
 #     2 节点分属 **1a / 1b**（`ap-southeast-1.10.1.19.103`=1a g9ae，`…10.1.38.113`=1b g8ine）
 #     ⇒ 2 副本各 1 台可放置；节点不足时宁可 Pending 也不单 AZ 全灭。
 #   * 不进主站 ALB 后端（卡片坑 5）：本卡只建 ClusterIP Service，挂 GTM 备地址池属任务 25。
-#   * 无 Redis：sg 侧未建 Tair，`new-api-secrets` 实测无 `REDIS_CONN_STRING`，而 cm
-#     `MEMORY_CACHE_ENABLED=false`。代码事实：`common/redis.go:25` 空串即
-#     `RedisEnabled=false` + 一条日志、`return nil`，**不报错不退出**；限流退化为单 Pod 内存态
-#     （`middleware/rate-limit.go:148`）。⇒ 零流量备站可接受，**属已知降级，不是本卡遗漏**；
-#     要恢复跨副本一致性需 SG Tair（成本项，另卡裁定）。
+#   * Redis（**2026-10-09 起已启用**）：SG Tair 实购 `r-gs5ltv3m4i3655besh`（任务 29 执行记录 4/5），
+#     `new-api-secrets.REDIS_CONN_STRING` 已注入并经本卡两副本实跑验证（Tair 内出现
+#     `rateLimit:v2:ip:GA:*` 键）⇒ 限流不再退化为单 Pod 内存态（`middleware/rate-limit.go:148`）。
+#     ⚠ 连接串口径：**口令含 `#` 等保留字符必须百分号转义（`#` → `%23`）** —— go-redis
+#     `url.Parse` 把 `#` 当 fragment 起点，原样写会报 `invalid port ":…" after host` 并 FatalLog 退出；
+#     而 `redis-cli -u` 能容忍原样口令，**用它验证会漏掉该问题**（2026-10-09 实踩，见任务 29 坑 10）。
+#     历史口径（未建 Tair 时）：空串即 `RedisEnabled=false` + 一条日志、`return nil`，不报错不退出。
 #   * 配额：实测 sg `new-api-quota` hard = requests.cpu 48 / limits.cpu 64 /
 #     requests.memory 96Gi / limits.memory 128Gi，当前 **used 全 0**（ns 无业务负载）
 #     ⇒ 2 副本 requests 4C/8Gi、limits 8C/16Gi，宽裕。
