@@ -389,4 +389,58 @@ ms 命中 = 6   秒级行 = 0   → RESULT=MS_CONFIRMED
 | 镜像构建 | ⛔ 本机 WSL2 并发出网受限（见上），改走 CI 或 macOS |
 | 推 ACR / 部署 | ⛔ 待用户提供 ACR 密码；部署按规范 §7.1 走 release（或先 canary） |
 
+---
+
+### ⏱ 追加 6（2026-10-09）：任务 26 完成度复核 —— **仍未完成**，两处阻塞根因已精确定位
+
+**背景**：用户要求复检任务 26 是否完成，未完成则继续执行到完成。
+
+**结论：未完成。** 4 大组成部分中 **SLS ✅ / ARMS Prometheus ✅**，**Grafana ⛔ / 云监控站点监控 ⛔** 两项仍阻塞，且**两项均卡在「账号侧开通/购买」，CLI 无法闭环**。
+
+#### 一、本次实查的新事实（推翻原报告的两处口径）
+
+| 项 | 原报告（2026-10-06） | 2026-10-09 实查 |
+|---|---|---|
+| 账户余额 | 0.00 USD（10-05 复核） | **1,260.55 USD**（已充值）⇒ 余额**不再是**阻塞根因 |
+| Grafana 调用通道 | 未注明产品名，报 601 | API 在 **`aliyun arms`** 下（`ListGrafanaWorkspace` / `CreateGrafanaWorkspace`）；正常可调用 |
+| 站点监控配额 | `SiteMonitorOperatorProbe QuotaLimit=0`、`SuitInfo=free` | `DescribeMonitorResourceQuotaAttribute` 显示 **`SiteMonitorTask.QuotaLimit=0`**（任务配额为 0）、`SiteMonitorEcsProbe=5`、`ExpireTime=2026-10-09` ⇒ **套餐未开通** |
+| 探测点 | 新加坡 375 / 香港 569 / 日本 576 / 马尼拉 18877 | 复核一致；**香港 569 探针 5 个**、东京 576、新加坡 375、马尼拉 18877 均可用（`isp=465` 阿里云探针） |
+| 监控目标可达性 | 未验 | `http://www.likha.hk/api/status` → **HTTP 200**，响应含 **`"success":true`**（`data.version` 为空）⇒ 断言条件成立 |
+
+#### 二、阻塞 A：云监控站点监控 —— **NAAM 未开通，且无开通 API**
+
+- `CreateSiteMonitor` → **`ExceedingQuota`**（`SiteMonitorTask.QuotaLimit=0`）。带/不带 `IspCities`、PING 与 HTTP 均同样报错 ⇒ 与探针选择无关，是**配额为 0**。
+- 归属产品定位：`bssopenapi QueryProductList` → `cms / **cms_naam_public_intl**（网络分析与监控 NAAM，PayAsYouGo）`。这正是原报告 `CreateInstantSiteMonitor` 报的 `Please register NAAM product code`。
+- 官方口径（已核实文档）：**开通 NAAM 免费、按量计费**；境外 PC 探测节点 **8.4 USD/万次**。按本方案（4 探针 × 5 分钟 × 30 天 ≈ 34,560 次/月）⇒ **≈ 2.9 USD/月**。
+- **开通过程无 API**：`aliyun cms` 无 `OpenService/Activate` 类接口；`aliyun bssopenapi` **无 `CreateOrder`**（仅 `CancelOrder/QueryOrders/GetOrderDetail`，新版 API 已移除通用下单）。⇒ **只能控制台「立即开通」**。
+
+#### 三、阻塞 B：Grafana 工作区 —— **下单恒 601，商品在目标地域无可售模块**
+
+- `CreateGrafanaWorkspace` 恒报 **`601 create commonBuy Order failed: 调用账号服务错误`**，与参数无关（试过 `10.0.x`/`9.0.x`、`personal_edition`/`experts_edition`、`AutoRenew=false`、`AliyunLang=en` 全部同样 601；`standard` 版报 `604 not support edition`）。
+- **排除项**：
+  - ❌ 非余额问题（余额 1,260.55 USD）；
+  - ❌ 非权限问题（当前 RAM 用户 `yanxuewei` 持有 **`AdministratorAccess`**）；
+  - ❌ 非账号购买能力问题（`QueryOrders` 近 14 天有 ecs/rds/slb/eip/kvstore/clickhouse/cas/domain 等**大量成功订单**）。
+- **定位**：`bssopenapi QueryCommodityList --ProductCode grafana` 有 **`grafana_prepaid_public_intl`（可观测可视化 Grafana 版-预付费包年包月）**，但 **`DescribePricingModule` 在 `ap-southeast-1` 返回空模块列表** ⇒ 该地域**无可售配置**，故下单失败。
+- 官方口径补充：Grafana 版**默认提供一个免费「共享版」工作区**（预集成 ARMS/Prometheus 大盘），但**共享版不支持自定义数据源**；要接马尼拉 Prometheus 公网端点须商业版。文档另载**专家版首次开通首月免费（10 用户最低规格）**。
+- **待用户动作（二选一或并行）**：
+  1. **控制台创建**：ARMS 控制台 → Grafana 服务 → 工作区管理 → 创建工作区（地域=新加坡、专家版首月免费 / 开发者版），建成后我接管配数据源 + 4 面板；
+  2. **提工单**：以「`CreateGrafanaWorkspace` 报 601，`DescribePricingModule` 空模块」向阿里云国际站提工单确认该地域可售性。
+
+#### 四、V 项判定（2026-10-09 复核）
+
+| 项 | 结果 |
+|---|---|
+| V1 日志真的进来了 | ✅ mnl `k8s-log-cd57…/app-stdout` 实时有数据（`_pod_name_`/`_container_name_` 齐全，**`__time_ns_part__` 毫秒仍生效**） |
+| V2 Prometheus 有系统指标 | ✅ `count(container_memory_working_set_bytes{namespace="new-api"})` = **18** |
+| V3 三重拨测各自独立 | ⚠ **未达成**：站点监控 ⛔（本卡）、GTM 探测 ⛔（任务 21 未建）、blackbox ⛔（T+14） |
+| Grafana 跨区出图 | ⛔ 工作区未建成（见阻塞 B） |
+
+#### 五、交付物
+
+- `deploy/tasks/task26/task26_finish_gaps.sh` —— **开通后一键补齐脚本**（幂等）：`status` 看状态 / `site` 建站点监控任务 / `grafana` 试建工作区 / `all` 全量。开通动作完成后直接 `bash task26_finish_gaps.sh` 即可闭合最后两卡。
+- 证据脚本：`deploy/logs/t26_probe{1..22}.sh`、`t26_create_sitemonitor.sh`、`t26_create_grafana.sh`、`t26_grafana_experts.sh`、`t26_verify_sls_arms.sh`。
+
+**⇒ 任务 26 标记为「未完成」**；代码/SLS/Prometheus 侧无遗留，仅剩上述两项**账号控制台**动作。
+
 
