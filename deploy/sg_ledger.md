@@ -1,7 +1,7 @@
 # 安全组台账（SG Ledger）· new-api 菲律宾/新加坡
 
 > 状态：**业务安全组已提前落地（2026-09-29，早于任务 22 排期 D5）**。
-> 落地脚本：`deploy/task22/sg_bootstrap.sh`（幂等，支持 `--verify` / `--dry-run` / `--office-cidr`）。
+> 落地脚本：`deploy/tasks/task22/sg_bootstrap.sh`（幂等，支持 `--verify` / `--dry-run` / `--office-cidr`）。
 > 依据：`deploy/docs/阿里云国际站菲律宾部署_详细操作指南-v2.0.md` §8.1 / 任务 22；`deploy/aliyun/ph/security-groups.md`。
 > 提前落地的理由：ACK 节点池**必须显式**指定 `scaling_group.security_group_ids`，否则 ACK 会自建 `sg-` 前缀托管组（任务 22 坑 2）；把 ID 先定死可杜绝"改了另一个安全组"的排查陷阱。
 
@@ -128,7 +128,7 @@
 ### 7.4 例外清单（反例自查保留项，2026-10-06 全账号扫描 = 7 命中，需裁定 0）
 
 1. 集群级 ICMP：mnl `sg-5tsaatp5w68vyqszezja`、sg `sg-t4nevyfflaeo3tdvi510`（坑 7；**禁止删除**）
-2. **云产品自管**：`ALB_SYSTEM_SECURITY_GROUP-alb-1riqckb1h8ezm0y7s9` ×5 条 `ALL -1/-1 ← 0.0.0.0/0`（`alb_system_policy`，ALB 服务维护）——审计脚本已固化该判定（`deploy/task22/sg_object_audit.sh`，云产品自管不再报"待裁定"；同时修掉 `$TOTAL` 全角空格导致的 `set -u` 崩溃）
+2. **云产品自管**：`ALB_SYSTEM_SECURITY_GROUP-alb-1riqckb1h8ezm0y7s9` ×5 条 `ALL -1/-1 ← 0.0.0.0/0`（`alb_system_policy`，ALB 服务维护）——审计脚本已固化该判定（`deploy/tasks/task22/sg_object_audit.sh`，云产品自管不再报"待裁定"；同时修掉 `$TOTAL` 全角空格导致的 `set -u` 崩溃）
 
 ### 7.5 回收与验证
 

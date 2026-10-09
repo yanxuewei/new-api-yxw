@@ -164,8 +164,8 @@ aliyun ecs AuthorizeSecurityGroup --RegionId ap-southeast-1 --SecurityGroupId sg
 
 | 文件 | 说明 |
 | --- | --- |
-| `deploy/task24/ack_sg.sh` | 建集群：`--check` / `--keypair` / `--create` / `--wait` / `--verify` / `--all`（幂等） |
-| `deploy/task24/nodepool_sg.sh` | 节点池薄封装，**复用** `deploy/task11/nodepool_mnl.sh`（两地同一份 user_data / 逻辑） |
+| `deploy/tasks/task24/ack_sg.sh` | 建集群：`--check` / `--keypair` / `--create` / `--wait` / `--verify` / `--all`（幂等） |
+| `deploy/tasks/task24/nodepool_sg.sh` | 节点池薄封装，**复用** `deploy/tasks/task11/nodepool_mnl.sh`（两地同一份 user_data / 逻辑） |
 | `deploy/ops/nodepool_azbalance_fix.sh` | ESS `AzBalance` 断言/修复（**两地通用**，改完节点池必跑） |
 | `deploy/ops/nodepool-userdata-nofile.sh` | 节点 user_data（两地共用，2700 B → b64 3600 B） |
 | `deploy/logs/task24_*` | 建集群 / 建池 / 终验原始证据 |

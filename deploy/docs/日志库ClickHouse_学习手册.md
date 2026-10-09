@@ -222,7 +222,7 @@ func createLog(log *Log) error {
 - 主站（马尼拉）：必须 `-clickhouse.clickhouseserver`（**同区私网**，更省 NAT 流量）；
 - 备站（新加坡）：必须 `-public.clickhouseserver`（**跨区公网**，2026-09-30 裁定③）；写错成 VPC 端点 ⇒ **跨区不可达、备站日志全丢**。
 
-> ⚠ 已知陷阱：Secret 注入脚本 `deploy/task17/secret_inject.sh` 是**整键覆盖**写。若保管文件的 `LOG_SQL_DSN` 仍是 VPC host，跑一次 `--apply` 就会把 sg 已修正的 `-public` 悄悄退回 —— 脚本已加 `-public` 断言（不命中直接 die），但**改集群必须同批改真源**。
+> ⚠ 已知陷阱：Secret 注入脚本 `deploy/tasks/task17/secret_inject.sh` 是**整键覆盖**写。若保管文件的 `LOG_SQL_DSN` 仍是 VPC host，跑一次 `--apply` 就会把 sg 已修正的 `-public` 悄悄退回 —— 脚本已加 `-public` 断言（不命中直接 die），但**改集群必须同批改真源**。
 
 ---
 
@@ -317,7 +317,7 @@ kubectl -n new-api run ckcli --rm -it --restart=Never \
 ```
 
 > 客户端协议要够新（实例内核 `26.2.1.698_1`），用 `latest` 或 ≥ 25.x。
-> 本仓已验证的路径是 **HTTP 8123**（`deploy/task17/dsn_verify.sh` 就用它做端到端鉴权）。
+> 本仓已验证的路径是 **HTTP 8123**（`deploy/tasks/task17/dsn_verify.sh` 就用它做端到端鉴权）。
 
 ---
 
@@ -495,6 +495,6 @@ bash deploy/ops/ck_query.sh mnl --json "SELECT fromUnixTimestamp(created_at) ts,
 | `deploy/docs/Day1任务9_日志库CK决策_执行报告.md` | 为什么是"马尼拉企业版单 AZ"、三处口径收紧、成本与资源包 |
 | `deploy/docs/Day2任务17_DSN注入_执行报告.md` | 两地 DSN 端点（VPC vs PUBLIC）与鉴权证据 |
 | `deploy/ops/ck_query.sh` | 只读查询脚本（本手册 §7.2 通道 A） |
-| `deploy/task17/dsn_verify.sh` | 只读核验：Secret 键清单 + DSN 结构 + 端点口径 + 端到端鉴权 |
-| `deploy/task9/ck_decision.sh` | CK 可购性/成本探针（`verify\|probe\|cost\|create\|check`） |
+| `deploy/tasks/task17/dsn_verify.sh` | 只读核验：Secret 键清单 + DSN 结构 + 端点口径 + 端到端鉴权 |
+| `deploy/tasks/task9/ck_decision.sh` | CK 可购性/成本探针（`verify\|probe\|cost\|create\|check`） |
 | `deploy/docs/风险_ALB健康检查被限流429_2026-10-06.md` | 与"日志库无关但与日志观测相关"的 429 事件（健康检查路径撞全局限流） |

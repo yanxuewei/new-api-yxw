@@ -1,7 +1,7 @@
 # 节点池台账（NodePool Ledger）· 马尼拉 / 新加坡
 
 > 任务 11（马尼拉）/ 后续任务 24（新加坡）的唯一真源。
-> 配套脚本：`deploy/task11/nodepool_mnl.sh`（幂等，`--dry-run` / `--verify` / `--enable-autoscaling` / `--delete`）
+> 配套脚本：`deploy/tasks/task11/nodepool_mnl.sh`（幂等，`--dry-run` / `--verify` / `--enable-autoscaling` / `--delete`）
 > 共享 user_data：`deploy/ops/nodepool-userdata-nofile.sh`（马尼拉/新加坡**同一份**，禁止手工点两遍）
 > 证据目录：`deploy/logs/task11_<ts>/`
 
@@ -415,7 +415,7 @@ aliyun cs DescribeClusterUserKubeconfig --ClusterId <cid> --region ap-southeast-
 | ECS 实例本体 `DescribeInstances` | `InstanceChargeType` / `ExpiredTime` | `PostPaid` / `2099-12-31`（按量哨兵值） | 同 |
 | ESS 伸缩配置 `DescribeScalingConfigurations`（**扩容新节点真正走的那层**） | `InstanceChargeType` / `Period` | `null`（ESS 中 null=按量） | `null` |
 
-根因：建池脚本 `deploy/task11/nodepool_mnl.sh` 写死 `instance_charge_type:"PostPaid"` → **2026-09-28"ECS 节点池全面转包年（PrePaid，1 年 + 自动续费）"决策从未落到节点池**，而任务 11 坑 7/7b（扩容即预付、库存独立）与本卡前置的成本模型都建立在 PrePaid 前提上。
+根因：建池脚本 `deploy/tasks/task11/nodepool_mnl.sh` 写死 `instance_charge_type:"PostPaid"` → **2026-09-28"ECS 节点池全面转包年（PrePaid，1 年 + 自动续费）"决策从未落到节点池**，而任务 11 坑 7/7b（扩容即预付、库存独立）与本卡前置的成本模型都建立在 PrePaid 前提上。
 
 **✅ 已裁定（2026-09-30，负责人）：选 A —— 维持按量**；配额口径固定为按量 `q_ecs_enterprise_postpay_c`（64/96，顶满 max_size），`prepay_c`=100/100 降为备查。三选项留档：
 - **A. 维持按量 ✅**：弹性最灵活，新加坡备区（低频启用）语义合适；代价是马尼拉 4 台常驻节点按量单价高于包年（实测差价可用 `DescribePrice`，注意任务 11 坑 7：Prepaid 用 `--CommodityCode rds`、Postpaid 用 `bards`，先看 `chargeType` 自校）。

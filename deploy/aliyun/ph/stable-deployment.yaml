@@ -1,7 +1,7 @@
 # Day 2 · 任务 23｜stable Deployment（4 副本 + PDB + HPA + 反亲和）—— 马尼拉
 #
 # 权威卡片：deploy/docs/阿里云国际站菲律宾部署_详细操作指南-v2.0.md:3419-3553
-# 执行器：  deploy/task23/stable.sh（--precheck / --dryrun / --apply / --verify / --status / --wire-alb / --cleanup）
+# 执行器：  deploy/tasks/task23/stable.sh（--precheck / --dryrun / --apply / --verify / --status / --wire-alb / --cleanup）
 # 通道：    deploy/lib/ack_remote.sh（两集群 endpoint_public_access=false，本机无 kubeconfig，
 #           全部 kubectl 经云助手在 VPC 节点内执行）
 #
@@ -14,7 +14,7 @@
 #      "最少 3 个"（70% 口径是 12）。所以这里沿用一个**不放松、且随规模自动收紧**的值。
 #
 #   ② `spec.replicas` 写在清单里（卡片步骤 3 建议 GitOps 不要写）。
-#      本仓没有 ArgoCD/Flux，apply 由 deploy/task23/stable.sh 直发，且 `--verify` 会把
+#      本仓没有 ArgoCD/Flux，apply 由 deploy/tasks/task23/stable.sh 直发，且 `--verify` 会把
 #      Deployment.spec.replicas 与 HPA 期望做一次对照；等接上 GitOps 时按卡片加
 #      `ignoreDifferences: [/spec/replicas]`。
 #
@@ -82,7 +82,7 @@ spec:
         track: stable
         env: prod
       annotations:
-        # ConfigMap 变更即滚动：占位符由 deploy/task23/stable.sh 用集群现值的 sha256 前 12 位渲染
+        # ConfigMap 变更即滚动：占位符由 deploy/tasks/task23/stable.sh 用集群现值的 sha256 前 12 位渲染
         # （清单里不写死值，避免每次改 ConfigMap 都要提交镜像无关的 diff）。
         checksum/config: "__CONFIG_CHECKSUM__"
         # G8（可观测）落地前无实际抓取方，占位；卡片原样保留

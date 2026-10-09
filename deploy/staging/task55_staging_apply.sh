@@ -52,7 +52,7 @@ import sys,os,re,hashlib
 man, sdir, image = sys.argv[1], sys.argv[2], sys.argv[3]
 path = man
 t = open(path, encoding='utf-8').read()
-# ★ checksum 口径说明：prod（deploy/task23/stable.sh）取的是**集群现值** sha256[:12]。
+# ★ checksum 口径说明：prod（deploy/tasks/task23/stable.sh）取的是**集群现值** sha256[:12]。
 #   本脚本无集群写权限（--plan/--apply 才下发），这里退化为"渲染后 CM/Secret 内容"的摘要，
 #   只保证"改配置即滚动"这一语义；apply 后请回读 annotations 与集群值是否一致。
 cm_path = os.path.join(os.path.dirname(path), '55-config-secret-template.yaml')

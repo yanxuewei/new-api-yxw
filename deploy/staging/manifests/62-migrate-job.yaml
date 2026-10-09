@@ -70,5 +70,5 @@ spec:
 #   kubectl -n new-api-staging delete job new-api-staging-migrate --ignore-not-found
 #   kubectl -n new-api-staging apply -f 62-migrate-job.yaml
 #   kubectl -n new-api-staging logs job/new-api-staging-migrate -f
-# 复验序列（任务54 口径，脚本 deploy/task54/migrate_version.sh 改 STAGE_DB=newapi_staging）：
+# 复验序列（任务54 口径，脚本 deploy/tasks/task54/migrate_version.sh 改 STAGE_DB=newapi_staging）：
 #   version → up → down 1 → up → up(no change)，并在 down3→up 期间开并发 writer + pg_stat_activity 锁采样

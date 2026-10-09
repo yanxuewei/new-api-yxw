@@ -1,4 +1,4 @@
-# 任务 54 · 迁移执行 Job（prod 用；staging 由 deploy/task54/migrate_version.sh 直连执行）
+# 任务 54 · 迁移执行 Job（prod 用；staging 由 deploy/tasks/task54/migrate_version.sh 直连执行）
 #
 # 设计口径（卡片步骤 5 + 本仓实测）：
 #   - backoffLimit: 0       迁移失败不重试，人工介入（半途失败 + 自动重试 = 状态更脏）

@@ -2,7 +2,7 @@
 
 > 任务 10（马尼拉）/ 后续任务 24（新加坡）的唯一真源。
 > 证据目录：`deploy/logs/task10_<ts>/`（原始 JSON 全部留存）
-> 配套脚本：`deploy/task10/ack_mnl.sh`（幂等，`--dry-run`）
+> 配套脚本：`deploy/tasks/task10/ack_mnl.sh`（幂等，`--dry-run`）
 
 ---
 

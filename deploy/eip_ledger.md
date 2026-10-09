@@ -1,6 +1,6 @@
 # 上游出口 EIP 台账（任务 6 / 任务 12 合并）
 
-> 生成时间：20260928-181113 · 账号 `5108890064395960` · 来源：`deploy/task6/nat_eip.sh` + `deploy/task12/nat_eip_sg.sh`
+> 生成时间：20260928-181113 · 账号 `5108890064395960` · 来源：`deploy/tasks/task6/nat_eip.sh` + `deploy/tasks/task12/nat_eip_sg.sh`
 > 坑 1：任一 EIP 新增/替换未同步供应商 → 偶发 403，失败率 ≈ 1/N。**上线前 8 个 EIP 必须全部取得供应商书面生效确认**。
 
 | # | EIP 名称 | AllocationId | 公网 IP | Region | 绑定对象 | 状态 | 已进 RDS 白名单? | 已交供应商? | 生效确认时间 |

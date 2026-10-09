@@ -1,7 +1,7 @@
 # Day 2 · 任务 28｜新加坡 PH 备 Deployment + Service —— 新加坡（ap-southeast-1）
 #
 # 权威卡片：deploy/阿里云国际站菲律宾部署-v2.0.md 见指南 3606-3688 行
-# 执行器：  deploy/task28/standby.sh（--precheck / --dryrun / --apply / --verify / --status / --cleanup）
+# 执行器：  deploy/tasks/task28/standby.sh（--precheck / --dryrun / --apply / --verify / --status / --cleanup）
 # 通道：    deploy/lib/ack_remote.sh sg（SG 集群 endpoint_public_access=false，本机无 kubeconfig，
 #           全部 kubectl 经云助手在 VPC 节点内执行）
 #
