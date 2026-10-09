@@ -75,6 +75,7 @@ git merge upstream/main
 
 # 4) 冲突解决后：重跑 verify + 全量测试（CI 不得 skip 任何 job）
 bash ours_likha/ops/verify-upstream-changes.sh
+go run ./ours_likha/code/cmd/logms-check   # 运行时证据，期望 RESULT=MS_CONFIRMED
 make test && go vet ./... && go build ./...
 
 # 5) 提 sync PR，CI 全绿后合并；更新本清单「我们的提交/PR」列
@@ -86,5 +87,6 @@ make test && go vet ./... && go build ./...
 
 - 自研目录说明：`ours_likha/README.md`
 - 复现补丁：`ours_likha/ops/patches/`
-- 在位校验脚本：`ours_likha/ops/verify-upstream-changes.sh`
+- 在位校验脚本（静态）：`ours_likha/ops/verify-upstream-changes.sh`
+- 运行时自检（动态，期望 `RESULT=MS_CONFIRMED`）：`go run ./ours_likha/code/cmd/logms-check`
 - 部署侧背景（SLS 毫秒落地）：`deploy/Day3任务26_SLS与可观测_执行报告.md`

@@ -12,12 +12,13 @@
 - ✅ Go 1.25.1（= `go.mod`）+ `GOPROXY=https://goproxy.cn,direct`；`web/` 前端用 bun（WSL 内**无 node/npm/bun/kubectl/helm**，需时装 Linux 版）。
 - ✅ PATH 污染已清：`/etc/wsl.conf` 加 `[interop] appendWindowsPath=false`。**编译/装依赖别放 `/mnt/e`**（`/tmp` 2.9 GB/s vs 421 MB/s）。
 - 容器 `new-api`(:3000) · `postgres:15` · `redis` 均 `restart: always`。
+- ⚠️ **本机不适合构建本仓镜像（2026-10-09 实测）**：`web/` 800+ 依赖使 `bun install` 一次性开 **200+ 并发 TCP**，**WSL2 NAT 建不起来** → 容器内采样 `SYN_SENT≈211 / ESTABLISHED 13~25`（`nf_conntrack 112/262144`，**非**表满）→ bun 永久等齐卡死；**脱离 BuildKit 也能稳定复现**。反证：低并发 `bun add lodash`（4 请求）**391ms 成功**、主机 `curl` 正常 ⇒ **与代码/Dockerfile 无关**。`go mod download` 走 `--go-proxy aliyun` 可用（2.7s）。⇒ 发版构建走 **CI** 或 **macOS**（⚠ fork 现有 `docker-image-branch.yml`/`docker-build.yml` **推 Docker Hub `calciumion/new-api`，无推 ACR 的 workflow**，需新增）。
 - **macOS 侧直操云端**：`~/.workbuddy/binaries/aliyun-cli/aliyun`（**无 `--region` 会静默用 profile 地域 ap-southeast-6**）；集群操作用 `deploy/ack_remote.sh`。
 
 ## 上游二次开发纪律（2026-10-09 fanyan 下达 · fork 维护总纲）
 `new-api-yxw` = `QuantumNous/new-api` 的二次开发分支（origin `git@github.com:yanxuewei/new-api-yxw.git`，分支 `main`）。
 **五条铁律**：① **能扩展不改源码**（优先插件/hook/配置覆盖，其次才改上游文件）② 根目录 `UPSTREAM_CHANGES.md` 记定制清单、**每次 sync 前对照检查冲突点** ③ 自研代码放 `ours_likha/{code,ops,doc}` 与上游**物理隔离** ④ **禁止无意义的格式化改动上游文件**（一次格式化 = 永久冲突源）⑤ **merge 冲突解决后必须跑全量测试**，sync PR 的 CI **不允许 skip 任何 job**。
-- **落地物**：`UPSTREAM_CHANGES.md`（清单，含"不动的地方"反例表）· `ours_likha/ops/patches/0001-log-ms-precision.patch`（复现补丁）· `ours_likha/ops/verify-upstream-changes.sh`（**在位校验，sync 前后必跑**）· `ours_likha/ops/local-ci.sh`（本地复现 `ci.yml` 全量 job：backend `go vet/build` + `make test`，frontend `bun typecheck/test`）。
+- **落地物**：`UPSTREAM_CHANGES.md`（清单，含"不动的地方"反例表）· `ours_likha/ops/patches/0001-log-ms-precision.patch`（复现补丁）· `ours_likha/ops/verify-upstream-changes.sh`（**在位校验，sync 前后必跑**）· `ours_likha/ops/local-ci.sh`（本地复现 `ci.yml` 全量 job：backend `go vet/build` + `make test`，frontend `bun typecheck/test`）· `ours_likha/code/cmd/logms-check`（**运行时自检**：`go run ./ours_likha/code/cmd/logms-check` → 期望 `RESULT=MS_CONFIRMED`；不需 DB/Redis/Docker）。
 - **当前唯一上游改动**：日志时间格式毫秒化 —— **3 文件 5 处**（`middleware/logger.go:38`、`common/sys_log.go:20/27/34`、`logger/logger.go:113`），`15:04:05` → `15:04:05.000`。该需求**无扩展点**（GIN formatter 是闭包硬编码；`middleware.SetUpLogger` 还承载私有脱敏 `redactTaskArtifactAccessQuery`，整体替换会丢脱敏）⇒ 原地最小改写，符合纪律 1/4。
 - ⚠️ **纪律 3 的例外**：当"能扩展不改源码"不成立时，允许**最小化原地补丁**，但必须登记清单 + 附可复现补丁 + 配在位校验。
 
