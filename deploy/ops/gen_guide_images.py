@@ -237,7 +237,7 @@ POL = [("newapi-dev-program", "—", "1", "2026年9月25日 22:29:57"),
        ("newapi-enforce-mfa", "true", "5", "2026年9月25日 11:41:00"),
        ("newapi-iac-terraform", "newapi terraform: IaC minimum set incl. ram:Get*, excl. ram:CreateUser and all RAM writes", "1", "2026年9月25日 11:39:24"),
        ("newapi-cicd-acr-push", "newapi cicd: ACR pull/push limited to newapi/* namespace", "1", "2026年9月25日 11:39:04"),
-       ("newapi-ops-operator", "newapi ops: VPC/ECS/ACK/RDS/SLB/WAF/DNS describe + deploy write, deny RAM/account + destructive", "3", "2026年9月25日 11:38:47")]
+       ("newapi-ops-operator", "newapi ops(v3): ECS/VPC/ACK/RDS/Tair/DAS/SLB/ALB/WAF/DNS/CK/ARMS/CMS/SLS/OSS/CR/CEN/PVtz 读写 + 证书/配额/资源组/标签; Deny account,bss写 + DeleteInstance/Vpc/Cluster/LoadBalancer/Bucket", "3", "2026年9月25日 11:38:47")]
 tb = btn(NAVW + 24, TOP + 108, 132, 32, "创建权限策略", "primary", "1")
 tb += (r(NAVW + 24, TOP + 156, 320, 32, fill="#fff", stroke=C["line"], rx=4)
        + t(NAVW + 36, TOP + 177, "筛选策略名称、备注", 12.5, C["muted"])

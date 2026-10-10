@@ -45,6 +45,16 @@
 - **ALB 写操作先干跑**：`--DryRun true` 回 `DryRunOperation` 即校验全过、零变更。
 - 一键复核 `deploy/verify_deploy_0_6.sh`（8 项全走 `jq -e`）。**`WARN` ≠ 通过**。
 
+## RAM 权限与 K8s RBAC（2026-10-10 定论）
+
+**★ 两套互不相通的体系，配齐才不报错**：**RAM 策略**管「能否调 OpenAPI」（控制台报「无权限查看」）；**K8s RBAC**管「K8s 里能否 list/get/update 资源」（报 `APISERVER.403 … is forbidden: User "<uid>" cannot list resource "…"`）。两个症状必须分别处理，别混为一谈。
+
+- **`newapi-ops-operator` 现为 v3**（2026-10-10 发布并 SetAsDefault，AttachmentCount=3：挂 `ops_group`/`dev_group`/`ops-prod_group`）。v3 相比 v2 新增 Allow：`kvstore:*`(Tair) · `hdm:*`(DAS) · `yundun-cert:*`(数字证书/原SSL) · `arms:*`(ARMS+Grafana) · `clickhouse:*`(CK) · `quotas:*` · `resourcemanager:Get*|List*` · `ram:Get|ListResourceGroup*` · `tag:Get*|List*|Describe*` · `*:ListTagResources` 等；新增 Deny **`kvstore:DeleteInstance`**（与 `rds:DeleteDBInstance` 同口径）。**IaC（此前正文只在控制台、无 IaC）**：`deploy/ops/ram_policy_newapi-ops-operator.v3.json`（真源）+ `deploy/ops/ram_ops_operator_extend.sh`（`check|apply|verify|desc|rollback`）。⚠️ 策略版本上限 **5**（现 v1/v2/v3）。
+- **★ 动作前缀必须逐个在系统策略里核准**（凭记忆写会**静默失效**，RAM 不报错）。已知：`kvstore`=Tair · `hdm`=DAS · **`yundun-cert`=数字证书（原SSL，无 `cas:`/`ssl:` 前缀）** · `clickhouse`=CK · `quotas`=配额中心 · `resourcemanager`/`ram:Get|ListResourceGroup*`=资源组 · `tag`+`*:ListTagResources`=标签。核验方式：`aliyun ram GetPolicyVersion --PolicyName Aliyun<X>FullAccess --PolicyType System`。
+- **★ ACK RBAC（`cs`）两条坑**：① **`cs GrantPermissions` 是「全量覆盖」** —— body 必须列出该用户要保留的**全部**集群，否则抹掉其它集群授权 ⇒ 正确姿势「读现状→原样保留所有集群→只改角色」。② **响应字段名与请求不一致**：请求用 `role_name`(预置角色名: admin|admin-view|ops|dev|restricted) + `role_type`(cluster|namespace|all-clusters)；**响应**把预置角色名放在 `role_type`、`role_name` 为空。③ `cs DescribeUserPermission`（`--uid`）**不分地域**，一次返回该用户**全部**集群授权。IaC：`deploy/ops/ack_rbac_grant.sh`（`check|apply|verify`，含**防降权护栏**：admin→ops 会被拒绝，需 `ALLOW_DOWNGRADE=1`）。
+- **当前集群清单（3 个）**：mnl `cd57e40ce9a634c1698c2f5c5e09bd93c`(ap-southeast-6) · sg `ca75829e3492d491d9d434de087913798`(ap-southeast-1) · `cb0abf5bc06034f7bbdb991752f6f3e62`(ap-southeast-6, ack.standard, 09-30 建, 私网端点 `10.2.25.173:6443`)。
+- ⚠️ **`UID` 是 bash 只读变量**（root 下=0）——脚本里用它作变量名会静默取到 0；一律换名（如 `RAM_UID`）。
+
 ## 付费方式（2026-09-28 指令 + 09-29 CK 补丁 + **10-06 节点池裁定**）
 | 产品 | 口径 | 计费参数名 |
 |---|---|---|
