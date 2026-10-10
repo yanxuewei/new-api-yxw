@@ -2,23 +2,27 @@
 # =============================================================================
 # Day3 · 任务26 收尾补齐脚本（幂等）
 #
-# 用途：在账号/控制台侧完成两项前置「开通」后，一键补齐任务26 剩余两卡：
-#   A. 云监控站点监控（需先在控制台开通「网络分析与监控」——免费，无 API）
-#   B. Grafana 工作区（需先在 ARMS 控制台创建；CLI 直连报 601）
+# 用途：闭合任务26 剩余两卡
+#   A. 云监控站点监控 —— 需先在控制台开通「网络分析与监控(NAAM)」（免费，无 API）
+#   B. Grafana 工作区 + 数据源 + 4 面板 —— 工作区已在 ARMS 控制台建好（2026-10-10），
+#      本脚本接管「加入账号 -> 建数据源 -> 建看板 -> 复核」全流程
 #
-# 前置（必须由**主账号**在控制台完成，RAM 子账号/CLI 无法闭环）：
+# 前置（须由**账号侧**在控制台完成）：
 #   1) 云监控控制台 → 左侧「网络分析与监控」→ 站点监控 → 立即开通（勾选协议）
 #      https://cms.console.aliyun.com/
 #   2) ARMS 控制台 → 「Grafana 服务」→ 工作区管理 → 创建工作区
-#      地域=新加坡(ap-southeast-1)、版本=专家版(首月免费)/开发者版、Grafana 版本=10.0.x
-#      https://arms.console.aliyun.com/
+#      地域=新加坡(ap-southeast-1)、版本=专家版(首月免费)/开发者版
+#      ✅ 2026-10-10 已完成：gra-newapi-sg / grafana-intl-sg-swy4zuysc01
 #
 # 用法：
 #   bash task26_finish_gaps.sh          # 全量补齐 + 复核
 #   bash task26_finish_gaps.sh status   # 只看当前状态
+#   bash task26_finish_gaps.sh site     # 只做站点监控
+#   bash task26_finish_gaps.sh grafana  # 只做 Grafana（走 grafana_setup.py）
 # =============================================================================
 set -u
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 R_SG=ap-southeast-1
 R_MNL=ap-southeast-6
 SITE_TASK="likha-hk-newapi-status"
@@ -36,7 +40,8 @@ site_status() {
   aliyun cms DescribeMonitorResourceQuotaAttribute --region "$R_SG" 2>&1 \
     | grep -A5 'SiteMonitorTask' | head -8
   echo "── 任务列表 ──"
-  aliyun cms DescribeSiteMonitorList --region "$R_SG" 2>&1 | grep -E 'TotalCount|"Name"|"TaskId"|"TaskState"' | head -12
+  aliyun cms DescribeSiteMonitorList --region "$R_SG" 2>&1 \
+    | grep -E 'TotalCount|"Name"|"TaskId"|"TaskState"' | head -12
 }
 
 grafana_status() {
@@ -58,18 +63,16 @@ site_apply() {
 }
 
 grafana_apply() {
-  hr "B. Grafana：尝试创建（若控制台已建则 skip）"
+  hr "B. Grafana：工作区 + 数据源 + 4 面板"
   local n
   n=$(aliyun arms ListGrafanaWorkspace --region "$R_SG" 2>&1 | grep -c '"grafanaWorkspaceId"' || true)
-  if [ "$n" -gt 0 ]; then
-    echo "  已有工作区 → skip（幂等）；去 ARMS 控制台配置数据源 + 4 面板"
-    return 0
+  if [ "$n" -eq 0 ]; then
+    echo "  ⛔ 尚无工作区：请在 ARMS 控制台创建（地域=新加坡、专家版首月免费）"
+    echo "     建好后重跑本脚本即可自动接管数据源与看板。"
+    return 1
   fi
-  echo "  控制台尚未创建工作区。CLI 直连（历史结论：恒报 601）："
-  aliyun arms CreateGrafanaWorkspace --region "$R_SG" --RegionId "$R_SG" \
-    --GrafanaWorkspaceName "newapi-obs-mnl" --GrafanaWorkspaceEdition experts_edition \
-    --GrafanaVersion "10.0.x" --AccountNumber 10 --PricingCycle Month --Duration 1 \
-    --Password "Likx@0bs2026Aa" 2>&1 | head -12
+  echo "  工作区已在册 → 走 grafana_setup.py（account + ds + dash + verify）"
+  python3 "$SCRIPT_DIR/grafana_setup.py" all
 }
 
 case "$MODE" in

@@ -443,4 +443,65 @@ ms 命中 = 6   秒级行 = 0   → RESULT=MS_CONFIRMED
 
 **⇒ 任务 26 标记为「未完成」**；代码/SLS/Prometheus 侧无遗留，仅剩上述两项**账号控制台**动作。
 
+---
+
+## ⏱ 追加 7（2026-10-10）｜Grafana 工作区已开通 → 数据源 + 4 面板闭环
+
+**触发**：用户 2026-10-10 在 ARMS 控制台建成 Grafana 工作区（截图显示 `gra-newapi-sg` / 新加坡 / 专家版(10U) / 到期 2026-11-11）。本轮把 Grafana 侧从「阻塞」推到「闭环」。
+
+### 一、工作区实况（API 复核）
+
+| 项 | 值 |
+|---|---|
+| 工作区名 | `gra-newapi-sg` |
+| 工作区 ID | `grafana-intl-sg-swy4zuysc01` |
+| 地域 | `ap-southeast-1`（新加坡） |
+| 版本 | `experts_edition`（专家版 10 用户） |
+| Grafana 版本 | 12.4.x |
+| 访问端点 | `https://grafana-intl-sg-swy4zuysc01.grafana.aliyuncs.com:443` |
+| SNAT IP | `8.222.236.38` |
+| 状态 | Running |
+| 到期 | 2026-11-11（首月免费） |
+
+### 二、关键发现：配置通道 = `GrafanaWorkspaceHttpApiProxy`
+
+`aliyun arms GrafanaWorkspaceHttpApiProxy`（`--BodyStr` 传 `{"method","path","headers","body"}`，**body 必须是转义后的 JSON 字符串**）可**完全脚本化**配置 Grafana，**不需要 Grafana 本地账号/API Key**。踩到两个坑：
+
+1. **必须先把调用者加入工作区**：未加入时任何路径都报 `40300 sub account is not authorized on this workspace, operateUserId: <uid>`。
+   修法：`CreateGrafanaWorkspaceAccount --AliyunUid <RAM用户UserId> --Role Admin --OrgId 1`。
+   ⚠️ **`UID` 是 bash 只读变量** —— 脚本里 `UID=...` 赋值会静默失败（`readonly variable`），并因此建出 `aliyunUid="0"` 的**空账号**。**必须换变量名**（如 `RAMUID`）。已删除误建账号（accountId=1118）后重建。
+2. **代理有路径白名单**：`/api/health`、`/api/ds/query` 报 `40300 proxy path is not allowed`；**可用路径**含 `/api/datasources`、`/api/datasources/uid/<uid>/health`、`/api/dashboards/db`、`/api/search`、`/api/dashboards/uid/<uid>`。
+
+### 三、落地结果（幂等）
+
+| 项 | 结果 | 证据 |
+|---|---|---|
+| 工作区账号 | ✅ RAM 子账号 `yanxuewei`(219901390242410810) → **Admin**(org 1)，accountId=1119 | `ListGrafanaWorkspaceAccount` |
+| Prometheus 数据源 | ✅ `ARMS-Prometheus-MNL`（uid `arms-prom-mnl`，isDefault=true）指向 mnl 公网端点 | `GET /api/datasources` |
+| **跨区连通性** | ✅ **`GET /api/datasources/uid/arms-prom-mnl/health` → `Successfully queried the Prometheus API. status OK`** | **权威证据**（Grafana 新加坡 → Prometheus 马尼拉，坑 4 彻底解除）|
+| 4 面板看板 | ✅ `New API · 最小可观测（4 面板）`（uid `newapi-min-obs`，url `/d/newapi-min-obs/7b8c4a2`）| `GET /api/dashboards/uid/...` |
+
+**4 张最小面板**（因 `/metrics` 未注册 [P1-20]，只能用容器/cAdvisor 指标）：
+
+| # | 面板 | 类型 | PromQL |
+|---|---|---|---|
+| 1 | 就绪容器数 (ready) | stat | `count(kube_pod_container_status_ready{namespace="new-api"} == 1)` |
+| 2 | 容器 CPU 使用 (cores) | timeseries | `sum(rate(container_cpu_usage_seconds_total{namespace="new-api",container!="",container!="POD"}[5m])) by (pod)` |
+| 3 | 容器内存工作集 (bytes) | timeseries | `sum(container_memory_working_set_bytes{namespace="new-api",container!="",container!="POD"}) by (pod)` |
+| 4 | 容器重启累计 (次) | timeseries | `sum(kube_pod_container_status_restarts_total{namespace="new-api"}) by (pod)` |
+
+### 四、IaC（新增）
+
+- `deploy/tasks/task26/grafana_setup.py` —— `account|ds|dash|verify|all`（幂等：账号授权 + 数据源 + 看板 + 复核）
+- `deploy/tasks/task26/task26_finish_gaps.sh` —— `grafana` 分支改为调用上述脚本；`site` 分支不变
+
+### 五、剩余阻塞（仅 1 项）
+
+| 项 | 状态 | 说明 |
+|---|---|---|
+| 云监控站点监控 | ⛔ **仍阻塞** | `SiteMonitorTask.QuotaLimit=0`；`CreateSiteMonitor` 仍 `ExceedingQuota` ⇒ **NAAM（`cms_naam_public_intl`）本次未开通**（用户只开通了 Grafana）。开通免费/按量（≈2.9 USD/月），但**无开通 API** ⇒ 控制台「网络分析与监控 → 立即开通」 |
+
+**⇒ 任务 26 更新为「4 项中 3 项闭环（SLS ✅ / ARMS Prometheus ✅ / Grafana ✅），仅剩云监控站点监控 ⛔」。**
+Grafana 看板口径延伸（SLO/错误预算）仍属**任务 32**。
+
 
