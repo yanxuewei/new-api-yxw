@@ -504,4 +504,72 @@ ms 命中 = 6   秒级行 = 0   → RESULT=MS_CONFIRMED
 **⇒ 任务 26 更新为「4 项中 3 项闭环（SLS ✅ / ARMS Prometheus ✅ / Grafana ✅），仅剩云监控站点监控 ⛔」。**
 Grafana 看板口径延伸（SLO/错误预算）仍属**任务 32**。
 
+---
+
+## ⏱ 追加 8（2026-10-10 晚）——云监控站点监控闭环，**任务 26 全部完成 ✅**
+
+用户已在控制台开通 **NAAM（网络分析与监控 / `cms_naam_public_intl`）**。本轮完成最后一项并把四项做成**一次幂等复核**。
+
+### 一、NAAM 开通前后对比（配额面，权威）
+
+| 指标 | 开通前（10-09） | **开通后（10-10）** |
+|---|---|---|
+| `SiteMonitorTask.QuotaLimit` | **0** | **9999** |
+| `SiteMonitorTask.QuotaPackage` | — | 9999 |
+| `SuitInfo` | free | `free`（免费额度生效） |
+| `DescribeSiteMonitorList.TotalCount` | 0 | **1** |
+
+### 二、站点监控任务已建（V1–V3 实测）
+
+| 项 | 值 | 证据 |
+|---|---|---|
+| TaskId | `d7a836f6-b87b-4b3d-82bb-424dda2853cf` | `DescribeSiteMonitorList` |
+| TaskName | `likha-hk-newapi-status` | 同上 |
+| 目标 | `http://www.likha.hk/api/status` | `DescribeSiteMonitorAttribute` |
+| 类型/频率/超时 | HTTP GET · **5 分钟** · 30000ms | 同上 |
+| 断言 | `match_rule=0`（**含**）· `response_content='"success":true'` · `acceptable_response_code=200` | 同上 |
+| 探针 | **新加坡 375 / 香港特别行政区 569 / 日本 576 / 马尼拉 18877**（均 `Isp=465 阿里巴巴` / `Type=IDC`） | 同上 |
+| TaskState | **1（运行中）** | 同上 |
+
+**实测数据（`DescribeSiteMonitorData`，创建后约 25 分钟窗口）**：
+
+| 指标 | 实测值 |
+|---|---|
+| **Availability** | **100.0**（`AvailableNumber` 1→2 递增 · `UnavailableNumber=0` · `UnhealthyCityISPs="[]"` · 4XX/5XX/6XX 错误率全 0） |
+| **ResponseTime** | **平均 125–158.5ms**，最大 **254ms**，最小 **63ms**（4 探针聚合） |
+
+⇒ **V3「站点监控独立产生结果」达成**；马尼拉探针 **18877 可用且健康**（再次实质性推翻 P1-13「马尼拉探测点未确认」）。
+
+### 三、断言口径说明（与任务卡的一处偏差，已核实）
+
+任务卡原文要求「断言响应含 `"success":true` **且 `version` 匹配**」。实测 `GET /api/status` →
+`…,"user_agreement_enabled":false,"version":"","wechat_login":false,…,"success":true}` ——
+**`version` 字段存在但为空串**（本构建未注入版本号 `common.Version`），**无法做版本匹配断言**。
+故断言取 **`"success":true`**（`match_rule=0` 含匹配，已实测 HIT）。
+→ 待 G8/发版注入版本号后，可把断言升级为 `"version":"<目标版本>"`（记录为后续增强项，不阻塞本卡）。
+
+### 四、任务 26 最终验收（4/4 闭环）
+
+| # | 组成部分 | 状态 | 关键证据 |
+|---|---|---|---|
+| 1 | SLS 两站 Project/Logstore + 容器日志采集 | ✅ | mnl 22 / sg 13 logstore；`app-stdout` 实时有数据；`__time_ns_part__` 毫秒生效 |
+| 2 | 可观测监控 Prometheus 版（ARMS） | ✅ | `count(container_memory_working_set_bytes{namespace="new-api"})` = 18 |
+| 3 | 可观测可视化 Grafana 版（新加坡）+ 4 张最小面板 | ✅ | 工作区 `gra-newapi-sg`（专家版 10U / 12.4.x / Running）；数据源 `arms-prom-mnl`；看板 `newapi-min-obs`；health = `Successfully queried the Prometheus API. OK` |
+| 4 | 云监控站点监控 | ✅ | 任务 `likha-hk-newapi-status` 运行中，**可用性 100%** / 响应 63–254ms，4 探针（含马尼拉） |
+
+**⇒ 任务 26 判定：完成（4/4）。** 唯一遗留为**非本卡范围**的「三重兜底」另两腿：
+- ACK 内 `blackbox-exporter` 多 region 自拨 → **T+14 / G8 后**（`/metrics` 未注册，P1-20）
+- GTM 健康探测 → **任务 21，2026-09-30 裁定挂起**（域名侧评估）
+- Grafana 的 SLO/错误预算看板 → **任务 32**
+
+### 五、一键复核（幂等）
+
+```bash
+bash deploy/tasks/task26/task26_finish_gaps.sh all
+# A 站点监控：配额 9999 / TotalCount=1 / 已存在同名任务 → skip（幂等）
+# B Grafana：账号已存在 skip / 数据源 PUT 更新 200 / 看板 POST 200 / V1 health OK / V2 4 面板在位
+```
+
+**证据脚本**（留存复现）：`deploy/logs/t26_site_verify.sh`（任务详情+列表）、`deploy/logs/t26_site_data.sh`（可用性/响应时间）、`deploy/logs/t26_status_body.sh`（断言字段核验）。
+
 
