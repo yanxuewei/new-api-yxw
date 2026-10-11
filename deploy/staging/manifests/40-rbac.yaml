@@ -1,0 +1,89 @@
+# staging · 40 RBAC（namespaced，零 ClusterRole 绑定）
+#
+# 红线：staging 的 CI/CD 凭证**不得**有任何 prod namespace 权限（任务45:3）。
+# 现状对照：prod 侧只有 SA new-api-app（Day2任务23），没有独立 Role/RoleBinding 清单文件
+#          ⇒ 非生产侧在这里补齐，避免"集群管理员一把梭"的隐性 Cluster-admin。
+# ★ SA 名字必须是 new-api-app：ACR 免密由 managed-aliyun-acr-credential-helper 只挂到该 SA，
+#   用 default 必 ImagePullBackOff（任务16 坑 5 / Day2任务18）。
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: new-api-app
+  namespace: new-api-staging
+  labels:
+    app.kubernetes.io/part-of: new-api
+automountServiceAccountToken: false
+---
+# 应用运行所需的最小权限：本应用不读 K8s API（无 informer/operator 逻辑），
+# 故 Role 只给 Pod 状态观测用途，供未来 /readyz 依赖或 sidecar 使用；不授权 secrets 读。
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: new-api-staging-app
+  namespace: new-api-staging
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "endpoints", "services", "configmaps"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: new-api-staging-app-binding
+  namespace: new-api-staging
+subjects:
+  - kind: ServiceAccount
+    name: new-api-app
+    namespace: new-api-staging
+roleRef:
+  kind: Role
+  name: new-api-staging-app
+  apiGroup: rbac.authorization.k8s.io
+---
+# CI/CD（rc 镜像自动部署 staging，git开发-发布-值班规范.md:422「staging 自动合并生效」）
+# 单独一个 SA，权限含 deploy 滚动 + CM/Secret 写，但**仅限本 ns**。
+# 该 SA 的 token 才是进 CI 的凭证；prod namespace 对它没有任何 RoleBinding。
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: new-api-staging-ci
+  namespace: new-api-staging
+automountServiceAccountToken: true
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: new-api-staging-ci
+  namespace: new-api-staging
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["configmaps", "secrets", "services"]
+    verbs: ["get", "list", "create", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list", "watch"]
+  # ⚠ 不给 pods/exec、pods/attach、nodes/*、namespaces/*；不给任何 delete namespace 级别权限
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: new-api-staging-ci-binding
+  namespace: new-api-staging
+subjects:
+  - kind: ServiceAccount
+    name: new-api-staging-ci
+    namespace: new-api-staging
+roleRef:
+  kind: Role
+  name: new-api-staging-ci
+  apiGroup: rbac.authorization.k8s.io

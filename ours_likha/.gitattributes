@@ -1,0 +1,7 @@
+# 自研目录行尾固化：保证补丁可直接 `git apply`、脚本可直接 `bash` 执行。
+# （仓库根 .gitattributes 属上游文件，按纪律不在其中加我们的规则；用本目录级文件替代。）
+*.patch text eol=lf
+*.sh    text eol=lf
+*.md    text eol=lf
+*.yaml  text eol=lf
+*.yml   text eol=lf

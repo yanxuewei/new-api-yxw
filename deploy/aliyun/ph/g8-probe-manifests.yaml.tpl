@@ -1,7 +1,7 @@
 # G8 探针 / 指标暴露面的集群侧清单（菲律宾 new-api）
 #
 # 配套：deploy/G8探针与指标_2026-09-28.patch（代码侧）、
-#       deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md §3.9
+#       deploy/docs/阿里云国际站菲律宾部署_详细操作指南-v2.0.md §3.9
 #
 # ⚠️ 未在任何集群上 apply 过。上线前必须逐项人工核对：
 #   - containerPort / app 端口是否与现网 ConfigMap 的 PORT 一致（默认 3000）

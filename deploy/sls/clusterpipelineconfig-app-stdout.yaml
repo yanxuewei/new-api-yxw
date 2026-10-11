@@ -1,0 +1,66 @@
+# 任务 26 步骤 2（2026-10-08 修订版）：new-api 容器 stdout 采集 —— 纳秒时间戳
+#
+# 结论（源码级取证，loongcollector plugins/processor/gotime/processor_gotime.go）：
+#   `log.TimeNs = parsedTime.Nanosecond()` 只在 **时间处理器 SetTime=true** 且
+#   **global.EnableTimestampNanosecond=true** 时才写入 ⇒ SLS 侧才有 `__time_ns_part__`。
+#   纯 stdout 采集（无时间处理器）不会自动产出 ns，这就是此前反复试都 NULL 的原因。
+#
+# 附带的三个实测坑（老链路带不进这个开关）：
+#   ① 老式 AliyunLogConfig：alibaba-log-controller 转 SLS 后 GetConfig 无该键；
+#   ② 新 OpenAPI `aliyun sls UpdateConfig` / python SDK：写入后回读 null（键被规范化剥掉）；
+#   ③ ClusterAliyunPipelineConfig 的 `spec.config` 顶级同名键同样被剥掉，
+#      只有 `config.global` 能持久化（GetLogtailPipelineConfig 回读可见）。
+#
+# 前置：LoongCollector ≥1.8.0（实测 logtail-ds = v3.3.3.1-aliyun ✅）、仅 Linux。
+# 语义：SLS 落 `__time__`（秒）+ `__time_ns_part__`（纳秒偏移 0~999999999）；
+#      排序用 ORDER BY __time__, __time_ns_part__；控制台时间列随之显示到 ms。
+apiVersion: telemetry.alibabacloud.com/v1alpha1
+kind: ClusterAliyunPipelineConfig
+metadata:
+  name: new-api-app-stdout-ns
+spec:
+  project:
+    name: k8s-log-cd57e40ce9a634c1698c2f5c5e09bd93c
+    endpoint: ap-southeast-6.log.aliyuncs.com
+  config:
+    global:
+      # 纳秒时间戳总开关（官方 API 文档：global 级 bool，默认 false）
+      EnableTimestampNanosecond: true
+      # ★ 关键：保持 iLogtail 1.x 的 tag 存储位置（容器元数据写成**普通字段**
+      #   `_pod_name_`/`_image_name_`/`_container_ip_`…），而不是 2.0 默认的
+      #   "tag 归位"（写成 `__tag__:_pod_name_` 前缀系统标签）。
+      #   依据：iLogtail 2.0 升级说明 —— 旧版 API（AliyunLogConfig）建的配置默认 1.x 行为；
+      #   新版 API（ClusterAliyunPipelineConfig）默认归位；置 true 可还原旧行为。
+      #   ⚠ 2026-10-08 曾误删此项以为其"强制秒级"，实为无关 —— 删掉后控制台
+      #     pod_name/image_name/container_ip 列全部变空（字段名迁移所致）。
+      UsingOldContentTag: true
+    inputs:
+      # ★ 必须用旧版 Go 插件 service_docker_stdout：只有它把容器元数据写成**普通字段**
+      #   `_pod_name_`/`_image_name_`/`_container_ip_`/`_namespace_`/`_container_name_`；
+      #   新的原生插件 input_container_stdio 一律写成 `__tag__:` 前缀系统标签，
+      #   且 global.UsingOldContentTag=true 也**改不动**（2026-10-08 实测），
+      #   会导致控制台/查询里 pod_name、image_name 等列全部为空。
+      - Type: service_docker_stdout
+        Stdout: true
+        Stderr: true
+        IncludeLabel:
+          io.kubernetes.container.name: new-api
+    processors:
+      # 从容器 runtime 时间戳字段 `_time_`（含纳秒：2026-10-08T15:36:04.646260725+08:00）
+      # 解析高精度时间并 SetTime 回写日志时间 —— 触发 TimeNs，产出 __time_ns_part__
+      - Type: processor_gotime
+        SourceKey: _time_
+        SourceFormat: "2006-01-02T15:04:05.999999999Z07:00"
+        DestKey: event_time_ms
+        DestFormat: "2006-01-02 15:04:05.000"
+        SetTime: true
+        KeepSource: true
+        NoKeyError: false
+        AlarmIfFail: false
+    flushers:
+      - Type: flusher_sls
+        Project: k8s-log-cd57e40ce9a634c1698c2f5c5e09bd93c
+        Logstore: app-stdout
+        Region: ap-southeast-6
+        Endpoint: ap-southeast-6-intranet.log.aliyuncs.com
+        TelemetryType: logs

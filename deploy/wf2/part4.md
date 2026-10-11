@@ -76,14 +76,14 @@ sse_first_token_p95..: 760ms   ✓ <= 800ms
 ```bash
 curl -sG "${PROM_URL}/api/v1/query" \
   --data-urlencode 'query=sum(container_cpu_cfs_throttled_periods_total{namespace="new-api-perf"})' \
-  --data-urlencode 'query2=process_open_fds' | jq . > .deploy/evidence/d4/s2-throttle-fds.json
+  --data-urlencode 'query2=process_open_fds' | jq . > deploy/evidence/d4/s2-throttle-fds.json
 # 另三类：pg_stat_activity 快照、NAT 出流量、WAF 拦截数（【控制台】→ Grafana/NAT 监控页导出）
 ```
 
 `【控制台】Grafana 压测面板导出 S1–S10 曲线 PNG`
 `[图 D4-4｜拍摄对象：压测期间 QPS/P95/错误率/HPA 副本数四联曲线；打码：Prometheus 外部访问地址、NAT EIP 明细]`
 
-**验证方法**：以 **S2 通过 + S3 收敛 + S5/S6/S7 不致命** 为硬门槛；任何一项不过 → 触发裁剪预案讨论（延后上线 or 降 SLA 承诺），不允许"带病上线"。报告（含曲线截图）归档 `.deploy/evidence/d4/s1-s10-report.md`。
+**验证方法**：以 **S2 通过 + S3 收敛 + S5/S6/S7 不致命** 为硬门槛；任何一项不过 → 触发裁剪预案讨论（延后上线 or 降 SLA 承诺），不允许"带病上线"。报告（含曲线截图）归档 `deploy/evidence/d4/s1-s10-report.md`。
 
 **不通过时修复**（速查表）：
 
@@ -151,7 +151,7 @@ dig +short www.likha.hk @8.8.8.8   # 期望：返回新加坡 ALB 地址，记�
 curl -sG "${PROM_URL}/api/v1/query_range" \
   --data-urlencode 'query=sum(rate(newapi_db_query_seconds{quantile="0.99"}[30s]))' \
   --data-urlencode "start=${T_SWITCH}" --data-urlencode "end=$((T_SWITCH+120))" \
-  --data-urlencode step=5s > .deploy/evidence/d4/takeover-0-120s-p99.json
+  --data-urlencode step=5s > deploy/evidence/d4/takeover-0-120s-p99.json
 ```
 
 5. 稳定 15 分钟 → GTM 回切主访问池（`【控制台】`，同 D4-1 补拍回切后状态）→ 再稳定 10 分钟；**主站恢复后等待 ≥15 分钟再回切**的规则一并演练记录。
@@ -203,7 +203,7 @@ kubectl --context sg -n new-api create job warmup --image=${ACR_SG_PREFIX}:${SHA
 | HTTP 上游连接 | 预建 TLS 会话（打一次 `/v1/models` 类轻接口） | 首批请求 P99 不劣于稳态 1.5× |
 | Pod 磁盘/页缓存 | 日志目录预创建 | 无首写延迟 |
 
-**验证方法**：接管演练（任务 36）报告里必须有一张"**接管后 0–120s 的 DB QPS / P99 曲线**"（取证文件 `.deploy/evidence/d4/takeover-0-120s-dbqps-p99.png`，数据源 JSON 同目录）。有 warmup 与无 warmup 各跑一次对比（在 perf 环境）。
+**验证方法**：接管演练（任务 36）报告里必须有一张"**接管后 0–120s 的 DB QPS / P99 曲线**"（取证文件 `deploy/evidence/d4/takeover-0-120s-dbqps-p99.png`，数据源 JSON 同目录）。有 warmup 与无 warmup 各跑一次对比（在 perf 环境）。
 
 `[图 D4-2｜拍摄对象：接管后 0–120s DB QPS 与 P99 双轴曲线（有/无 warmup 两条对比）；打码：RDS 内网地址、监控面板账号信息]`
 
@@ -283,7 +283,7 @@ aliyun rds ModifySecurityIps --DBInstanceId ${RDS_MNL_INSTANCE} \
 ```bash
 # 步骤 3：折算（示例，C 以实测值替换）
 python3 - <<'EOF'
-C = float(open('.deploy/evidence/d4/capacity-C.csv').read().splitlines()[1].split(',')[1])
+C = float(open('deploy/evidence/d4/capacity-C.csv').read().splitlines()[1].split(',')[1])
 print("peak RPM =", int(16 * C * 60))   # 主站 16 副本口径
 EOF
 
@@ -291,7 +291,7 @@ EOF
 kubectl --context mnl -n new-api get cm new-api-config -o jsonpath='{.data.GLOBAL_API_RATE_LIMIT}'
 ```
 
-盘点表归档 `.deploy/evidence/d4/upstream-quota-roster.csv`；`【控制台】` 各厂商控制台配额页逐项截图登记。
+盘点表归档 `deploy/evidence/d4/upstream-quota-roster.csv`；`【控制台】` 各厂商控制台配额页逐项截图登记。
 `[图 D4-3｜拍摄对象：厂商控制台 RPM/TPM 配额与实测超额行为（429/排队）页；打码：API Key、账号邮箱、账单余额]`
 
 **验证方法**：`curl` 打满应用限流阈值 → 期望应用侧 429，且上游侧观测不到超额 RPM（厂商控制台确认）；渠道 failover 在注入 5xx 后 ≤10s 生效。
@@ -356,11 +356,11 @@ dig +short www.likha.hk @8.8.8.8
 # 期望：返回 GTM 接入地址（而非直连 ALB DNS 名）
 # 2) 小流量观察（若有灰度开关/白名单用户优先放行）
 # 3) 30/60/120 分钟三次快照：错误率、P95、DB 连接、上游 429、账单速率
-#    快照导出到 .deploy/evidence/d4/release-snapshot-{30,60,120}.json
+#    快照导出到 deploy/evidence/d4/release-snapshot-{30,60,120}.json
 # 4) 宣布上线完成，进入 72h 冻结窗口（只允许回滚，不允许功能变更）
 ```
 
-**验证方法**：上线判定依据是 **SLO 面板 + 拨测**，不是 `rollout status`；三次快照（30/60/120 分钟）各项均在基线带内且检查表勾选已签字归档 `.deploy/evidence/d4/go-live-checklist-signed.md`。
+**验证方法**：上线判定依据是 **SLO 面板 + 拨测**，不是 `rollout status`；三次快照（30/60/120 分钟）各项均在基线带内且检查表勾选已签字归档 `deploy/evidence/d4/go-live-checklist-signed.md`。
 `[图 D4-5｜拍摄对象：上线后 30/60/120 分钟 SLO 面板（错误率/P95/上游 429/账单速率）；打码：用户标识、账单明细金额]`
 
 **不通过时修复**：任一项为"否"→ **不切 DNS、不上线**，回到对应任务卡修复后仅复验失败项与受牵连项；快照异常 → 按回滚 SOP 回滚（回滚方案已在 Day 3 演练，发布后 24h 内回滚必须可用，expand-contract 保证 24h 内不 Contract）。
@@ -398,7 +398,7 @@ kubectl --context perf -n new-api-perf exec deploy/new-api -- sh -c \
 # 期望：恢复动作完成后返回正常 status；全过程录屏 + 命令历史归档
 ```
 
-移交文档索引归档 `.deploy/evidence/d4/handoff-9kit.md`（九件套各自路径 + 抽考记录 + 影子值班排班表）。
+移交文档索引归档 `deploy/evidence/d4/handoff-9kit.md`（九件套各自路径 + 抽考记录 + 影子值班排班表）。
 
 **验证方法**：九件套逐项签字 + 新人抽考通过 + **2 周影子值班**计划落地（Day 5–Day 18：运维主导、原执行人旁观，验收单双方签字）。
 
@@ -423,14 +423,14 @@ kubectl --context perf -n new-api-perf exec deploy/new-api -- sh -c \
 
 ## 里程碑与验收（4 天口径重排）
 
-> 本节将 v2.1 的 D1–D9 里程碑（原 M1=D1–D2、M2=D3–D4、M3=D5–D6、M4=D7–D8、M5=D8–D9）重排到 4 天日历。**判定标准与出口证据内容不变，只压缩时间跨度**；证据目录约定为 `.deploy/evidence/<d1|d2|d3|d4>/`，每项都必须是"可点开看的产物"（命令输出、导出文件、截图），不接受口头汇报。
+> 本节将 v2.1 的 D1–D9 里程碑（原 M1=D1–D2、M2=D3–D4、M3=D5–D6、M4=D7–D8、M5=D8–D9）重排到 4 天日历。**判定标准与出口证据内容不变，只压缩时间跨度**；证据目录约定为 `deploy/evidence/<d1|d2|d3|d4>/`，每项都必须是"可点开看的产物"（命令输出、导出文件、截图），不接受口头汇报。
 
 ### 门禁与里程碑（M1–M5，4 天口径）
 
 | 里程碑 | 判定 | 出口证据（必须可点开看） |
 | --- | --- | --- |
 | **G0（Day 0 前）** | T-5/T-3 十三项前置全部完成（**4 天口径下全部提前到 Day 0 之前**，任一项"已提工单待回"= 未过，D1 不得启动） | 实名批复截图、配额工单批复号、`dig` NS 生效输出、证书签发详情（含 Sans/到期）、11 类产品开通列表、**G8 合并 commit + CI 绿**、连接数预算表、SLA 口径签字页、staging 方案确认 |
-| **M1（Day 1 出口：网络 + 数据底座）** | VPC/10 vSwitch 网段照 §2.2 落地且地址基线记录；RDS 高可用两 AZ、Tair、日志库决策全部就绪 | `.deploy/evidence/d1/vswitch-ip-baseline.txt`（`DescribeVSwitchAttributes` 的 `AvailableIpAddressCount`）；`d1/rds-ha-status.png`【控制台】两 AZ 主备状态；`d1/tair-policy.txt`（`allkeys-lru` 输出）；`d1/ck-decision.md`（ClickHouse A0/A/B/C 决策落地）；`d1/eip-roster.csv`（8 EIP 登记）；`d1/sg-bindings.txt`（SG 绑定 `sg-mnl-app`，非 127.0.0.1） |
+| **M1（Day 1 出口：网络 + 数据底座）** | VPC/10 vSwitch 网段照 §2.2 落地且地址基线记录；RDS 高可用两 AZ、Tair、日志库决策全部就绪 | `deploy/evidence/d1/vswitch-ip-baseline.txt`（`DescribeVSwitchAttributes` 的 `AvailableIpAddressCount`）；`d1/rds-ha-status.png`【控制台】两 AZ 主备状态；`d1/tair-policy.txt`（`allkeys-lru` 输出）；`d1/ck-decision.md`（ClickHouse A0/A/B/C 决策落地）；`d1/eip-roster.csv`（8 EIP 登记）；`d1/sg-bindings.txt`（SG 绑定 `sg-mnl-app`，非 127.0.0.1） |
 | **M2（Day 2 出口：集群 + 应用底座 + 入口）** | 双集群跨 AZ 可调度、镜像流水线通、stable 与备站跑通、主站 token 在备站可用 | `d2/nodes-zones.txt`（两集群 `kubectl get nodes` 跨 AZ）；`d2/node-fd-limit.txt`（`ulimit -n`**≥200000**，实测软/硬限 262144）；`d2/migration-idempotent.txt`（master 二次启动 DDL=0）；`d2/stable-sg-running.txt`；`d2/cross-region-token.json`（主站 token 在备站可用） |
 | **M3（Day 3 出口：安全可观测 + 演练）** | ALB/WAF/GTM 对外生效、安全收口、三重拨测、灰度与故障演练全过 | `d3/alb-waf-gtm.txt`（生效验证）；`d3/sg-negative-test.txt`（SG 反例自查输出为空、伪造 Host 非 200）；`d3/triple-probe.md`（GTM/云监控站点监控/blackbox 独立产出）；`d3/canary-weights.txt`（5/20/50/100 权重实测 + 归零 ≤30s）；`d3/security-audit-15.md`（15 项含豁免单）；`d3/rds-failover-60s.json`（主备切换 5xx 窗口 ≤60s 且自愈、额度对账 0 差异）；`d3/config-sync.txt`（30s 跨副本 + 60s 跨 region 收敛） |
 | **M4（Day 4 上午～午后：容量与接管）** | 压测硬门槛过 + 接管演练判据全过（**本日任务 33/36/49/39 即其证据来源**） | `d4/capacity-C.csv`（单实例容量 C 表；1500 并发 ÷ C ≤ 16）；`d4/s1-s10-report.md`（含曲线截图）；`d4/hpa-scaling.txt`（主站 4–16 与备站 2–24 实测）；`d4/warmup-tw.txt`（备站 24 副本预热耗时 Tw/Twarm 实测）；`d4/takeover-0-120s-dbqps-p99.{json,png}`；`d4/takeover-report.md`（接管/回切 ≤90s、会话保持、对账 0 差异） |

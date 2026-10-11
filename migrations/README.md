@@ -1,7 +1,7 @@
 # migrations/ —— 版本化 DDL（golang-migrate）
 
 > 任务 54 产物。**本目录是 schema 的唯一真相来源**；`migrations/` 一旦启用，应用侧 GORM
-> AutoMigrate 必须整体关闭（`MIGRATE_MODE=off`，见 `deploy/G8代码补项_交付说明_2026-09-28.md`）。
+> AutoMigrate 必须整体关闭（`MIGRATE_MODE=off`，见 `deploy/docs/G8代码补项_交付说明_2026-09-28.md`）。
 > 两条路径并存 = 回滚永远不干净（坑 2），所以切换是**一次性**的。
 
 ## 1. 命名与结构
@@ -56,7 +56,7 @@ Contract 的 PR 标题强制带 `[N+1]`，评审门禁核对「线上是否 100%
 
 - down 必须是 up 的**对称逆操作**，且在 staging 真跑过（本目录每周自动 `up → down 1 → up` 一轮，纳入 §12 证据）。
 - 确实不可逆的迁移（如 Contract 删列、`DROP TABLE`），必须在文件头**显式标注**
-  `⚠ 不可逆 / 仅前滚修复` 并过评审；`ci_check_migrate_versioned.sh` 会检查该标注是否存在。
+  `⚠ 不可逆 / 仅前滚修复` 并过评审；`deploy/ops/ci_check_migrate_versioned.sh` 会检查该标注是否存在。
 - 数据类迁移（回填）的 down 要求「可推导还原」或先建归档表。
 
 ## 5. 执行方式

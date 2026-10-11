@@ -1,3 +1,8 @@
+# ⚠️ 已废弃（2026-10-08）：被 `clusterpipelineconfig-app-stdout.yaml`（新式 ClusterAliyunPipelineConfig）取代。
+#    原因：本老式 CRD 的控制器会把 inputDetail 里未登记的键静默剥掉，纳秒开关
+#    `enable_timestamp_nanosecond` 根本到不了 SLS ⇒ 无法满足 ms 精度要求。
+#    马尼拉 / 新加坡两集群的 `AliyunLogConfig/new-api-app-stdout` 已删除，勿再 apply 本文件（会重复采集）。
+#
 # 任务 26 步骤 2：new-api 容器 stdout 采集（声明式，logtail-ds 消费）
 # 说明：文件日志走**独立配置** `aliyunlogconfig-app-file.yaml`（2026-10-06 纠正版落地）：
 #   落点 `/data/logs/oneapi-*.log`（镜像 WORKDIR=/data；卡内写的 `/app/logs` 不存在），
@@ -15,6 +20,11 @@ spec:
     configName: new-api-app-stdout
     inputType: plugin
     inputDetail:
+      # 2026-10-08：开启纳秒时间戳（官方《日志采集支持纳秒精度时间戳》，场景一 扩展配置）。
+      # 容器 runtime（containerd）stdout 行前缀自带 ns 时间 ⇒ 开启后 SLS 落
+      # `__time_ns_part__`（0~999999999），控制台时间列显示到 ms；严格排序用
+      # ORDER BY __time__, __time_ns_part__。需 LoongCollector ≥1.8.0（实测 3.3.3 ✅）、仅 Linux。
+      enable_timestamp_nanosecond: true
       plugin:
         inputs:
           - type: service_docker_stdout

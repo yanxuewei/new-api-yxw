@@ -12,7 +12,15 @@
 - ✅ Go 1.25.1（= `go.mod`）+ `GOPROXY=https://goproxy.cn,direct`；`web/` 前端用 bun（WSL 内**无 node/npm/bun/kubectl/helm**，需时装 Linux 版）。
 - ✅ PATH 污染已清：`/etc/wsl.conf` 加 `[interop] appendWindowsPath=false`。**编译/装依赖别放 `/mnt/e`**（`/tmp` 2.9 GB/s vs 421 MB/s）。
 - 容器 `new-api`(:3000) · `postgres:15` · `redis` 均 `restart: always`。
+- ⚠️ **本机不适合构建本仓镜像（2026-10-09 实测）**：`web/` 800+ 依赖使 `bun install` 一次性开 **200+ 并发 TCP**，**WSL2 NAT 建不起来** → 容器内采样 `SYN_SENT≈211 / ESTABLISHED 13~25`（`nf_conntrack 112/262144`，**非**表满）→ bun 永久等齐卡死；**脱离 BuildKit 也能稳定复现**。反证：低并发 `bun add lodash`（4 请求）**391ms 成功**、主机 `curl` 正常 ⇒ **与代码/Dockerfile 无关**。`go mod download` 走 `--go-proxy aliyun` 可用（2.7s）。⇒ 发版构建走 **CI** 或 **macOS**（⚠ fork 现有 `docker-image-branch.yml`/`docker-build.yml` **推 Docker Hub `calciumion/new-api`，无推 ACR 的 workflow**，需新增）。
 - **macOS 侧直操云端**：`~/.workbuddy/binaries/aliyun-cli/aliyun`（**无 `--region` 会静默用 profile 地域 ap-southeast-6**）；集群操作用 `deploy/ack_remote.sh`。
+
+## 上游二次开发纪律（2026-10-09 fanyan 下达 · fork 维护总纲）
+`new-api-yxw` = `QuantumNous/new-api` 的二次开发分支（origin `git@github.com:yanxuewei/new-api-yxw.git`，分支 `main`）。
+**五条铁律**：① **能扩展不改源码**（优先插件/hook/配置覆盖，其次才改上游文件）② 根目录 `UPSTREAM_CHANGES.md` 记定制清单、**每次 sync 前对照检查冲突点** ③ 自研代码放 `ours_likha/{code,ops,doc}` 与上游**物理隔离** ④ **禁止无意义的格式化改动上游文件**（一次格式化 = 永久冲突源）⑤ **merge 冲突解决后必须跑全量测试**，sync PR 的 CI **不允许 skip 任何 job**。
+- **落地物**：`UPSTREAM_CHANGES.md`（清单，含"不动的地方"反例表）· `ours_likha/ops/patches/0001-log-ms-precision.patch`（复现补丁）· `ours_likha/ops/verify-upstream-changes.sh`（**在位校验，sync 前后必跑**）· `ours_likha/ops/local-ci.sh`（本地复现 `ci.yml` 全量 job：backend `go vet/build` + `make test`，frontend `bun typecheck/test`）· `ours_likha/code/cmd/logms-check`（**运行时自检**：`go run ./ours_likha/code/cmd/logms-check` → 期望 `RESULT=MS_CONFIRMED`；不需 DB/Redis/Docker）。
+- **当前唯一上游改动**：日志时间格式毫秒化 —— **3 文件 5 处**（`middleware/logger.go:38`、`common/sys_log.go:20/27/34`、`logger/logger.go:113`），`15:04:05` → `15:04:05.000`。该需求**无扩展点**（GIN formatter 是闭包硬编码；`middleware.SetUpLogger` 还承载私有脱敏 `redactTaskArtifactAccessQuery`，整体替换会丢脱敏）⇒ 原地最小改写，符合纪律 1/4。
+- ⚠️ **纪律 3 的例外**：当"能扩展不改源码"不成立时，允许**最小化原地补丁**，但必须登记清单 + 附可复现补丁 + 配在位校验。
 
 ## 两文档口径冲突（一律按 ①）
 | 项 | ② xlsx v2.3 | ① 指南（采信） |
@@ -36,6 +44,16 @@
 - **VPC 端点两端皆偶发抖动** → 写操作**重试 ≥3 次**并校验返回是合法 JSON，否则**静默漏建资源**。
 - **ALB 写操作先干跑**：`--DryRun true` 回 `DryRunOperation` 即校验全过、零变更。
 - 一键复核 `deploy/verify_deploy_0_6.sh`（8 项全走 `jq -e`）。**`WARN` ≠ 通过**。
+
+## RAM 权限与 K8s RBAC（2026-10-10 定论）
+
+**★ 两套互不相通的体系，配齐才不报错**：**RAM 策略**管「能否调 OpenAPI」（控制台报「无权限查看」）；**K8s RBAC**管「K8s 里能否 list/get/update 资源」（报 `APISERVER.403 … is forbidden: User "<uid>" cannot list resource "…"`）。两个症状必须分别处理，别混为一谈。
+
+- **`newapi-ops-operator` 现为 v3**（2026-10-10 发布并 SetAsDefault，AttachmentCount=3：挂 `ops_group`/`dev_group`/`ops-prod_group`）。v3 相比 v2 新增 Allow：`kvstore:*`(Tair) · `hdm:*`(DAS) · `yundun-cert:*`(数字证书/原SSL) · `arms:*`(ARMS+Grafana) · `clickhouse:*`(CK) · `quotas:*` · `resourcemanager:Get*|List*` · `ram:Get|ListResourceGroup*` · `tag:Get*|List*|Describe*` · `*:ListTagResources` 等；新增 Deny **`kvstore:DeleteInstance`**（与 `rds:DeleteDBInstance` 同口径）。**IaC（此前正文只在控制台、无 IaC）**：`deploy/ops/ram_policy_newapi-ops-operator.v3.json`（真源）+ `deploy/ops/ram_ops_operator_extend.sh`（`check|apply|verify|desc|rollback`）。⚠️ 策略版本上限 **5**（现 v1/v2/v3）。
+- **★ 动作前缀必须逐个在系统策略里核准**（凭记忆写会**静默失效**，RAM 不报错）。已知：`kvstore`=Tair · `hdm`=DAS · **`yundun-cert`=数字证书（原SSL，无 `cas:`/`ssl:` 前缀）** · `clickhouse`=CK · `quotas`=配额中心 · `resourcemanager`/`ram:Get|ListResourceGroup*`=资源组 · `tag`+`*:ListTagResources`=标签。核验方式：`aliyun ram GetPolicyVersion --PolicyName Aliyun<X>FullAccess --PolicyType System`。
+- **★ ACK RBAC（`cs`）两条坑**：① **`cs GrantPermissions` 是「全量覆盖」** —— body 必须列出该用户要保留的**全部**集群，否则抹掉其它集群授权 ⇒ 正确姿势「读现状→原样保留所有集群→只改角色」。② **响应字段名与请求不一致**：请求用 `role_name`(预置角色名: admin|admin-view|ops|dev|restricted) + `role_type`(cluster|namespace|all-clusters)；**响应**把预置角色名放在 `role_type`、`role_name` 为空。③ `cs DescribeUserPermission`（`--uid`）**不分地域**，一次返回该用户**全部**集群授权。IaC：`deploy/ops/ack_rbac_grant.sh`（`check|apply|verify`，含**防降权护栏**：admin→ops 会被拒绝，需 `ALLOW_DOWNGRADE=1`）。
+- **当前集群清单（3 个）**：mnl `cd57e40ce9a634c1698c2f5c5e09bd93c`(ap-southeast-6) · sg `ca75829e3492d491d9d434de087913798`(ap-southeast-1) · `cb0abf5bc06034f7bbdb991752f6f3e62`(ap-southeast-6, ack.standard, 09-30 建, 私网端点 `10.2.25.173:6443`)。
+- ⚠️ **`UID` 是 bash 只读变量**（root 下=0）——脚本里用它作变量名会静默取到 0；一律换名（如 `RAM_UID`）。
 
 ## 付费方式（2026-09-28 指令 + 09-29 CK 补丁 + **10-06 节点池裁定**）
 | 产品 | 口径 | 计费参数名 |
@@ -64,9 +82,12 @@
 - **★ 集群内无 alb-controller Pod 属正常**：ACK 托管形态（webhook+reconcile 在托管平面）⇒ 判死活**一律用 server-side dry-run**，勿看 Pod。
 - **既有实例**：RDS `pgm-5tstdhko64x2c01w`（`rds-mnl-newapi`，**PG 17.0**，`pg.n4.2c.2m` **2C8G**，主 6b/备 6a，Prepaid，Running，**到期 2026-10-28 ⚠ 倒计时风险**）· Tair `r-5tsf1fe16543e274`（企业版 1G/2DB/6proxy，仅 6a，**只买 1 个月**）· Tair 新加坡**仍 0 实例** · CK `cc-5tsv2o51s1360b0pr`（企业版单 AZ 6a，已接线）。**规格/周期与指南口径不符 → 待用户裁定**。
 - **⚠ RDS 规格口径矛盾**：实况 2C8G，但任务 4 卡正文仍以 `pg.x4.2xlarge.2c` 16C64G 的 15134.47 / 实付 10594.13 USD 为准 —— 两处须对齐。
-- **账务**：账户余额 **0.00 USD**（10-05 复核）；未支付订单 `518158947970481`（RDS **16C64G**，10594.13 USD）与实建 2C8G 不符，**须确认已取消**。
+- **账务**：账户余额 **1,260.55 USD**（**2026-10-09 复核，已充值**；10-05 曾为 0.00）；未支付订单 `518158947970481`（RDS **16C64G**，10594.13 USD）与实建 2C8G 不符，**须确认已取消**。`bssopenapi QueryAccountBalance` 须 `--region ap-southeast-1`（`ap-southeast-6`/`cn-hangzhou` 无 endpoint）。
 - **五项裁定（09-30）**：① KMS 实例**不买**（凭据走手工 Secret，已落地）② CK 计算资源包**不买**（走按量）③ 备站→CK 走 **CreateEndpoint 公网**（已落地）④ ALB 现在买（已执行）⑤ **GTM 挂起**（域名到位后可重启评估）。
 - **集群侧已落地**：`new-api` ns/SA/ResourceQuota/ConfigMap 两地 · RRSA 角色 `new-api-rrsa-kms-mnl/-sg` · Secret `new-api-secrets`（mnl 6 键 / sg 3 键）· CM `LOG_SQL_CLICKHOUSE_TTL_DAYS=90` · SG `SQL_DSN` 已切 `sslmode=verify-full&sslrootcert=/etc/ssl/rds/ca.crt` + Secret `rds-ca-apse6`（**备站 Deployment 必须挂载，否则连不上**；mnl 侧仍 `prefer`）· VPC/vSwitch · SG×5 · NAT/EIP · ACR（全项闭合）· SLS 两项目 · ACK 两集群 + 节点池 · 私网运维通道。
 - **凭据保管**：`/root/.deploy_secrets/`（root 600）= RDS 三账号口令 + CK 两 DSN + SESSION_SECRET×2；Tair 口令在 `deploy/.env`（gitignored）；`newapi_ops` 在 `/home/fanyan/.newapi_rds_ops_password`。待补：`PAYMENT_PRIVATE_KEY`、`TLS_WILDCARD`（用户提供）；SG `REDIS`/`SESSION_SECRET_OLD`/`SQL_DSN_MIGRATE`（SG Tair 未建）。
 - **仍未闭环门禁**：G1 实名 · G4 NS · **G5 证书** · G6 模板 PR · **G7 产品开通（含 CK 企业版白名单）** · **G8 代码补项（/healthz·/readyz·/metrics + 限流降级放行）** · G11 连接预算表 · G12 SLA 签字 · G13 staging · 上游 8 EIP 白名单。
+- **★ 账号侧「开通/购买」类阻塞（2026-10-10 更新）**：① ✅ **NAAM 网络分析与监控**（`cms_naam_public_intl`，站点监控归属）**2026-10-10 已由控制台开通**（免费/按量；境外探测 8.4 USD/万次，本方案 ≈2.9 USD/月）→ `SiteMonitorTask.QuotaLimit` **0 → 9999**（`SuitInfo=free`）。`aliyun cms` 无 Open 接口、`bssopenapi` 新版**已移除 `CreateOrder`** ⇒ **开通只能控制台「立即开通」**；开通后创建/查询全可 CLI。② ✅ **Grafana 工作区 2026-10-10 已由控制台建成**（`gra-newapi-sg` / `grafana-intl-sg-swy4zuysc01` / 新加坡 / 专家版 10U / Grafana **12.4.x**，snatIp `8.222.236.38`，到期 2026-11-11）；CLI 建工作区历史恒报 601（`grafana_prepaid_public_intl` 在 `ap-southeast-1` 无 `DescribePricingModule` 模块）⇒ **工作区创建必须走控制台，但建好之后的一切配置可全脚本化**（见下条）。
+- **★ Grafana 配置通道（2026-10-10 定论）**：`aliyun arms GrafanaWorkspaceHttpApiProxy` —— **`--BodyStr` 就是被代理的 Grafana 请求本身** `{"method","path","headers","body"}`（**不是**包装对象；⚠️ `body` 必须是**转义后的 JSON 字符串**；POST 须显式带 `Content-Type: application/json`）。**两个坑**：① 调用者须先 `CreateGrafanaWorkspaceAccount --AliyunUid <RAM UserId> --Role Admin --OrgId 1` 加入工作区，否则任意路径报 `40300 sub account is not authorized on this workspace`（⚠️ **`UID` 是 bash 只读变量**，误用会静默建出 `aliyunUid="0"` 的空账号）；② 代理**有路径白名单**（`/api/health`、`/api/ds/query` 被拒；`/api/datasources*`、`/api/dashboards*`、`/api/search` 可用）。**已落地**：数据源 `ARMS-Prometheus-MNL`（uid `arms-prom-mnl`，→ mnl 公网端点）+ 看板 `newapi-min-obs`（4 面板：就绪容器数 / CPU / 内存工作集 / 重启累计）；**跨区连通铁证** `GET /api/datasources/uid/arms-prom-mnl/health` → `Successfully queried the Prometheus API. status OK`。**IaC**：`deploy/tasks/task26/grafana_setup.py`（`account|ds|dash|verify|all`）+ `task26_finish_gaps.sh grafana`。
+- **任务 26 判定（2026-10-10 更新）**：**完成（4/4）** —— SLS ✅ / ARMS Prometheus ✅ / Grafana ✅ / **云监控站点监控 ✅**。站点监控任务 `likha-hk-newapi-status`（TaskId `d7a836f6-b87b-4b3d-82bb-424dda2853cf`，HTTP GET 5min，断言 `match_rule=0` + `"success":true`，探针 **新加坡375/香港569/日本576/马尼拉18877**，`TaskState=1`），**实测可用性 100%、响应 63–254ms**；⚠️ 任务卡要求断言含 `version`，但实测 `/api/status` 返回 `"version":""`（空串）⇒ 版本断言不可行（增强项，待 G8/发版注入）。**马尼拉探针 18877 可用且健康，推翻 P1-13**。一键复核 `bash deploy/tasks/task26/task26_finish_gaps.sh all`。非本卡范围：blackbox 多 region 自拨（T+14/G8 后）、GTM（任务 21 挂起）；Grafana SLO/错误预算看板属任务 32。
 - **F11 待裁决**：官方规格表标 `pg.x4.2xlarge.2c` `max_connections=6400`，与 F11 的 800 差 8 倍 → 实例 Running 后 `SHOW max_connections;` 定论。

@@ -1,8 +1,8 @@
 # 节点池台账（NodePool Ledger）· 马尼拉 / 新加坡
 
 > 任务 11（马尼拉）/ 后续任务 24（新加坡）的唯一真源。
-> 配套脚本：`deploy/task11_nodepool_mnl.sh`（幂等，`--dry-run` / `--verify` / `--enable-autoscaling` / `--delete`）
-> 共享 user_data：`deploy/nodepool-userdata-nofile.sh`（马尼拉/新加坡**同一份**，禁止手工点两遍）
+> 配套脚本：`deploy/tasks/task11/nodepool_mnl.sh`（幂等，`--dry-run` / `--verify` / `--enable-autoscaling` / `--delete`）
+> 共享 user_data：`deploy/ops/nodepool-userdata-nofile.sh`（马尼拉/新加坡**同一份**，禁止手工点两遍）
 > 证据目录：`deploy/logs/task11_<ts>/`
 
 ---
@@ -28,7 +28,7 @@
 | 登录 | `key_pair=newapi-mnl`（无密码） |
 | Worker RAM 角色 | `KubernetesWorkerRole-4f4f9191-362f-4e36-8420-a41375ef1183` |
 | 节点池托管 | **关闭**（`management.enable=false`：无自愈 / 无 CVE 自动修复 / 无 OS 自动升级） |
-| user_data | `nodepool-userdata-nofile.sh`，b64 3600 B，已注入 ✅ |
+| user_data | `deploy/ops/nodepool-userdata-nofile.sh`，b64 3600 B，已注入 ✅ |
 | 标签（ECS 资源） | `site=ph-mnl` · `env=prod` · `track=stable` |
 | 标签（K8s Node） | `site=ph-mnl` · `track=stable`（已写进节点池 `kubernetes_config.labels`，后续扩缩容节点自带） |
 
@@ -161,9 +161,9 @@ please complete the AliyunOOSLifecycleHook4CSRole ramrole authorization
 
 ## 6. 文档回写（2026-09-29，**已完成**）
 
-脚本：`deploy/patch_task11_nodepool.py`（幂等，`--check` / `--apply`，自动 `.bak-np11-<ts>`）。
+脚本：`deploy/ops/patch_task11_nodepool.py`（幂等，`--check` / `--apply`，自动 `.bak-np11-<ts>`）。
 
-覆盖 **5 份文件**：`阿里云国际站菲律宾部署_详细操作指南-v2.0.md`（52 行）、`…指南.md`（52）、`…指南-ch.md`（52）、`wf2/part2a.md`（33）、`wf2/part5.md`（7）。
+覆盖 **5 份文件**：`deploy/docs/阿里云国际站菲律宾部署_详细操作指南-v2.0.md`（52 行）、`…指南.md`（52）、`…指南-ch.md`（52）、`wf2/part2a.md`（33）、`wf2/part5.md`（7）。
 
 修正的 8 类错误（均为**实测**推翻原文）：
 
@@ -192,7 +192,7 @@ please complete the AliyunOOSLifecycleHook4CSRole ramrole authorization
 > 根因：**ACK 创建集群时没有在「控制面 ENI 的安全组」放行 TCP 6443** → 节点与 Pod 都无法直连 API Server ENI。
 > 处置：补齐该安全组规则 + 重跑 bootstrap → **4/4 `Ready`，集群可用**。**全程不需要任何 hosts / EndpointSlice hack。**
 >
-> **📌 工单闭环（2026-09-30）**：就"为何控制面 SG 不放行 6443"提的阿里云工单已答复——**平台侧已修复**（对**新建**集群生效）。存量两集群的 6443 仍由我方 09-29 所补规则承担（`CreateTime` 可证），**勿撤**；SOP 维持（新建集群仍先复核 6443，若观察到 ACK 已自动放行即可降级该步骤）。详见 `deploy/工单_ACK马尼拉控制面安全组缺失.md` §7。
+> **📌 工单闭环（2026-09-30）**：就"为何控制面 SG 不放行 6443"提的阿里云工单已答复——**平台侧已修复**（对**新建**集群生效）。存量两集群的 6443 仍由我方 09-29 所补规则承担（`CreateTime` 可证），**勿撤**；SOP 维持（新建集群仍先复核 6443，若观察到 ACK 已自动放行即可降级该步骤）。详见 `deploy/docs/工单_ACK马尼拉控制面安全组缺失.md` §7。
 
 ### 7.1 现象：控制台「失败 2」是失真显示
 
@@ -298,7 +298,7 @@ aliyun ecs AuthorizeSecurityGroup --RegionId ap-southeast-6 \
 
 | # | 项 | 说明 |
 |---|---|---|
-| 1 | **手工补的安全组规则** | 该规则由我方添加，ACK 未建。若 ACK 后续运维重置该 SG，需重加 → **建议提工单要求 ACK 侧补齐**（文本见 `deploy/工单_ACK马尼拉控制面安全组缺失.md`） |
+| 1 | **手工补的安全组规则** | 该规则由我方添加，ACK 未建。若 ACK 后续运维重置该 SG，需重加 → **建议提工单要求 ACK 侧补齐**（文本见 `deploy/docs/工单_ACK马尼拉控制面安全组缺失.md`） |
 | 2 | 源放宽到 `10.0.0.0/16` | 覆盖节点 / Pod / SLB 全部可能源；API Server 仍需 mTLS 客户端证书，风险可控。如需收紧可改为「节点 SG + Pod vSwitch 段」 |
 | 3 | 新加坡同构集群（任务 24） | **建集群后第一件事就是核对控制面 SG 是否有 6443 规则**，否则会原样复现 |
 
@@ -361,7 +361,7 @@ aliyun cs DescribeClusterUserKubeconfig --ClusterId <cid> --region ap-southeast-
 
 ## 9. 待办
 
-- [ ] **提交工单**：要求 ACK 侧补齐控制面安全组 6443 规则（文本 → `deploy/工单_ACK马尼拉控制面安全组缺失.md`）
+- [ ] **提交工单**：要求 ACK 侧补齐控制面安全组 6443 规则（文本 → `deploy/docs/工单_ACK马尼拉控制面安全组缺失.md`）
 - [x] ~~**任务 13**：集群级「节点伸缩」方案配置~~ → **编号更正：文档里「节点伸缩」是任务 42**（任务 13 是 RDS 账号最小化，早已完成）。任务 42 已执行，见 §10
 - [ ] **任务 22 关联**：`sg-mnl-app` 的 3000 端口入向规则已就位（组引用 ALB）；节点侧无需再加
 - [ ] 8 EIP 出口复验、Tair 连通性验证 → 节点已就绪，**现在就能做**（云助手）
@@ -377,8 +377,8 @@ aliyun cs DescribeClusterUserKubeconfig --ClusterId <cid> --region ap-southeast-
 - ACK 建节点池只设 ESS 的 `MultiAZPolicy=BALANCE`，**不设独立的 `AzBalance`**。仅前者时，ESS 在**实例创建阶段不做跨区均衡**，会顺着「有库存的交换机」把实例全塞进去 —— 新加坡 desired=2 建出来是 **1a:2 / 1b:0**（先把首位机型换成两区都在售的 `g9ae` 仍全落 1a，证明与机型无关）。
 - 修复与断言（**幂等，两地通用**）：
   ```bash
-  bash deploy/nodepool_azbalance_fix.sh mnl     # 马尼拉 asg-5tsd68ew4u0wutaqk5cy
-  bash deploy/nodepool_azbalance_fix.sh sg      # 新加坡 asg-t4ngzbg7m9u84y59dkxl
+  bash deploy/ops/nodepool_azbalance_fix.sh mnl     # 马尼拉 asg-5tsd68ew4u0wutaqk5cy
+  bash deploy/ops/nodepool_azbalance_fix.sh sg      # 新加坡 asg-t4ngzbg7m9u84y59dkxl
   ```
 - ⚠️ `AzBalance` **`DescribeScalingGroups` 不回读**；且**任何经 ACK 侧改节点池后都要重跑断言**（可能被覆盖）。
 - 马尼拉处置结果：`AzBalance=true` 已断言，分布仍 **6a:2 / 6b:2**（未开 `AutoRebalance`，不动现有节点）。
@@ -395,4 +395,31 @@ aliyun cs DescribeClusterUserKubeconfig --ClusterId <cid> --region ap-southeast-
 
 **容量口径**：按 **request** 规划 + 留 30% 余量（8C 节点可分配 ≈7.2C，stable 副本 request 2C → 每节点 ≈3 副本）；**勿按 limit 4C 算**。
 
-**未完成**：任务 42 步骤 4 的 `pdb-new-api-stable`（`minAvailable: 70%`）依赖 namespace `new-api`（**任务 17** 创建）→ 顺延。
+## 11. ✅ 任务 42 收尾（2026-09-30，PDB 已建，本卡全部落地）
+
+- `pdb-new-api-stable`（ns `new-api`，`minAvailable: 70%`，selector `app=new-api,track=stable`）**已创建**（此前因任务 17 未建 ns 而顺延）。当前 `ALLOWED DISRUPTIONS=0` 属预期——匹配 Pod 为 0，stable Deployment（任务 23）上线后随副本数变化。
+- **AzBalance 复断言（2026-09-30）**：两池均重跑 `deploy/ops/nodepool_azbalance_fix.sh`（幂等），分布 **6a:2/6b:2**、**1a:1/1b:1**，与 09-29 一致，无漂移。
+- 配额不变量复核：马尼拉 8×8=64 / 新加坡 12×8=96，均顶满已批配额（64/96，工单 Agree）——`max_size` 不可再调大，除非先提配额。
+
+**⛔ 仍挂账：伸缩压测验证（卡片「验证方法」整段）**——唯一前置：`new-api-stable` Deployment 尚未部署（任务 23/24），无从 scale。
+（付费方式订正见下 §11.1：**实为按量**，无"预付/不退款"问题，原"须预算签字"前提作废；配额约束 = 马尼拉 8×8=64 顶满按量已批 64、新加坡 12×8=96 顶满 96。）
+→ 触发条件：任务 23 部署 stable 后，低峰窗口执行「scale 12 → 观察 Pending→扩容→Running → 缩回 4」，证据回填本节。
+
+### 11.1 ⚠️ 付费方式实测订正（2026-09-30）：两池实为**按量（PostPaid）**，"全面转包年"决策未落地
+
+三层 API 证据一致（控制台节点池列表"自动收缩策略"列显示"（包年包月）"与执行层矛盾，**以 API 为准**）：
+
+| 视角 | 字段 | 马尼拉 | 新加坡 |
+|---|---|---|---|
+| ACK 节点池 `DescribeClusterNodePoolDetail` | `scaling_group.instance_charge_type` / `period` / `auto_renew` | `PostPaid` / 0 / false | `PostPaid` / 0 / false |
+| ECS 实例本体 `DescribeInstances` | `InstanceChargeType` / `ExpiredTime` | `PostPaid` / `2099-12-31`（按量哨兵值） | 同 |
+| ESS 伸缩配置 `DescribeScalingConfigurations`（**扩容新节点真正走的那层**） | `InstanceChargeType` / `Period` | `null`（ESS 中 null=按量） | `null` |
+
+根因：建池脚本 `deploy/tasks/task11/nodepool_mnl.sh` 写死 `instance_charge_type:"PostPaid"` → **2026-09-28"ECS 节点池全面转包年（PrePaid，1 年 + 自动续费）"决策从未落到节点池**，而任务 11 坑 7/7b（扩容即预付、库存独立）与本卡前置的成本模型都建立在 PrePaid 前提上。
+
+**✅ 已裁定（2026-09-30，负责人）：选 A —— 维持按量**；配额口径固定为按量 `q_ecs_enterprise_postpay_c`（64/96，顶满 max_size），`prepay_c`=100/100 降为备查。三选项留档：
+- **A. 维持按量 ✅**：弹性最灵活，新加坡备区（低频启用）语义合适；代价是马尼拉 4 台常驻节点按量单价高于包年（实测差价可用 `DescribePrice`，注意任务 11 坑 7：Prepaid 用 `--CommodityCode rds`、Postpaid 用 `bards`，先看 `chargeType` 自校）。
+- ~~**B. 补执行转包年**~~（否决）：基线 4 台走 ECS `ModifyInstanceChargeType`；节点池 `instance_charge_type` 改 PrePaid 让扩容走包年 → 回到坑 7"扩容即预付、缩容不退款"的成本刚性。
+- ~~**C. 混合**~~（否决）：马尼拉基线转包年 + 新加坡保持按量；成本表需分列两种口径。
+
+**文档回写**：v2.0 指南共 **38 处**已按本裁定订正（`deploy/ops/patch_prepaid_to_postpaid_20260930.py`，幂等，含建池 body/配额口径/成本表/坑 7·7b 状态标记），备份 `*.bak-prepaid2postpaid-20260930-180320`；另见 `deploy/docs/付费方式修订记录-2026-09-28.md` 追加的 2026-09-30 节。

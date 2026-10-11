@@ -1,0 +1,28 @@
+--- a/deploy/ack_remote.sh
++++ b/deploy/ack_remote.sh
+@@ -5,19 +5,22 @@
+ # 为什么需要它：两集群均 endpoint_public_access=false，本机（深圳）不在 VPC 内，
+ # 无法直连 10.x 私网 VIP；而 ACK 节点在 VPC 内、且已具备 NAT 出网。
+ # 本脚本把 kubeconfig 注入到节点，在节点内执行 kubectl / curl。
+ #
+-# usage: ack_remote.sh <mnl|sg> <body.sh> [node_id] [loops]
++# usage: ack_remote.sh <mnl|sg|jkt> <body.sh> [node_id] [loops]
+ #   body.sh 用 $KUBECONFIG 即可；可参考 K8S=/tmp/k8s/kubeconfig
+ set -uo pipefail
+ 
+-SITE="${1:?usage: ack_remote.sh <mnl|sg> <body.sh> [node_id] [loops]}"
++SITE="${1:?usage: ack_remote.sh <mnl|sg|jkt> <body.sh> [node_id] [loops]}"
+ BODY="${2:?body file required}"
+ NODE_ARG="${3:-}"
+ LOOPS="${4:-24}"
+ 
+ case "$SITE" in
+   mnl) REGION=ap-southeast-6; CID=cd57e40ce9a634c1698c2f5c5e09bd93c ;;
+   sg)  REGION=ap-southeast-1; CID=ca75829e3492d491d9d434de087913798 ;;
+-  *)   echo "site must be mnl|sg"; exit 2 ;;
++  # 雅加达非生产集群（任务45 方案 A / G13 staging 落点）。ack.standard 基础版。
++  # ⚠ 该集群当前"2 节点已起、无工作负载"（jakarta_dev_ledger §11.4），且未验证过
++  #   NAT 出网与 ACR EE 拉取路径（O2）⇒ 首次 apply 前先跑 task55_staging_apply.sh --precheck。
++  jkt) REGION=ap-southeast-5; CID=cb0abf5bc06034f7bbdb991752f6f3e62 ;;
++  *)   echo "site must be mnl|sg|jkt"; exit 2 ;;
+ esac

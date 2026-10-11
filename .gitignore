@@ -48,3 +48,4 @@ go.work.sum
 .obsidian/plugins
 .obsidian/themes
 
+.obsidian/workspace.json

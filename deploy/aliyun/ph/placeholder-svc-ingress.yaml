@@ -2,7 +2,7 @@
 #
 # ⚠️ 2026-10-06 起：**`Ingress/new-api-verify` 段已退役，不要再 apply 本文件的 Ingress**。
 #    原因：它与 `Ingress/new-api-stable-ip` 指向同一 Service，各自生成一个同质 ALB ServerGroup
-#    ⇒ 健康检查流量翻倍并触发 429（见 `deploy/风险_ALB健康检查被限流429_2026-10-06.md`）。
+#    ⇒ 健康检查流量翻倍并触发 429（见 `deploy/docs/风险_ALB健康检查被限流429_2026-10-06.md`）。
 #    其 host 规则（`ph-verify.internal.likha.hk`）已并入 `deploy/manifests/ingress-mnl-stable-ip.yaml`。
 #    `Service/new-api-master` 段仍在用（master Deployment 的前端），保留。
 #

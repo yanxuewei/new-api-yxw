@@ -25,3 +25,22 @@ records:
 
 # 裸域说明（§3.7 坑）：*.likha.hk 不覆盖 likha.hk 本身。
 # 裸域统一 301 → www.likha.hk，在 ALB/DCDN 层实现，不在 DNS 层做 CNAME（CNAME 不能用于裸域）。
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 现网实况（2026-10-09 实测，`alidns DescribeDomainRecords --DomainName likha.hk`）
+# 上面 records: 段仍是"设计模板"，未落地；真实已生效记录只有下面 6 条，全部 A 直指
+# ALB 各可用区公网 EIP（EipType=Common），GTM/ops/static 均未接入。
+# zone: likha.hk  ·  免费版  ·  NS = ns7.alidns.com / ns8.alidns.com
+#
+#   RR    Type Value            TTL  Weight Status  RecordId              归属
+#   @     A    8.212.183.7      600  1      ENABLE  2107459138178953216   ALB alb-1riqckb1h8ezm0y7s9 (mnl 6a)
+#   @     A    8.212.161.49     600  1      ENABLE  2107459130738276352   ALB alb-1riqckb1h8ezm0y7s9 (mnl 6b)
+#   www   A    8.212.183.7      600  1      ENABLE  2107455278295137280   同上
+#   www   A    8.212.161.49     600  1      ENABLE  2107455274482150400   同上
+#   sg    A    43.98.186.238    600  1      ENABLE  2108505861181153280   ALB alb-amdwm60xmznh7s1nae (sg 1a)  ← 2026-10-09 新增
+#   sg    A    47.237.68.142    600  1      ENABLE  2108505866349045760   ALB alb-amdwm60xmznh7s1nae (sg 1b)  ← 2026-10-09 新增
+#
+# sg.likha.hk 是"备站常态不接公网 DNS"这一裁定的有意推翻（用户 2026-10-09 裁定），
+# 后果与取证见指南 任务 25 顶部裁定块。两地 ALB 均只有 80/HTTP 监听 ⇒ 只能 HTTP。
+# ⚠ A 记录钉 EIP：ALB 增删可用区或释放 EIP 时以上记录会变哑，改 zone 映射须同步改 DNS。
+# ─────────────────────────────────────────────────────────────────────────────

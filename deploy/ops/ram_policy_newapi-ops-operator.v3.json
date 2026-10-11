@@ -1,0 +1,74 @@
+{
+  "Version": "1",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ecs:*",
+        "vpc:*",
+        "cs:*",
+        "rds:*",
+        "slb:*",
+        "alb:*",
+        "waf:*",
+        "alidns:*",
+        "cms:*",
+        "log:*",
+        "sls:*",
+        "oss:*",
+        "cr:*",
+        "cen:*",
+        "pvtz:*",
+        "kms:Describe*",
+        "kms:List*",
+        "bss:Describe*",
+        "bss:Query*",
+        "sts:GetCallerIdentity",
+
+        "kvstore:*",
+        "hdm:*",
+        "yundun-cert:*",
+        "arms:*",
+        "clickhouse:*",
+        "quotas:*",
+        "resourcemanager:Get*",
+        "resourcemanager:List*",
+        "ram:GetResourceGroup*",
+        "ram:ListResourceGroup*",
+        "ram:ListAssociatedTransferSetting",
+        "ram:LookupResourceGroupEvents",
+        "tag:Get*",
+        "tag:List*",
+        "tag:Describe*",
+        "*:ListTagResources",
+        "*:DescribeTags",
+        "*:DescribeTagKeys",
+        "*:ListTagKeys",
+        "*:ListTagValues"
+      ],
+      "Resource": [
+        "*"
+      ]
+    },
+    {
+      "Effect": "Deny",
+      "Action": [
+        "account:*",
+        "bss:Modify*",
+        "bss:Pay*",
+        "bss:Create*",
+        "ecs:DeleteInstance",
+        "vpc:DeleteVpc",
+        "vpc:DeleteVSwitch",
+        "rds:DeleteDBInstance",
+        "cs:DeleteCluster",
+        "slb:DeleteLoadBalancer",
+        "oss:DeleteBucket",
+        "kvstore:DeleteInstance"
+      ],
+      "Resource": [
+        "*"
+      ]
+    }
+  ]
+}

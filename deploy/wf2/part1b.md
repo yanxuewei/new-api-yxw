@@ -65,7 +65,7 @@ vsw-mnl-data-b  ap-southeast-6b 10.0.64.0/20  free=409x
 ```bash
 # 3. 把 free IP 基线写入台账（后续每里程碑对比用），例如：
 aliyun vpc DescribeVSwitches --RegionId ap-southeast-6 --VpcId "$VPC_ID" --PageSize 20 \
-  | jq -r '.VSwitches.VSwitch[]|"\(.VSwitchName) \(.AvailableIpAddressCount)"' >> .deploy/wf2/vsw-free-ip-baseline.txt
+  | jq -r '.VSwitches.VSwitch[]|"\(.VSwitchName) \(.AvailableIpAddressCount)"' >> deploy/wf2/vsw-free-ip-baseline.txt
 ```
 
 4. 流日志（VPC 控制台 → 流日志）投递 SLS：**马尼拉是否可选待核实**；不可选则跳过并记为残余风险。此步仅控制台可做：

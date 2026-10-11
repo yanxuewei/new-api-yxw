@@ -1,0 +1,37 @@
+# staging · 15 LimitRange
+#
+# 为什么必须有：prod ns new-api 只有 ResourceQuota、**没有 LimitRange**
+# （Day2任务23 注释："resources 必须显式 ns 有 ResourceQuota(new-api-quota) 且无 LimitRange"）。
+# 非生产侧由多个团队/临时任务反复改清单，漏写 requests 的概率远高于 prod ⇒
+# 补 default，把"漏写即吞掉整台 2C 节点"变成"漏写按 500m/512Mi 计"。
+# 口径：requests == default（不设 defaultRequest），limit 略高于 request。
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: lr-new-api-staging
+  namespace: new-api-staging
+spec:
+  limits:
+    # 容器级兜底：未显式声明 resources 的容器按此计
+    - type: Container
+      default:
+        cpu: 500m
+        memory: 512Mi
+      defaultRequest:
+        cpu: 200m
+        memory: 128Mi
+      max:
+        cpu: "2"
+        memory: 4Gi
+      min:
+        cpu: 50m
+        memory: 64Mi
+    # Pod 级兜底（含 init + 所有容器之和）
+    - type: Pod
+      default:
+        cpu: "2"
+        memory: 4Gi
+      max:
+        cpu: "2"
+        memory: 4Gi

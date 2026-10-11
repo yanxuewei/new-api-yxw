@@ -1,10 +1,10 @@
 # 阿里云国际站菲律宾部署 · 详细操作指南 v2.0（4 天压缩日历 · CLI-first 版）
 
-> **文档定位**：本指南是《阿里云国际站菲律宾部署_详细操作指南-ch.md》（v2.1 方案配套，D1–D9 口径）的 **v2.0 重写版**，两处根本变化：
+> **文档定位**：本指南是《deploy/docs/阿里云国际站菲律宾部署_详细操作指南-ch.md》（v2.1 方案配套，D1–D9 口径）的 **v2.0 重写版**，两处根本变化：
 > 1. **排期口径**：按用户决定压缩为 **4 个高强度日历日（Day 1–Day 4）× 每日 2 条泳道并行**，全部 56 项任务重新挂泳道；
 > 2. **操作口径**：每步以 `aliyun` CLI / `kubectl` / `psql` 真实命令为主路径（AI agent 可直接执行），控制台独有操作标 **【控制台】** 并配截图占位；关键命令一律附「期望输出」文本作为即贴即证。
 >
-> **配套文件**：`.deploy/菲律宾部署方案-v2.1-修订版.xlsx`（任务/人时/验收标准唯一权威源）、`impl_deploy.md`（架构依据）、`.deploy/` 各落地执行报告（已落地事实源）。
+> **配套文件**：`deploy/菲律宾部署方案-v2.1-修订版.xlsx`（任务/人时/验收标准唯一权威源）、`impl_deploy.md`（架构依据）、`deploy/` 各落地执行报告（已落地事实源）。
 > **任何一处与国际站控制台不一致，以控制台 + 工单答复为准。**
 
 ---
@@ -147,7 +147,7 @@ gantt
 
 | # | 事实 | 状态 | 对指南的影响 |
 | --- | --- | --- | --- |
-| F1 | **节点池机型 = ecs.g9i.2xlarge（8C32G）**：g8i 全系未在马尼拉上架（2026-09-25 API 实测，`控制台核实四问_结论.md` §3），备选 g8ine.2xlarge | 已修订入任务 11/24 | Day 2 开工第一动作 = `aliyun ecs DescribeAvailableResource` 复验库存 |
+| F1 | **节点池机型 = ecs.g9i.2xlarge（8C32G）**：g8i 全系未在马尼拉上架（2026-09-25 API 实测，`deploy/docs/控制台核实四问_结论.md` §3），备选 g8ine.2xlarge | 已修订入任务 11/24 | Day 2 开工第一动作 = `aliyun ecs DescribeAvailableResource` 复验库存 |
 | F2 | **ECS vCPU 配额已批**：马尼拉 50→64、新加坡 50→96（工单 `b140e263-…` / `e117bf2b-…`，状态 `Agree`，分钟级生效） | G2/G10 部分闭环 | 任务 11 节点上限 8、任务 24 上限 12 与配额对齐 |
 | F3 | **配额 API 口径**：必须带 `--Dimensions.1.Key regionId --Dimensions.1.Value <regionId>`（否则返回 cn-hangzhou）；申请参数拼写 `--DesireValue`；状态值 `Agree` | 已修订入 §3.4 口径与附录速查 | 所有配额命令按此改写 |
 | F4 | **真实 VPC 已建**：`vpc-newapi-mnl-prod`=`vpc-5tst1tgeessxn1azwasg2`（10.0.0.0/16，6 vSwitch 按 §2.2 网段落地）；`vpc-newapi-sg-prod`=`vpc-t4nimmwvruexbnene0a3r`（10.1.0.0/16） | 任务 5 ✅、12 部分 | 对应卡降级为复核 |

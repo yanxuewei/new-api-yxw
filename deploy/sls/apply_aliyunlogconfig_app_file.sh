@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# 任务 26 app-file 纠正版｜下发 AliyunLogConfig（经 ack_remote.sh 在 VPC 节点内执行）
-# 用法：bash ack_remote.sh mnl deploy/sls/apply_aliyunlogconfig_app_file.sh
+# 任务 26 app-file 纠正版｜下发 AliyunLogConfig（经 deploy/lib/ack_remote.sh 在 VPC 节点内执行）
+# 用法：bash deploy/lib/ack_remote.sh mnl deploy/sls/apply_aliyunlogconfig_app_file.sh
 set -uo pipefail
 echo "---- [1] apply ----"
 kubectl apply -f - <<'YAML'
