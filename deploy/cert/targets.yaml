@@ -1,0 +1,86 @@
+# Day 1 · 任务 3 步骤 4：证书部署目标登记（模板 + 实况销账，不自动下发）
+#
+# 用途：v2.0 旧时序在 D1 空跑部署任务找不到资源、后续靠手工补，D6 才发现某处仍用自签/旧证书。
+#       本文件把"证书要落到哪些资源"显式列成清单，执行时逐项销账。
+# 消费方式：ALB 侧用云 API 关联 CertIdentifier；K8s 侧
+#   kubectl -n new-api create secret tls new-api-tls \
+#     --cert=/root/.deploy_secrets/TLS_WILDCARD_CRT --key=/root/.deploy_secrets/TLS_WILDCARD_KEY
+#   （走文件参数，私钥绝不出现在命令行明文里）
+# ⚠ 本文件只登记资源标识与状态，**不得**写入任何私钥/口令。
+#
+# 证书本体（2026-10-12 G5 闭环）：
+#   InstanceId        cas_intl-sg-4rf4zyk0u00s
+#   CertId / CertIdentifier  606823 / 606823-ap-southeast-1
+#   Spec              ali.dv.w（DV 通配符，非 OV）
+#   SAN               *.likha.hk, likha.hk
+#   notBefore/notAfter 2026-10-12 / 2027-04-28（198 天，CA/B 新规）
+#   AutoReissue       enable（2026-10-12 经授权 UpdateInstance 开启；写前 disable，GetInstanceDetail
+#                     与 ListInstances 双路回读均为 enable）
+#                     ⚠ 开关已开 ≠ 443 自动续期：ListDeploymentJob / ListCloudResources(alb) 实测全空
+#                     ⇒ ALB 是直接绑 CertIdentifier、无 CAS 部署联动，新证书须人工换绑（见下方 renewal）
+#   保管目录（600）    /root/.deploy_secrets/TLS_WILDCARD_{CRT,KEY}
+#   到期告警          控制台已配（2026-10-12 负责人自配；CAS 无提醒类 API，故无回读证据）
+
+cert:
+  cert_identifier: 606823-ap-southeast-1
+  cas_instance_id: cas_intl-sg-4rf4zyk0u00s
+  region: ap-southeast-1        # CAS 国际站控制面地域
+  custody_dir: /root/.deploy_secrets
+  expire_after: "2027-04-28"
+  auto_reissue: enable          # 2026-10-12 实测回读值
+
+targets:
+  - target: alb
+    status: done                # ✅ 2026-10-12 两地 443 已部署并回读
+    sites:
+      - name: manila-primary
+        region: ap-southeast-6
+        load_balancer: alb-1riqckb1h8ezm0y7s9
+        listener_https: lsn-hjl2cz2g9oqvee4eix
+        readback: "GetListenerAttribute → ListenerProtocol=HTTPS, Certificates=606823-ap-southeast-1"
+      - name: singapore-standby
+        region: ap-southeast-1
+        load_balancer: alb-amdwm60xmznh7s1nae
+        listener_https: lsn-iqn5i233mvv7eu4u6w
+        readback: "GetListenerAttribute → ListenerProtocol=HTTPS, Certificates[0].CertificateId=606823-ap-southeast-1"
+    notes: 80 监听由 Ingress/new-api-http-redirect（order=1）对 www.likha.hk / likha.hk 做 HTTP→HTTPS 301
+
+  - target: waf
+    status: not-in-this-round   # ⏸ 2026-10-12 裁定（指南 §0.5 F15）：本轮不购买 WAF 3.0 ⇒ 不下发
+    blocked_on: 业务量增长后复评购买（控制台订阅，waf-openapi 无 CreateInstance）
+    notes: 接 WAF 后再执行域名证书绑定；F15 连带后果见指南任务 20/47/48
+
+  - target: dcdn
+    status: not-enabled         # 未开通全站加速 ⇒ 不下发（随任务 40 收尾）
+    notes: 若启用 DCDN，证书须另行下发并校验回源协议
+
+# ── 续签窗口动作（2027-03 前，notAfter=2027-04-28 的 30 天前）──────────────────
+# 为什么要人工做：实测 CAS 侧 ListDeploymentJob Total=0、ListCloudResources --CloudName alb Total=0，
+# 而两地 ALB 的 HTTPS 监听是**直接引用 CertIdentifier** 绑定的（非部署任务联动）。
+# AutoReissue=enable 只会让 CAS 签出**新的 CertId**，监听不会自动换绑 ⇒ 不补这一步，443 会在旧证到期当晚挂。
+renewal:
+  due_by: "2027-03-29"
+  steps:
+    - id: R1
+      name: 确认新证书已签发
+      cmd: "aliyun cas ListInstances --region ap-southeast-1 --cli-query 'InstanceList[].[InstanceId,Spec,CertificateStatus,CertificateId,CertIdentifier,AutoReissue]'"
+      expect: 出现新的 issued 记录（CertId ≠ 606823），SAN 仍含 *.likha.hk 与 likha.hk
+      gate: 未取得新 CertIdentifier 前不执行 R2/R3
+    - id: R2
+      name: 换绑两地 HTTPS 监听
+      cmd: |
+        # 先用 --dryrun 验参数形态，再去掉 --dryrun 执行；监听 ID 以本文件 targets.alb 为准
+        aliyun alb UpdateListenerAttribute --region ap-southeast-6 --ListenerId lsn-hjl2cz2g9oqvee4eix \
+          --Certificates.1.CertificateId <new-cert-identifier> --dryrun
+        aliyun alb UpdateListenerAttribute --region ap-southeast-1 --ListenerId lsn-iqn5i233mvv7eu4u6w \
+          --Certificates.1.CertificateId <new-cert-identifier> --dryrun
+      expect: 两监听 GetListenerAttribute 回读 Certificates[0].CertificateId == <new-cert-identifier>
+    - id: R3
+      name: 重新落保管目录并验配对（旧副本覆盖，不留第二份）
+      cmd: "bash deploy/logs/tls_store_20261012.sh   # 需把 CertId 改为新值；严禁开 bash -x"
+      expect: ls -l 两文件 600、cert_blocks=3、-modulus md5 两侧一致
+    - id: R4
+      name: 集群内 TLS Secret 重建 + 端到端验 443
+      cmd: "kubectl -n new-api create secret tls new-api-tls --cert=... --key=... --dry-run=client -o yaml | kubectl apply -f -"
+      expect: curl -svI https://www.likha.hk 的证书 notAfter 为新日期；两地各测一次
+  also_note: 若同时决定接 WAF（F15 复评），WAF 域名证书须一并换绑；本文件 waf 条目当前 not-in-this-round。
