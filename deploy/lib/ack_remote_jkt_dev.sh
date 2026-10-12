@@ -37,15 +37,23 @@ rm -f "${TMPD}/kc.${RUN_ID}.json"
 chmod 600 "$KCF"
 echo "[i] server=$(grep -m1 'server:' "$KCF" | tr -d '\r')  节点=$NODE_ARG  RUN_ID=$RUN_ID"
 
-# 远端包装：解出 kubeconfig(600) + body，执行，然后无条件删除 kubeconfig
-K64=$(base64 -w0 "$KCF")
-B64=$(base64 -w0 "$BODY")
-cat > "$CMD" <<EOF
+# 远端包装：kubeconfig 与 body 都用**引号 heredoc 原样落盘**（不再 base64）。
+# 实测教训：Base64 内嵌会让命令体膨胀 1.35x，grants/secret 这种 7KB 级 body 叠上 7KB 级
+# kubeconfig 就撞 `CmdContent.ExceedLimit`（云助手命令内容上限约 16KB，Base64 与 PlainText 同样受限）。
+DESK="DELMETA${RUN_ID//-}"
+DESB="DELBODY${RUN_ID//-}"
+cat > "$CMD" <<OUTER
 #!/bin/bash
 set -uo pipefail
 mkdir -p ${RTMP} && chmod 700 ${RTMP}
-printf '%s' '${K64}' | base64 -d > ${RTMP}/kubeconfig; chmod 600 ${RTMP}/kubeconfig
-printf '%s' '${B64}' | base64 -d > ${RTMP}/body.sh; chmod 700 ${RTMP}/body.sh
+cat > ${RTMP}/kubeconfig <<'${DESK}'
+$(cat "$KCF")
+${DESK}
+chmod 600 ${RTMP}/kubeconfig
+cat > ${RTMP}/body.sh <<'${DESB}'
+$(cat "$BODY")
+${DESB}
+chmod 700 ${RTMP}/body.sh
 export KUBECONFIG=${RTMP}/kubeconfig
 export PATH=/usr/bin:/bin:/usr/local/bin:\$PATH
 bash ${RTMP}/body.sh
@@ -53,25 +61,35 @@ RC=\$?
 rm -rf ${RTMP}
 echo "### remote_rc=\$RC cleaned=\$([ -e ${RTMP} ] && echo NO || echo YES)"
 exit \$RC
-EOF
+OUTER
 
-INV=$(aliyun ecs RunCommand --RegionId "$REGION" --Type RunShellScript --ContentEncoding Base64 \
-      --CommandContent "$(base64 -w0 "$CMD")" --InstanceId.1 "$NODE_ARG" --Timeout 300 \
+# 内容编码：用 PlainText 直发。理由（实测）：Base64 编码会把"已经内嵌 base64 载荷"的命令体
+# 二次膨胀（~1.35x），dev 的 grants/secret 命令体因此撞过 `CmdContentExceedLimit`（上限 24KB）。
+CMDLEN=$(wc -c < "$CMD")
+[ "$CMDLEN" -le 15000 ] || { echo "[!] 命令体 $CMDLEN 字节，接近云助手上限（实测 ~19KB 直接被 CmdContentExceedLimit 拒）⇒ 拆步/瘦身 body"; exit 1; }
+INV=$(aliyun ecs RunCommand --RegionId "$REGION" --Type RunShellScript --ContentEncoding PlainText \
+      --CommandContent "$(cat "$CMD")" --InstanceId.1 "$NODE_ARG" --Timeout 900 \
       --Name "jkt-dev-remote-${RUN_ID}" 2>&1)
 INVOKE=$(jq -r '.InvokeId // empty' <<<"$INV")
 [ -n "$INVOKE" ] || { echo "[!] RunCommand 失败："; head -5 <<<"$INV"; exit 1; }
 echo "[i] InvokeId=$INVOKE"
 
-for _ in $(seq 1 60); do
+# 轮询预算必须 ≥ RunCommand 的 --Timeout（900s），否则本地先放弃、远端还在跑（2026-10-12 实测踩过：
+# rollout 卡 300s 上限 ⇒ 云助手把命令判 Timeout、status 读成空，看起来像"远端没收口"）。
+for _ in $(seq 1 190); do
   RESP=$(aliyun ecs DescribeInvocationResults --RegionId "$REGION" --InvokeId "$INVOKE" 2>/dev/null)
-  ST=$(jq -r '.Invocation.InvocationResults.InvocationResult[0].InvocationStatus' <<<"$RESP")
-  [ "$ST" != "Running" ] && [ "$ST" != "Pending" ] && [ "$ST" != "Invoking" ] && break
-  sleep 5
+  ST=$(jq -r '.Invocation.InvocationResults.InvocationResult[0].InvocationStatus // empty' <<<"$RESP" 2>/dev/null)
+  # 空状态 = 这次 Describe 本身失败（限流/网络抖动），不是"命令结束"⇒ 继续下一轮，绝不提前收口
+  [ -z "$ST" ] && { sleep 5; continue; }
+  case "$ST" in Running|Pending|Invoking|Stopping) sleep 5; continue ;; esac
+  break
 done
+[ -n "$ST" ] || { echo "[!] 60 轮轮询仍拿不到 InvocationStatus（InvokeId=$INVOKE，可手工复查）"; exit 1; }
 OUT=$(jq -r '.Invocation.InvocationResults.InvocationResult[0].Output // empty' <<<"$RESP" | base64 -d)
 echo "----- 节点内输出（status=$ST）-----"
 printf '%s\n' "$OUT"
 echo "-----------------------------------"
 printf '%s\n' "$OUT" | grep -q "remote_rc=0" || { echo "[!] 远端未正常收口"; exit 1; }
-echo "[i] 凭据清理：本机 $( [ -e "$KCF" ] && echo 残留 || echo 已删 ) / 节点侧 $(printf '%s' "$OUT" | grep -o 'cleaned=[A-Z]*')"
 rm -f "$KCF" "${TMPD}/kc.${RUN_ID}.json"
+# 先删再断言：否则"本机已删"这行是在删除之前打印的，属于自证不成立
+echo "[i] 凭据清理：本机 $( [ -e "$KCF" ] && echo 残留 || echo 已删 ) / 节点侧 $(printf '%s' "$OUT" | grep -o 'cleaned=[A-Z]*')"
