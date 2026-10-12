@@ -1,17 +1,23 @@
 # G6 模板渲染件 · 马尼拉 ALB AlbConfig + IngressClass（对应 v2.0 指南 §6.3 任务 19）
 # 由 deploy/aliyun/ph/albconfig.yaml.tpl 渲染，**真实资源 ID 已回填**（2026-09-29 CLI 实测）。
 #
-# 与模板的两处订正（模板 bug，已就地修正）：
-#   ① IngressClass 是**集群级**资源，模板误写了 metadata.namespace（应删除；否则语义误导）。
-#   ② AlbConfig 挂载在 namespace: new-api —— 该 ns 由任务 17 创建，本渲染件执行前需存在。
+# ★ 2026-10-12 已闭环：G5 证书就绪，本件按实况 apply（generation 3 → 4），443 监听已上线并验收 V1–V5。
+#   实况核对：`kubectl get albconfig mnl-alb -o jsonpath='{.spec.listeners}'`
 #
-# ⚠️ 未回填项（阻塞执行，见交付说明）：
-#   ${CERT_ID_ALB} = CAS 证书 ID。2026-09-29 实测 `aliyun cas ListUserCertificateOrder`
-#   TotalCount=0（账号内**无任何证书**），且 likha.hk 的 NS 仍指向 GoDaddy
-#   （ns21/ns22.domaincontrol.com），G4(NS)/G5(证书) 均未闭环 → 443 监听无法按方案创建。
-#   回填方式：`export CERT_ID_ALB=<cas-cert-id>` 后由 deploy/tasks/task19/alb_mnl.sh 渲染。
+# ⚠️⚠️ 两个高危笔误（本件已修正，勿改回）：
+#   ① `listeners[].certificates[]` 的**字段名必须是 `CertificateId`**，值才是 CertIdentifier
+#      （如 `606823-ap-southeast-1`）。写成 `CertIdentifier:` 会因 CRD 是
+#      `x-kubernetes-preserve-unknown-fields` 被**静默忽略** ⇒ 证书不绑定、443 形同虚设，
+#      且**不报任何错**（v2.0 指南 §6.3 步骤 2 与 albconfig.yaml.tpl 都是错名，见 2026-10-12 订正）。
+#   ② `listeners[].httpDefaultActions` / `defaultActions` **实测均不生效** —— Controller 一律用
+#      自己的 ForwardGroup 覆盖（占位组 `kube-system-fake-svc-<port>`）⇒ 80 的 301 跳转**不能**写在这里，
+#      必须用 Ingress 的 `alb.ingress.kubernetes.io/actions.<name>` + `use-annotation`
+#      （落地件：deploy/manifests/ingress-mnl-http-redirect.yaml）。
 #
 # 管理红线（§6.3 坑 4）：ALB 只经 AlbConfig/Ingress 声明式管理，禁止控制台手工改 listener/转发规则。
+#   ★ 技术强制：ACK 托管的 ALB 是 **ServiceManagedResource**，直接调 alb OpenAPI 会被服务端拒绝
+#     `OperationDenied.ServiceManagedResource` ⇒ 想手工改也改不了，只能走 AlbConfig。
+# ⚠️ finalizer `ingress.k8s.alibaba/resources` ⇒ `kubectl delete albconfig mnl-alb` 会**级联删除云上 ALB**。
 # 参数依据（P0-5，勿改回方案 v2.1 原值）：requestTimeout 上限 600s；idleTimeout 60s 是"两包之间静默间隔"。
 apiVersion: alibabacloud.com/v1
 kind: AlbConfig
@@ -34,19 +40,26 @@ spec:
       - { key: env, value: prod }
   listeners:
     - port: 80
-      protocol: HTTP                           # 仅用于 301 跳转 HTTPS
-      httpDefaultActions:
-        - type: Redirect
-          redirectConfig: { host: www.likha.hk, https: on, port: "443" }
-    # ⚠️ 442/443 监听当前被证书阻塞：CERT_ID_ALB 为空时由脚本整段剔除（见 deploy/tasks/task19/alb_mnl.sh --without-tls）
+      protocol: HTTP
+      idleTimeout: 60
+      requestTimeout: 600
+      # ⚠️ 这里**不要**写 httpDefaultActions/defaultActions（实测不生效，见文件头⚠️②）。
+      #    HTTP→HTTPS 301 走 Ingress：deploy/manifests/ingress-mnl-http-redirect.yaml（已落地并验收）。
     - port: 443
       protocol: HTTPS
-      securityPolicyId: tls_cipher_policy_1_2_strict_with_1_3   # 显式指定，否则可协商 TLS1.0 被安全核查判不合格（坑 3）
-      caEnabled: false
-      requestTimeout: 600                      # 硬上限（P0-5）
       idleTimeout: 60
+      requestTimeout: 600
+      caEnabled: false
+      securityPolicyId: tls_cipher_policy_1_2_strict_with_1_3
+      # ↑ 显式指定，否则可协商 TLS1.0 被安全核查判不合格（坑 3）。
+      #   2026-10-12 实测：TLS1.3 正常协商；TLS1.0/1.1 被服务端 `tlsv1 alert protocol version`(70) 拒绝。
       certificates:
-        - CertIdentifier: ${CERT_ID_ALB}
+        - CertificateId: 606823-ap-southeast-1   # ← 字段名必须是 CertificateId（值才是 CertIdentifier）
+          IsDefault: true
+      # ★ 跨地域可用（2026-10-12 实测结论）：本地 CAS 口径 ap-southeast-1 的证书，
+      #   可被 ap-southeast-6（马尼拉）的 ALB 直接引用并成功 Associated。
+      #   反面事实：`cas` 产品在 ap-southeast-6 **无 endpoint**（连 DNS 都不存在），
+      #   故「马尼拉 ALB 用不了证书」的推断不成立 —— ALB 侧不要求证书与实例同地域。
 ---
 apiVersion: networking.k8s.io/v1
 kind: IngressClass

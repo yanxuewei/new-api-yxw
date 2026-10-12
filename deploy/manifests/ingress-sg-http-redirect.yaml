@@ -1,0 +1,69 @@
+# 域名规范化 · 新加坡（备站）80 侧跳转 · 与 mnl `new-api-http-redirect` 同口径
+# 集群：ca75829e3492d491d9d434de087913798（ap-southeast-1）· ALB `alb-amdwm60xmznh7s1nae`
+# 创建：2026-10-12（用户指令：「SG 侧对 www.likha.hk 和 likha.hk 的处理与 mnl 保持一致」）
+#
+# 目的：canonical 主域名 = `www.likha.hk`，把 **80 明文**访问收敛到 HTTPS：
+#   http://www.likha.hk  → 301 → https://www.likha.hk   （仅升协议，Host 不变）
+#   http://likha.hk      → 301 → https://www.likha.hk   （**一跳到位**，Host 归一）
+#
+# ★★★ 字段名坑（与 mnl 同源，务必照抄）★★★
+#   正确：{"type":"Redirect","RedirectConfig":{...}}   —— 配置对象名 PascalCase
+#   正确：状态码字段名是 "httpCode"                      —— 不是 statusCode
+#   错误（实测被静默忽略且**不报错**）：{"type":"Redirect","redirectConfig":{"statusCode":"301"}}
+#     → Controller 识别不了 → 退化成 ForwardGroup + 额外 404 规则（HTTP 仍 200，极具误导性）
+#   `type` 值 PascalCase（Redirect / FixedResponse / ForwardGroup），内层键 camelCase。
+#   （2026-10-12 马尼拉侧已实测：错名不报错、仍回 200 ⇒ 上线后**必须查云侧 RuleActions**复核。）
+#
+# ★ 硬约束：
+#   ① `order: "1"` —— 必须**小于**兜底 Ingress `new-api-ph-standby-ip` 的 50
+#      （以及显式 Host 规则的默认 10），否则压不过它们，规则等于没写。
+#   ② `service.name`（此处 `redirect`）必须与注解后缀 `actions.<name>` **逐字同名**；
+#      `port.name` 必须是 `use-annotation`。二者必须成对 —— 写成真实 Service 名 ⇒ Controller
+#      找不到该 Service ⇒ **规则不生成且不报错**。
+#      （`redirect` **不是** Service，是「伪服务名/注解键」；控制台「规则」列只会原样回显它，不可用于诊断。）
+#   ③ 本件**只能**放在 80 监听（`[{"HTTP":80}]`）；若误加 443，`https://www.likha.hk` 会被
+#      301 到 `https://www.likha.hk`（自己）⇒ **无限 301**。443 侧的根域收敛见 canonical 件。
+#
+# ★ 与 mnl 的对称性：本件 ≡ mnl `Ingress/new-api-http-redirect`（order=1、同一段 actions 注解）。
+#
+# 应用：kubectl -n new-api apply -f ingress-sg-http-redirect.yaml
+# 回退：kubectl -n new-api delete ingress new-api-sg-http-redirect
+# 验收：aliyun alb ListRules --region ap-southeast-1 --ListenerIds.1 lsn-qmi1hpyr3j83tq3z8j
+#        期望：RuleConditions=[Host=www.likha.hk] / [Host=likha.hk]，RuleActions[].Type=Redirect / HttpCode=301
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: new-api-sg-http-redirect
+  namespace: new-api
+  labels:
+    app: new-api
+    env: prod
+    site: ph-sg
+    purpose: http-to-https
+  annotations:
+    alb.ingress.kubernetes.io/actions.redirect: '[{"type":"Redirect","RedirectConfig":{"host":"www.likha.hk","path":"${path}","port":"443","protocol":"HTTPS","query":"${query}","httpCode":"301"}}]'
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80}]'
+    alb.ingress.kubernetes.io/order: "1"
+spec:
+  ingressClassName: alb
+  rules:
+    - host: www.likha.hk
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: redirect          # 必须与注解 actions.<name> 同名（非真实 Service）
+                port:
+                  name: use-annotation  # 固定值：告诉 Controller 去读注解而非查 Service
+    - host: likha.hk
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: redirect
+                port:
+                  name: use-annotation

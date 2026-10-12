@@ -503,3 +503,398 @@ RuleActions[]    : { Order, Type: "ForwardGroup", ForwardGroupConfig: { ServerGr
 **三条硬约束（防误用）**：① 生产 `SQL_DSN`/`SQL_DSN_MIGRATE` **永不得指向 `newapi_stage`**（现均指向 `newapi`，保持）；② 任何 CI/定时任务连它**只用 `newapi_migrate`** 账号（`newapi` 对该库无授权，RDS 侧 `GrantAccountPrivilege` 会被 `InvalidDBInfo.Malformed` 拒绝）；③ 与任务 45「同实例独立库=软隔离不达标」**不冲突但必须在案** —— 它是工具链演练库，不是生产环境。雅加达独立 RDS 就绪后载体迁走再评估。
 
 **证据**：`deploy/logs/task54_migrate_20261005-151349/`（`10-run-full.out` 全量输出 + `summary.json` + 两次失败尝试 + 诊断 + `migrations.snapshot/`）；报告 `deploy/Day2任务54_迁移版本化_执行报告.md`。
+
+---
+
+## ★ 镜像构建环境硬限制（WSL2 · 2026-10-09 实测 · 不可绕过）
+
+**结论：本机不适合构建本仓镜像** → 发版构建走 **CI** 或 **macOS**。
+
+- **现象**：`web/` 800+ 依赖使 `bun install` 一次性开 **200+ 并发 TCP**；**WSL2 NAT 建不起来** → 容器内采样 `SYN_SENT≈211 / ESTABLISHED 13~25`（`nf_conntrack 112/262144`，**非表满**）→ bun 永久等齐卡死。**脱离 BuildKit 也能稳定复现**。
+- **反证（排除代码/Dockerfile）**：低并发 `bun add lodash`（4 请求）**391 ms 成功**；主机 `curl` 正常 ⇒ **与本仓代码、Dockerfile 无关**。`go mod download` 走 `--go-proxy aliyun` 可用（2.7 s）。
+- **Windows 版本约束**：Win10 19045 (22H2)，`networkingMode=mirrored` 需 **Win11** ⇒ 不可用。
+- **并发建连实测曲线**：`n≤20` **100% 成功** / `n=40` 起丢包 / `n≥80` 全灭；突发后**秒级自恢复黑洞**。
+- **解法（限并发 CONNECT 代理）**：`deploy/logs/conc_proxy.py`（`--max-upstream 8~16 --attempts 6`，含明文 HTTP 转发支持 apt）+ `push.sh --proxy http://172.17.0.1:8899 --go-proxy aliyun`。代理生效后 `bun install` **成功（299.7 s / 1202 包）**，后续失败点前移到构建其它阶段。
+- **无效手段（勿再试）**：`BUN_CONFIG_MAX_HTTP_REQUESTS=16` 无效；`--network host` 无效。
+- **BuildKit 并行**跑 bun/go 两阶段互相挤占 ⇒ 改分阶段固化缓存。
+- **后台任务**：`wsl.exe` 退出即 SIGHUP 杀子进程 ⇒ 长任务须 `setsid nohup … </dev/null & disown`。
+- ⚠️ **fork 现有 `docker-image-branch.yml` / `docker-build.yml` 推 Docker Hub `calciumion/new-api`，无推 ACR 的 workflow，需新增**。
+
+## ★ RAM 策略 v3 全文口径（2026-10-10 发布）
+
+- **现状**：`newapi-ops-operator` **v3**，SetAsDefault，`AttachmentCount=3`（挂 `ops_group` / `dev_group` / `ops-prod_group`）。
+- **v3 相比 v2 新增 Allow**：`kvstore:*`(Tair) · `hdm:*`(DAS) · `yundun-cert:*`(数字证书/原SSL) · `arms:*`(ARMS+Grafana) · `clickhouse:*`(CK) · `quotas:*` · `resourcemanager:Get*|List*` · `ram:Get|ListResourceGroup*` · `tag:Get*|List*|Describe*` · `*:ListTagResources`。
+- **v3 新增唯一 Deny**：`kvstore:DeleteInstance`（与 `rds:DeleteDBInstance` 同口径）。
+- **IaC**：`deploy/ops/ram_policy_newapi-ops-operator.v3.json`（**策略正文唯一真源**，此前只在控制台、无 IaC）+ `deploy/ops/ram_ops_operator_extend.sh`（`check|apply|verify|desc|rollback`）。⚠️ 策略版本上限 **5**（现有 v1/v2/v3，余 2）。
+- **★ 动作前缀核准表**（凭记忆写会**静默失效**，RAM 不报错）：`kvstore`=Tair · `hdm`=DAS · **`yundun-cert`=数字证书（原SSL，无 `cas:` / `ssl:` 前缀）** · `clickhouse`=CK · `quotas`=配额中心 · `resourcemanager`/`ram:Get|ListResourceGroup*`=资源组 · `tag`+`*:ListTagResources`=标签。核验：`aliyun ram GetPolicyVersion --PolicyName Aliyun<X>FullAccess --PolicyType System`。
+- **ACK RBAC（`cs`）三条坑**：① **`cs GrantPermissions` 是「全量覆盖」**（"overwrites all existing cluster permissions"）⇒ body 必须列出要保留的**全部**集群，否则抹掉其它集群授权 ⇒ 正确姿势「读现状 → 原样保留所有集群 → 只改角色」。② **请求/响应字段名不一致**：请求用 `role_name`(预置角色名 admin|admin-view|ops|dev|restricted) + `role_type`(cluster|namespace|all-clusters)；**响应**把预置角色名放在 `role_type`、`role_name` 为空。③ `cs DescribeUserPermission --uid` **不分地域**，一次返回该用户**全部**集群授权。
+- **IaC**：`deploy/ops/ack_rbac_grant.sh`（`check|apply|verify`，含**防降权护栏**：admin→ops 会被拒绝，需 `ALLOW_DOWNGRADE=1`）。
+- **集群清单（3 个）**：mnl `cd57e40ce9a634c1698c2f5c5e09bd93c`(ap-southeast-6) · sg `ca75829e3492d491d9d434de087913798`(ap-southeast-1) · `cb0abf5bc06034f7bbdb991752f6f3e62`(ap-southeast-6, ack.standard, 09-30 建, 私网端点 `10.2.25.173:6443`)。
+- **2026-10-10 实况**：`daimingming`(UID `218577891456544282`) 17:24:59 已被**用户自行授为 3 集群全 `admin`**（原仅 SG 一条 `ops`）⇒ 403 已解除；**脚本未执行任何 RBAC 写入**（避免降权）。
+- ⚠️ **`UID` 是 bash 只读变量**（root 下=0）—— 用作变量名会静默取到 0，建出空授权。一律换名（如 `RAM_UID`）。
+- 报告：`deploy/docs/RAM策略v3扩展_执行报告.md`。
+
+## ★ Grafana / NAAM / 任务 26（2026-10-10 闭环）
+
+**★ Grafana 可全脚本化配置**：通道 = `aliyun arms GrafanaWorkspaceHttpApiProxy`（RPC，`--GrafanaWorkspaceId` + `--RegionId` + `--OrgId` + `--BodyStr`）。
+- **`BodyStr` 结构（权威）**：**就是被代理的 Grafana 请求本身**，不是包装对象 —— `{"method":"GET","path":"/api/datasources"}`；可选 `url`（与 path 二选一）、`queryParams`、`headers`、`body`。⚠️ **`body` 必须是转义后的 JSON 字符串**（不是嵌套对象）；POST 必须显式带 `Content-Type: application/json`。❌ 误写成 `{"q1":{"_method_":"GET",...}}` → 报 `601 method is not supported:`（method 解析为空）。
+- **两个必踩坑**：① **调用者必须先加入工作区**，否则任意路径报 `40300 sub account is not authorized on this workspace, operateUserId:<uid>` → `CreateGrafanaWorkspaceAccount --AliyunUid <RAM UserId> --Role Admin --OrgId 1`（RAM UserId 取自 `sts GetCallerIdentity` 的 `UserId`/`PrincipalId`）。② **代理有路径白名单**：`/api/health`、`/api/ds/query` → `40300 proxy path is not allowed`；可用 `/api/datasources*`、`/api/datasources/uid/<uid>/health`、`/api/dashboards/db`、`/api/dashboards/uid/<uid>`、`/api/search`。
+- **落地（幂等）**：工作区账号 RAM `yanxuewei`(219901390242410810) → **Admin**(org 1)，accountId **1119**；数据源 `ARMS-Prometheus-MNL`（uid `arms-prom-mnl`，isDefault=true，→ mnl 公网端点 `http://ap-southeast-6.arms.aliyuncs.com:9090/api/v1/prometheus/d53ceaaa3a927a094abb56714f8/5108890064395960/cd57e40ce9a634c1698c2f5c5e09bd93c/ap-southeast-6`）；看板 `New API · 最小可观测（4 面板）` uid `newapi-min-obs`；**跨区连通铁证** `GET /api/datasources/uid/arms-prom-mnl/health` → `Successfully queried the Prometheus API. status OK`。
+- **4 面板**（`/metrics` 未注册 [P1-20] ⇒ 只能用容器/cAdvisor 指标）：① `count(kube_pod_container_status_ready{namespace="new-api"} == 1)` ② `sum(rate(container_cpu_usage_seconds_total{namespace="new-api",container!="",container!="POD"}[5m])) by (pod)` ③ `sum(container_memory_working_set_bytes{...}) by (pod)` ④ `sum(kube_pod_container_status_restarts_total{namespace="new-api"}) by (pod)`。该 ns 下 `container_*` count=18/6、`kube_pod_container_status_ready`=18、restarts=6。
+- **工作区实况**：`grafana-intl-sg-swy4zuysc01` / `gra-newapi-sg` / 新加坡 / 专家版 10U / Grafana **12.4.x** / snatIp `8.222.236.38` / 到期 **2026-11-11**。
+- ⚠️ **CLI 建工作区历史恒报 601**：`grafana_prepaid_public_intl` 在 `ap-southeast-1` 无 `DescribePricingModule` 模块 ⇒ **控制台创建**。密码含 `#` 报 604 ⇒ 换 `@`。
+
+**NAAM（网络分析与监控 / `cms_naam_public_intl`）开通验证**：
+
+| 指标 | 开通前 | 开通后 |
+|---|---|---|
+| `SiteMonitorTask.QuotaLimit` | 0 | **9999** |
+| `SuitInfo` | free | free（免费额度生效） |
+| `DescribeSiteMonitorList.TotalCount` | 0 | **1** |
+
+- 站点监控任务：TaskId `d7a836f6-b87b-4b3d-82bb-424dda2853cf` · `likha-hk-newapi-status` · `http://www.likha.hk/api/status` · HTTP GET / **5 分钟** / 超时 30s / `match_rule=0` + `response_content='"success":true'` / 可接受码 200；探针 **新加坡375 / 香港569 / 日本576 / 马尼拉18877**（`Isp=465` 阿里巴巴，`Type=IDC`）· `TaskState=1`。
+- **实测**：`Availability=100.0`（`UnavailableNumber=0`、`UnhealthyCityISPs="[]"`、4XX/5XX/6XX 全 0）；`ResponseTime` 平均 125–158.5 ms / 最大 254 / 最小 63 ⇒ **马尼拉探针 18877 可用且健康，实质性推翻 P1-13**。
+- ⚠️ **断言口径偏差**：任务卡要求含 `version` 匹配，实测 `GET /api/status` → **`"version":""`（空串）**，本构建未注入 `common.Version` ⇒ 版本断言不可行；增强项 = G8/发版注入版本号后升级。
+- **IaC**：`deploy/tasks/task26/grafana_setup.py`（`account|ds|dash|verify|all`，幂等）· `task26_finish_gaps.sh`（`status|site|grafana|all`）· `deploy/tasks/task26/Day3任务26_SLS与可观测_执行报告.md`（追加 4~8）。探针脚本站存 `deploy/logs/t26_*.sh`（gitignored）。
+
+## ★ 阿里云工单 OpenAPI `aliyun workorder`（2026-10-12 首次打通）
+
+- **产品**：`workorder`（Product Name「ticket」），Version `2021-06-10`。
+- **地域**：`--region ap-southeast-1`（`workorder.ap-southeast-1.aliyuncs.com`）；⚠ **`ap-southeast-6` 不支持**。
+- **接口**：`CreateTicket` · `GetTicket` · `ListTickets` · `ListTicketNotes` · `ReplyTicket` · `CloseTicket` · `ReopenTicket` · `EvaluateTicket` · `GetAttachmentUploadUrl`（附件走 OSS 预签名）。
+- **`CreateTicket` 必填**：`--CategoryId` / `--Description`（**仅纯文本**）/ `--Severity`（**1 = 普通，2 = 紧急**）。可选：`--Title` / `--Email` / `--CreatorId`（分销场景）/ `--FileNameList` / `--SecretInfo`。
+- **取类别**：`ListProducts` → `ProductId`；`ListCategories --ProductId <id> --Language zh` → `CategoryId`。
+  - **数字证书管理服务（原SSL证书）`ProductId = 5057`**；其中 **`5601` = 证书审核问题**（其余：5593 功能与使用咨询 / 5594 计费 / 5595 控制台管理操作 / 5596 API·SDK / 5597 实例到期关停 / 5598 控制台报错 / 5599 增值服务 / 5600 安装及配置 / 5602 托管服务 / 5603 管理问题）。
+- **实操**：**先 `--cli-dry-run` 打印完整请求（含中文）再 go** —— 实测中文零乱码。
+- ⚠️ **长中文载荷一律 Write 成文件 + `tr -d '\r'` + `--Description "$(cat /tmp/x.txt)"`**，勿塞进 `bash -c` 字符串（会被 wsl.exe 拆坏）。
+
+## ★ 线上证书实例实况（G5 · 2026-10-12 取证 → **同日闭环 · Plan C**）
+
+> **终局**：G5 已于 **2026-10-12 10:12 HKT** 闭环。原 GlobalSign OV 实例（US$997）**已全额退款**（10-12 10:16:56），改买 **Alibaba 品牌 DV 通配符**（US$207）。
+> 下方「OV 停滞取证」为**历史记录**；闭环口径见本节末 **「### ★ 闭环（Plan C）」**。完整取证 `deploy/docs/G5闭环_PlanC_DV通配符签发_2026-10-12.md`；可复用脚本 `deploy/ops/cas_dv_cert.sh`。
+
+### 历史：OV 停滞取证（`cas_intl-sg-9lu4zmk9e00m`，10-12 08:5x 读取）
+
+`aliyun cas ListInstances | GetInstanceDetail --region ap-southeast-1`
+
+| 字段 | 值 |
+|---|---|
+| InstanceId | `cas_intl-sg-9lu4zmk9e00m`（实例名 `instance-ems85l`） |
+| Domain | `*.likha.hk`（`WildcardDomainCount=1`） |
+| **CertificateType** | **`OV`**（**非原计划的 DV**） |
+| **Spec** | **`gs.ov.w`**（GlobalSign OV 通配符；控制台显示「专业版」） |
+| Brand / KeyAlgorithm | GlobalSign / RSA_2048 |
+| OrderStartTime | `1791211179000` = **2026-10-05 14:39:39 UTC**（10-05 22:39:39 HKT） |
+| OrderEndTime | `1822752000000` = 2027-10-05 |
+| Status / PendingResult | `pending` / `pending` |
+| **ValidationMethod** | **`DNS`** |
+| **OrderProgress** | **`[]` 空数组** |
+| CompanyId / ContactIdList | `1630` / `[10185]` |
+| ResourceGroupId | `rg-aek4nyivmmsb6iy` |
+
+- **申请主体**：公司 `香港泓潤商貿有限公司`（CompanyId `1630`，香港公司编号 `71789790`，HK，电话 `+85255874391`）；联系人 `颜福君`（ContactId `10185`）；⚠️ **`EmailStatus=0`、`MobileStatus=0`（邮箱与手机均未验证）**。
+- **★ 认知纠正**：此前 G5 口径是 **DV 通配符**（报价 `rap.dv.w`/`ali.dv.w` = US$300/年），**实际落地的是 GlobalSign OV 通配符** ⇒ 二者流程差异巨大：DV 分钟级自动签发；**OV 需 CA 人工核验组织 + DCV，可能要求企业电话回拨（callback）、营业执照等**，以「工作日/周」计。「审核中 6 天」是 OV 正常流程，但**零进展需追问**。
+- **DCV 记录缺失硬证据**：`likha.hk` 云解析共 **6 条 A 记录**（`@`/`www` 各双 A → `8.212.161.49`/`8.212.183.7`；`sg` 双 A → `43.98.186.238`/`47.237.68.142`），**无任何 TXT/CNAME**；`dig TXT/CNAME _dnsauth.likha.hk` 均空，权威 NS 查 ANY 仅回 RFC8482 占位 ⇒ **DNS 验证记录从未添加**（头号卡点嫌疑）。
+- **工单**：**`00655PFH6W`**（CategoryId 5601 / Severity 2 紧急 / 待响应 / Creator `219901390242410810` / 2026-10-12 09:36 HKT）。证据链与后续动作见 `deploy/docs/G5证书审核中_工单00655PFH6W_2026-10-12.md`。
+- ⚠️ `cas GetInstanceDetail` 的 `--InstanceId` **必须是完整 ID**（`cas_intl-sg-...`），传短名 `ems85l` 报 `NotFound`。`cas` 产品 **`ap-southeast-6` 无 endpoint** ⇒ 一律 `--region ap-southeast-1`。
+
+### ★ 闭环（Plan C · 10-12 · DV 通配符，US$207）
+
+| 字段 | 值 |
+|---|---|
+| InstanceId / Spec | `cas_intl-sg-4rf4zyk0u00s` / **`ali.dv.w`**（Alibaba 品牌 · DV · 通配符 ×1） |
+| 订单 | `518405168450481` · **US$207.00**（原价 300 − 91.5 折扣，PromotionId `682287`，31% off） |
+| **CertIdentifier** | **`606823-ap-southeast-1`**（`CertificateId=606823`） |
+| 状态 / SAN | `CertificateStatus=issued` · `Status=normal` · SAN = `*.likha.hk` + `likha.hk` |
+| FingerPrint | `7494592843BFB96287D26D730838E0E7162E42B3` |
+| 信任链 | leaf ← `C=CN,O=Aliyun Computing Co, Ltd.,CN=Aliyun RSA TLS DV G1` ← **`C=US,O=DigiCert Inc,CN=DigiCert Global Root G2`** ⇒ `openssl verify -untrusted` = **OK** |
+| 有效期 | **2026-10-12 → 2027-04-28 = 198 天**（CA/B 新规上限），`AutoReissue=disable` |
+| OV 退款 | 订单 `518037286760481` · `OrderType=Refund` · **−997.00** · 10-12 10:16:56 · 实例 → `Status=refund` |
+
+- **★ Alibaba 品牌 = DigiCert 签发**：AIA 指向 `ocsp.digicert.cn` / `cacerts.digicert.cn`，根为 **DigiCert Global Root G2** ⇒ 全浏览器信任，此前担心的兼容性风险**不存在**。
+- ⚠️ **198 天 ≠ 订阅 1 年**：单张证书受 CA/B 有效期上限约束，**须 2027-03 前续签**（`AutoReissue=disable`，无自动托管）。
+- **★ V2 DCV 通道（CLI 帮助隐藏）**：`cas GetInstanceDetail` 响应字段 **`DomainValidationList[]`**（`Domain`/`RootDomain`/`ValidationKey`/`ValidationType`/`ValidationValue`/`Cname`/`CnameKey`）—— **不在 CLI 文本帮助中**，靠 OpenAPI 元数据比 schema 发现。本次取到 `_dnsauth` / `TXT` / `202610110000003zhpw4qcmdy3k2t527gt35baxknu6ffmahq4nh5qa8r2nl2jbq`，经 `alidns AddDomainRecord` 写入（RecordId `2109466686448971776`，TTL 600），三公共解析器秒级生效，约 2 min 后签发。
+- **★ V2 无独立验证触发 API**：`ApplyCertificate` **只接受 `--InstanceId`**（某开发者文章示例的 `--DcvType DNS` 参数**不存在**，实跑报 `not a valid parameter`）；DCV 由 Apply 后自动下发。
+- **★ `bssopenapi CreateInstance` 周期口径**：`--PricingCycle 2`（月）+ `--Period 12` = 1 年；用 `--PricingCycle 1`（年）报 `MissingParameter: pricingCycle error`。模块参数用 `--Parameter.N.Code/Value`（`--ModuleList.N.*` 被 CLI 拒绝）。
+- **★ CAS 退款规则**：`cas RefundInstance` 仅 **7 天内**有效，且**提交过（pending）申请后即拒退**（`CouldNotRefund.NotSupport`）；`bssopenapi` 退订通道**不适用** CAS（`InquiryPriceRefundInstance` 对 OV 报 `ResourceNotExists`）。⇒ OV 退款最终由**用户控制台人工**完成。
+- **★ V1 通道在本账号不可用**：`DescribeCertificateState --OrderId`（V2 订单号）报 `NotFound`；`ListUserCertificateOrder` 四种 `OrderType` 全返回 `TotalCount=0`。⇒ 只用 V2（实例模型）。
+- ⚠️ **安全提示**：`api.aliyun.com/meta/v1/products/cas/...` 元数据 `enum` 字段被注入 `$(curl …popscan.xaliyun.com)` 等载荷 ⇒ **任何解析该元数据的工具都不得执行 enum 值**（本次未执行，仅记录）。
+- **DNS TXT 记录须保留**：`_dnsauth.likha.hk` 的 TXT 供续签复用，删除会导致下次 DCV 失败。
+
+## ★ ALB 443 / TLS 与 ACK 托管 ALB 硬约束（2026-10-12 实测 · 任务 19 / 25 闭环）
+
+> 执行通道：`deploy/lib/ack_remote.sh <mnl|sg>`（云助手 + 私网 kubeconfig）+ `deploy/lib/aliyun_rpc.py`（绕 CLI 嵌套参数限制）+ WSL 脚本。
+> 完整取证 `deploy/docs/Day2任务19-25_443TLS闭环_2026-10-12.md`；落地件 `deploy/manifests/albconfig-sg.yaml` · `deploy/aliyun/ph/albconfig.rendered.yaml` · `deploy/manifests/ingress-mnl-http-redirect.yaml`。
+
+### 1. ★ listener 证书字段名 = `certificates[].CertificateId`（**不是** `CertIdentifier`）
+
+AlbConfig 写 443 listener 的正确形态：
+
+```yaml
+listeners:
+  - port: 443
+    protocol: HTTPS
+    idleTimeout: 60
+    requestTimeout: 600
+    caEnabled: false
+    securityPolicyId: tls_cipher_policy_1_2_strict_with_1_3
+    certificates:
+      - CertificateId: 606823-ap-southeast-1   # ← 唯一正确字段名
+        IsDefault: true
+```
+
+- ⚠️ **写 `CertIdentifier:` 会被 CRD 的 `x-kubernetes-preserve-unknown-fields` 静默忽略且不报错** ⇒ 监听建起来但**无证书** ⇒ HTTPS 握手失败。**原模板 / 指南 / 首版 sg YAML 全部写错**，本次已订正（渲染件 + 指南 + 两份 manifest 共 3 处）。
+- 官方依据：《通过 AlbConfig 配置 ALB 监听》示例。
+- ⚠️ 别与 **CAS 侧口径 `CertIdentifier`** 混淆：`606823-ap-southeast-1` 这个**值**就是 CAS 的 CertIdentifier，但写进 AlbConfig 时**键名**必须是 `CertificateId`。
+- `alb ListListeners` **响应**字段亦为 `Certificates[].CertificateId`（`task19/alb_mnl.sh:391` 的 jq 断言用的就是它，正确）。
+
+### 2. ★ ACK 托管 ALB = `ServiceManagedResource` ⇒ 直调 API 被拒 / DryRun 探针法不可用 / 无证书上传 API
+
+- mnl/sg 两 ALB 均由 ACK（AlbConfig + Ingress Controller）托管 ⇒ `aliyun alb` **任何写操作**（`CreateListener` / `AssociateAdditionalCertificatesWithListener` / `UpdateListenerAttribute` …）**一律被服务端拒绝**：`OperationDenied.ServiceManagedResource`。
+- ⇒ **① 管理红线是平台级技术强制**（不是「不该做」而是「做不到」）——**只能改 AlbConfig / Ingress（声明式）**。
+- ⇒ **② `--DryRun true` 探针法在托管 ALB 上完全不可用**：服务端**在校验参数之前**就拒写 ⇒ 本次 4 组 DryRun 全部返回同一错误、**零信息量**。该场景的替代法 = **读官方文档确证 + 低风险侧（sg）先行实测**。
+- ⇒ **③ ALB 产品侧无证书上传 API**：`alb` 只有 `AssociateAdditionalCertificatesWithListener` / `DissociateAdditionalCertificatesFromListener` / `ListListenerCertificates` 三个证书接口；`CreateServerCertificate` / `ListServerCertificates` **不存在**。证书来源只能是 **CAS 实例**（跨地域引用，见下）。
+- ⚠️ **AlbConfig finalizer `ingress.k8s.alibaba/resources`** ⇒ `kubectl delete albconfig` 会**级联删除云上 ALB**。AlbConfig 是 **Cluster-scoped**。
+- ⚠️ 集群内**看不到 alb-controller Pod 属正常**（ACK 托管形态：webhook + reconcile 在托管平面）⇒ 判死活**一律用 server-side dry-run / 实测行为**，勿看 Pod。
+
+### 3. ★★ 跨地域证书可用：ap-southeast-1 的证书可挂到 ap-southeast-6 的 ALB
+
+- **实测**：`CertIdentifier=606823-ap-southeast-1`（新加坡购买）被**马尼拉** `alb-1riqckb1h8ezm0y7s9` 的 443 监听**成功 Associated**（`ListListenerCertificates` 确认）⇒ **无需另购 / 上传证书副本**。
+- **根因**：`aliyun cas` 产品 **在 ap-southeast-6 无 endpoint**（`cas.ap-southeast-6.aliyuncs.com` **DNS 不存在**；官方端点列表 12 个地域**不含** ap-southeast-6）⇒ 马尼拉**买不到也管不了** CAS 证书，只能跨地域引用新加坡实例。**这与「CAS 不服务马尼拉」是同一件事的两面。**
+- 备用通道（本次未用）：CAS 有 `UploadUserCertificate`（`--Name` / `--Cert` / `--Key` / `--ResourceGroupId`），可上传证书副本 —— **仅当跨地域关联被拒时启用**。
+
+### 4. ★ 跳转注解字段名：`RedirectConfig`（PascalCase）+ `httpCode`（**非** `statusCode`）
+
+HTTP→HTTPS 301 的正确 Ingress 动作注解：
+
+```yaml
+alb.ingress.kubernetes.io/actions.redirect: >-
+  [{"type":"Redirect","RedirectConfig":{"host":"${host}","path":"${path}","port":"443",
+    "protocol":"HTTPS","query":"${query}","httpCode":"301"}}]
+```
+
+- ⚠️ **写 `redirectConfig`（小驼峰）/ `statusCode` 会被 Controller 静默忽略且不报错**：:80 规则里**不出现 Redirect**，反而多出 `rule-80-5`(ForwardGroup 到占位组) + `rule-80-6`(FixedResponse 404) —— 而 **HTTP 仍返回 200**（404 规则未命中，走了兜底）⇒ **症状强伪装**。
+- **诊断法**：`aliyun alb ListRules --ListenerIds.1 <80监听ID>` 后看 **`RuleActions[].Type`** 是否出现 `Redirect`；不出现即字段名写错（Controller 不报错）。
+- 正确参考：《自定义 ALB Ingress 的转发规则》（`RedirectConfig` + `${host}/${path}/${query}` 变量 + `httpCode`）。
+- **设计取舍**：跳转 Ingress **只对具名 host**（`www.likha.hk` / `likha.hk`）下发，**不全局跳转** ⇒ 保留 10-06 裁定的「裸 IP 直访」（`http://8.212.161.49/api/status` → 200 不跳转）。
+
+#### 4.1 ★★ `redirect` / `reject` 是「伪服务名」——不是 Service，是注解键（控制台显示会误导）
+
+- `backend.service.port.name: use-annotation` 是**开关**：Controller 见到它就**不去查 Service**，改读注解 **`alb.ingress.kubernetes.io/actions.<service.name>`**。
+- ⇒ `service.name` 必须与注解后缀**逐字同名**（本例 = `redirect`，兜底 404 那个 = `reject`），它**只是别名/键**，云上/集群内**都不存在**对应的 Service 对象。
+- ⇒ **ACK 控制台「路由清单」的「规则」列显示的是 `backend.service.name` 原文（原样回显、不解析）** ⇒ 看到 `www.likha.hk / → redirect`、`/ → reject`（`new-api-catchall-404`）**不是配错**；真实行为一律去 **ALB 规则**看 `RuleActions[].Type`（见下方诊断法）。
+- ⚠️ 若把 `port.name` 从 `use-annotation` 改成 `number: 80`，Controller 会**真的去找**名为 `redirect` 的 Service ⇒ 不存在 ⇒ **规则不生成**（静默少一条）。
+- ⚠️ 若把 `service.name` 改成语义化的 `new-api-stable` 而注解仍叫 `actions.redirect` ⇒ **找不到动作** ⇒ 规则同样不生成。二者必须成对。
+- ⇒ **转发到 `new-api-stable` 由 443 侧承担**（`rule-443-*`）+ :80 的无 Host 兜底（`Ingress/new-api-stable-ip` → `sgp-j4qrgy3f7bcv1r67na`）。:80 的 `www.likha.hk`/`likha.hk` **就该是 Redirect 301** —— 指到 Service 反而是错的（那样明文 HTTP 直接 200，永不跳 HTTPS）。
+- **实测快照**（2026-10-12 15:0x，mnl `lsn-ihrgkty2sjdy8s5p4h`）：`rule-80-1` `[Host=www.likha.hk]` → **Redirect 301** · `rule-80-2` `[Host=likha.hk]` → **Redirect 301** · `rule-80-3/4` `[Host=ph-verify.internal.likha.hk]` → ForwardGroup（canary 组 `sgp-slwubl6v6sb2xtsxrz` / stable+canary） · `rule-80-5` `[Path=/*]` → ForwardGroup(`sgp-j4qrgy3f7bcv1r67na`，裸 IP 兜底) · `rule-80-6` `[Path=/*]` → FixedResponse 404。
+
+#### 4.2 ★★ 跳转状态码可选 301/302/303/307/308 —— 承载 API 的域名**必须用 308**
+
+- **`RedirectConfig.HttpCode` 合法取值 = `301` / `302` / `303` / `307` / `308`**（ALB `CreateRule` API 文档 + 《ALB 网关路由最佳实践》互证）。
+- **`HTTPS` 监听只允许跳转到 `HTTPS` 协议**（`HTTP` 监听可跳 HTTP 或 HTTPS）。
+- **★ 语义差异决定 API 生死**：`301/302/303` 下**客户端普遍把 POST 降级为 GET 并丢弃 body**；`307`（临时）与 **`308`（永久）保留方法与 body**。⇒ 对承载 API 的域名（如 `www.likha.hk`，可能被填作 base_url）做收敛，**必须用 308**，否则客户的 `POST /v1/...` 会静默变成 `GET` ⇒ 调用失败且极难排查。SEO 上 Google 对 301/308 视为等价（无权重损失）。
+- **`307` 的用法**：`307` = 临时 + 保留方法 ⇒ **想留「随时反悔」余地时用它跑观察期**，稳定后再切 `308`（301/308 会被客户端长期缓存，**回退对已访问过的客户端无效**）。
+- **HTTPS 侧跳转的隐藏前提**：只做 80 的跳转**不够** —— 浏览器地址栏自动补 https、外部 `https://` 直链、**HSTS 生效后根本不经过 80** ⇒ 443 侧必须独立配一条。
+
+#### 4.3 ★ 本张 CAS 证书 SAN **含裸域**（推翻「通配符不覆盖裸域」的通用认知）
+
+- 实测 `openssl s_client -connect <alb-ip>:443 -servername <host>` → `subject=CN = *.likha.hk`，**`X509v3 Subject Alternative Name: DNS:*.likha.hk, DNS:likha.hk`**（`Aliyun RSA TLS DV G1`，2026-10-12 → 2027-04-28）。
+- ⇒ **根域 `likha.hk` 与任意一级子域都被覆盖** ⇒ 选根域做 canonical **无额外证书成本**。
+- ⚠️ 但**不能据此假定阿里云 DV 通配符一律含裸域** —— 本张含裸域是申请时域名列表的**结果**，续签（2027-04）时必须**保持同样的域名列表**，否则裸域会掉。
+- ⚠️ 注意 `*.likha.hk` **不覆盖二级**（如 `a.b.likha.hk`），也**不覆盖 `internal.`** 类命名（`ph-verify.internal.likha.hk` 走 443 会 SAN 不匹配 ⇒ 内部域名继续用 80）。
+
+#### 4.4 域名 canonical 定案（2026-10-12）· **✅ 已上线并验收（15:33/15:38 HKT）**
+
+- **决策**：canonical = **`www.likha.hk`**（根域 `likha.hk` **全链路收敛到 www**）。此前本方案推荐根域，**用户 15:25 改为 www**，文档/落地件已同步反转。
+- **目标矩阵（✅ 实测达成）**：`http://likha.hk` → 301 → `https://www.likha.hk`（**一跳到位**）· `http://www.likha.hk` → 301 → `https://www.likha.hk` · **`https://likha.hk` → 308 → `https://www.likha.hk`** · `https://www.likha.hk` → 200。
+- **★ P0 实证（308 方法保留）**：`curl -L -d '' https://likha.hk/api/status` → **`code=404 redirects=1`** ⇒ POST **未被降级为 GET**（若 301 降级会得 200）—— 308 相对 301 的**唯一不可替代收益**已实测坐实。→ 承载 API 的域名做收敛**一律 308**。
+- **★ 上线前必做「临时 host 试跑」**（已按此执行）：新建 `canon-probe.likha.hk` 探针 Ingress（仅 443、order=1、httpCode=308）→ 云侧查 `ListRules` 确认 `Type=Redirect`+`HttpCode=308`（**没退化成 ForwardGroup+404**）→ 实测 308 → **立即删除**。理由：错字段名/不支持的状态码**都是静默失败**（HTTP 仍可能 200），只有云侧 RuleActions 能证伪。
+- **⚠ RuleId 会复用/漂移**（本次实测）：探针规则拿到的 `rule-5eb1lqucee6bjp6wtn` 正是**基线里 ph-verify 那条的 ID**；canonical 上线后该 ID 又归 `Host=likha.hk`。⇒ **判路由一律实时查 API，RuleId 无稳定性、勿作引用。**
+- **执行时间**：2026-10-12 15:32–15:38 HKT（mnl）。取证 `deploy/docs/Day2_域名规范化canonical闭环_2026-10-12.md`。
+- **落地件（✅ 均**已 apply**）**：
+  - `deploy/manifests/ingress-mnl-http-redirect.yaml` —— `RedirectConfig.host` 由变量 `${host}` 改为**字面量** `www.likha.hk`（**唯一改动**）。
+  - `deploy/manifests/ingress-mnl-https-canonical.yaml`（**新建**）—— `host: likha.hk` → **308**；`order:"1"`（必须 < `new-api-stable-ip` 的 50）；**只放根域**（放 `www.likha.hk` = canonical 自跳 = 无限 308）。
+  - 方案全文：`deploy/docs/域名规范化与Host收敛_最佳实践方案_2026-10-12.md`。
+- **为什么 443 那条不是可选**：只改 80 会漏掉「地址栏自动补 https / 外部 `https://` 直链 / **HSTS 生效后根本不经过 80**」⇒ `https://likha.hk` 仍 200，canonical 形同虚设。
+- **回退**：80 侧把 host 改回 `${host}` 并重新 apply；443 侧 `kubectl -n new-api delete ingress new-api-https-canonical`。⚠ **301/308 会被客户端长期缓存 ⇒ 回退对已访问过的客户端无效**（**现状已上线 ⇒ 回退只对新客户端生效**）。
+- **想留反悔余地**：可先上 `307`（临时 + 保留方法）跑观察期，稳定后再切 `308`。本次直接上 `308`（依据：试跑已证 Controller 放行 + 目标明确）。
+- **★ SG 侧已同步对齐（2026-10-12 15:52–15:56）· 两地拓扑完全对称**：
+  | 角色 | mnl | sg |
+  |---|---|---|
+  | 80 跳转 | `new-api-http-redirect`（order=1） | `new-api-sg-http-redirect`（order=1） |
+  | 443 canonical | `new-api-https-canonical`（order=1） | `new-api-sg-https-canonical`（order=1） |
+  | 无 Host 兜底 | `new-api-stable-ip`（order=50，80+443） | `new-api-ph-standby-ip`（order=50，**80+443**） |
+  - SG 改动：① `new-api-ph-standby-ip` 的 `listen-ports` `[{"HTTP":80}]` → **`[{"HTTP":80},{"HTTPS":443}]`** + 显式 **`order:"50"`** ② 新建上述 2 个 Ingress。
+  - **★ 次序硬约束**：必须**先补 443 兜底、后上 canonical** —— 反过来 `https://likha.hk` 308 会跳到 SG 443 **无规则可匹配**的 `https://www.likha.hk` ⇒ **502**。
+  - **验收**：四入口与 mnl 逐项一致（301/301/308/200，`redirects=1`）；**308 方法保留同样成立**（`curl -L -d ''` → `404`，非 200）；SG 裸 IP HTTPS 由 **502 → 200**（新增能力）；证书 Verify 0；**mnl 未受影响**。
+  - **★ RuleId 漂移第 2 例**：80 的 `rule-an94dmm2qm60em54bw`（原 `sg-standby.internal`）与 443 的 `rule-5qc042unqehclbul67` 均被重assign；443 兜底 ID 由 `rule-bbk2hlv7sgu7j28obs` → `rule-vz9gxy1830bw4vc9pn`。⇒ **判路由一律实时查 API**。
+  - **`order` 缺省 = 10**：未设 order 的 Ingress 落 10；`order=1` 可压过显式 Host（10）与兜底（50）。
+  - **`new-api-ph-standby-ip`「吃掉所有未匹配 Host」本次是设计要求**（www 有意不建显式 Host ⇒ 落兜底 ⇒ 不跳转、直出业务，与 mnl 的 www 一致）。
+  - 取证 `deploy/docs/Day2_SG侧域名规范化对齐_2026-10-12.md`；真源 `deploy/manifests/ingress-sg-{http-redirect,https-canonical,standby-noHost}.yaml`。
+
+#### 4.5 ★★ 裸 IP 的 HTTPS 天然不可用（2026-10-12 诊断 · 修正 10-06 裁定 A 的边界）
+
+- **现象**：`http://8.212.161.49` 白屏（用户 16:13 报告）。**服务端无故障**。
+- **根因**：浏览器把裸 IP 升级为 HTTPS → ALB 443 默认证书 `CN=*.likha.hk`（SAN `*.likha.hk, likha.hk`，**不含 IP**）→ 证书校验失败。
+  - 浏览器对 **IP 字面量不发 SNI**（RFC 6066 禁止）⇒ ALB 只能回落到 443 监听的**默认证书**。
+  - 未忽略证书 ⇒ `ERR_CERT_COMMON_NAME_INVALID` 拦截页；**忽略后 ⇒ 主 HTML 能加载，但 `/static/js/*` 逐个子资源同样校验失败 ⇒ React 不渲染 ⇒ 白屏**。
+- **为什么"今天才出现"**（**443 上线是唯一变量**）：
+  - 443 上线**前**：`https://8.212.161.49` 握手被拒 ⇒ 浏览器**回退 http** ⇒ 正常。
+  - 443 上线**后**：握手**成功**但证书错 ⇒ 浏览器**不回退**（证书错误 ≠ 连接不可达）⇒ 白屏。
+- **实测矩阵**（Chrome headless `--dump-dom` 后统计 `#root` 内容长度）：
+
+  | 场景 | DOM 字节 | `#root` 长度 | 判定 |
+  |---|---|---|---|
+  | `http://8.212.161.49/` | 67,152 | **49,880** | ✅ 正常 |
+  | `https://8.212.161.49/` | **0** | 0 | ❌ 证书错误，页面未加载 |
+  | `https://8.212.161.49/` + `--ignore-certificate-errors` | 1,053 | **0** | ❌ **白屏** |
+  | `https://www.likha.hk/` | 67,152 | **49,880** | ✅ 正常 |
+
+  **http 与 https-www 的 DOM 字节数、`#root` 长度完全一致** ⇒ 页面本身对 IP / 域名**无任何差异化逻辑**，唯一变量就是 HTTPS 证书。
+- **可解性：无解（这不是配错）**。CAS DV **不签发 IP SAN**；IP 证书需 OV + IP 所有权证明，而 ALB 的 IP 是**共享资产**；自签名/私有 CA 浏览器不信任；ALB 的 HTTPS 监听**必须有默认证书**，不支持"拒绝未知 SNI"以触发浏览器回退；关掉 443 会废掉任务 19/25。
+- **⇒ 修正 10-06 裁定 A**：**「保留裸 IP 直访」仅限 HTTP**（`http://8.212.161.49` 服务端完全正常：200 + 完整 SPA + `/api/status` 200 + 静态资源可达 + **无 HSTS / 无 Location**）。**对外口径一律 `https://www.likha.hk`**，**勿把裸 IP 作为任何交付入口**（浏览器残留的 HSTS / 证书例外会让老访问者继续撞墙）。
+- **关联**：任务 47（Host 收敛）若删掉无 Host 兜底，裸 IP 直访将**整体消失** ⇒ 届时须与用户确认是否彻底放弃该入口。
+- 取证 `deploy/docs/裸IP直访白屏_诊断_2026-10-12.md`；复现脚本 `deploy/logs/t_ipwhite.sh`（服务端+证书）+ `t_dom.sh`（Chrome headless 渲染对比）。
+
+### 5. 附：`httpDefaultActions` / `defaultActions` 在 AlbConfig 中均不生效（实测）
+
+- 两种字段名**都试过**，Controller **一律用自己的 ForwardGroup 覆盖派生占位服务器组**（`kube-system-fake-svc-<port>`）⇒ **无法用 AlbConfig 配「HTTP 默认兜底跳转」**。
+- ⇒ 想让 80 默认兜底**只能靠 Ingress 规则**（见第 4 条）。
+- 与 10-06 SG 侧结论一致（`idleTimeout`/`requestTimeout` ✅ 有效；`defaultActions`/`httpDefaultActions` ❌ 无效）；另 `accessLogConfig.logStore` **必须 `alb_` 前缀**（webhook 硬校验）。
+
+### 6. 附：HEAD vs GET —— 一次「全站 404」误判的教训
+
+- 排查时用 `curl -sSI http://www.likha.hk/api/status`（**HEAD**）→ **404**，一度判定「跳转破坏了生产」并**执行了回滚**。
+- **真因**：new-api `/api/status` **只注册 GET**，gin 对 HEAD 返回**应用层 404**（响应头 `Content-Type: application/json` + `X-Oneapi-Request-Id`）。
+- **区分法**：ALB FixedResponse 404 是 `text/plain` 且无应用头；应用层 404 是 `application/json` + `X-Oneapi-Request-Id`。
+- ⇒ **验收一律用 `curl -sS -o /dev/null -w '%{http_code}'`（GET）**，勿用 `-I`（HEAD）。本次回滚**无必要**（但无害）。
+
+### 7. 验收实测（任务 19 V1–V5 / 任务 25）
+
+| 项 | 任务 19（mnl · `alb-1riqckb1h8ezm0y7s9`） | 任务 25（sg · `alb-amdwm60xmznh7s1nae`） |
+|---|---|---|
+| V1 双 AZ | `[ap-southeast-6b, ap-southeast-6a]` ✅ | — |
+| V2 443 监听 | `Idle=60 / Req=600` ✅ | `lsn-iqn5i233mvv7eu4u6w` Running ✅ |
+| V3 TLS 协商 | `TLSv1.3 / TLS_AES_128_GCM_SHA256` ✅；`-tls1_1`/`-tls1` → 服务端回 `tlsv1 alert protocol version`(70) ✅ | openssl **Verify 0 (ok)** ✅ |
+| V4 HTTP→HTTPS | `www.likha.hk` / `likha.hk` → **301**，`-L` 终到 **200** ✅ | 未做（保留 80） |
+| V5 后端健康 | SG `sgp-j4qrgy3f7bcv1r67na` 4 ENI（`10.0.43.202`/`10.0.43.218`/`10.0.22.219`…）`:3000` 全 Available ✅ | `rule-443-1`(Host `sg-standby.internal.likha.hk`) → `sgp-rlxs1mqishcxcfkx7u` ✅；`curl --resolve :443:{43.98.186.238,47.237.68.142}` → **200 / 200** ✅ |
+| 回归 | 裸 IP 直访 200 不跳转 ✅ · `ph-verify.internal.likha.hk:80` 200 ✅ · canary 优先级不变 ✅ | — |
+
+- ⚠️ **弱版本反例的正确观测**：`openssl s_client -tls1_1` 在 OpenSSL 3 客户端需加 `-cipher 'DEFAULT@SECLEVEL=0'`，否则是**客户端自报** `no protocols available`（不算服务端拒绝）；**正确的服务端拒绝现象**是回 `tlsv1 alert protocol version`。
+
+### 8. ⚠️ CLI 参数形态坑（本轮新增）
+
+- `alb ListListeners` 必须用**复数 flat** `--LoadBalancerIds.1 <id>`（`--LoadBalancerId` 报非法；`--LoadBalancerIds <id>` 报 `Illegal parameter serialization format. Flat format is required`）。
+- `alb ListRules` 用 **`--ListenerIds.1 <id>`**（复数）。
+- **嵌套对象参数被 CLI 拒绝**：`--DefaultActions.1.ForwardGroupConfig.ServerGroupTuples.1.ServerGroupId` 报非法 ⇒ 改用自建 `deploy/lib/aliyun_rpc.py`（RPC SigV1 签名 + 点号扁平明文）。
+- 多层 JMESPath 引号在 shell 中被拆 ⇒ **原始 JSON 落盘 + `python3` 解析**（比 `--cli-query` 稳）。
+
+### 9. ★★ 443「无匹配 Host ⇒ 502」—— `sg.likha.hk` 故障与修复（2026-10-12）
+
+- **现象**：`https://sg.likha.hk` → **502**（页脚 `alb`）；`http://sg.likha.hk` **正常**。
+- **根因**：443 监听上**只有** `Host=sg-standby.internal.likha.hk` 一条规则 ⇒ `sg.likha.hk` 不匹配 ⇒ 落**监听器默认动作** ⇒ 派生占位组 **`kube-system-fake-svc-443`**（后端 = **节点 IP:3000**、`HealthCheckEnabled=off`）⇒ 无服务监听 ⇒ **502**。
+- **★ 托管 ALB 的「默认动作」是占位组，不是业务兜底**：`ListListeners` 的 `DefaultActions` 指向 `sgp-*` 名字为 `kube-system-fake-svc-<port>` 的组，健康检查 off、后端是**节点 IP** ⇒ **任何未匹配请求必 502**。想让某 Host 可用**必须显式建规则**。
+- **为什么只挂 HTTPS**：80 端口有历史遗留的**无 Host 兜底 Ingress**（`new-api-ph-standby-ip`，`listen-ports=[{"HTTP":80}]`）⇒ 任意 Host 命中兜底；而它**没开 443** ⇒ HTTPS 缺口现形。**⇒ 验收必须 HTTP/HTTPS 各测一遍。**
+- **修复**：给 `Ingress/new-api-ph-standby` 用 JSON patch 追加一条 host（只动 `/spec/rules`，**不碰注解**）：
+  `kubectl -n new-api patch ingress new-api-ph-standby --type=json -p='[{"op":"add","path":"/spec/rules/-","value":{"host":"sg.likha.hk","http":{"paths":[{"path":"/","pathType":"Prefix","backend":{"service":{"name":"new-api-ph-standby","port":{"number":80}}}}]}}}]'`
+  ⇒ 443 生成 `rule-443-2`(Host=`sg.likha.hk`) → `sgp-rlxs1mqishcxcfkx7u`（2 台 ENI 全健康）⇒ **200**。
+- **诊断法**：`ListRules --ListenerIds.1 <LSN>` 看 `RuleConditions[].HostConfig.Values` 是否含目标 Host；`GetListenerHealthStatus --ListenerId <LSN> --IncludeRule true` 区分「规则缺失」与「后端不健康」（本次 `NonNormalServers=[]` ⇒ 纯规则缺失）。集群内 `curl http://<svc>/api/status` 得 200 也可排除应用层。
+- **★ `RuleName` 会重新编号**：本次 nohost 兜底由 `rule-80-2` 变为 `rule-80-3`，新 Host 规则占 `rule-80-2` ⇒ **判路由只信实时 API 的 `Host`/`Priority`/`ServerGroupId`**。
+- **★ 漂移教训**：10-12 上线 443 时只 annotate 了集群，未回写 `deploy/manifests/ingress-sg-standby.yaml`（仍写 `[{"HTTP":80}]`）⇒ 本次已对齐。**改配置必须同步真源文件。**
+- **遗留**：443 仍无无-Host 兜底（SG 侧仅显式 Host 可达，符合任务 47 收敛方向）；`sg-standby.internal.likha.hk` 走 443 会 SAN 不匹配（通配符不含 `.internal.`）⇒ 内部域名继续用 80。
+- 完整取证：`deploy/docs/SG站sg.likha.hk_502修复_2026-10-12.md`。
+
+### 10. ★★ 新增域名转发配置：**只改 Ingress / AlbConfig，禁止手动改 ALB 规则**（2026-10-12 实测）
+
+- **硬证据（3/3）**：对两地 ALB 监听直调 `CreateRule`（`--DryRun true` 零变更）→ **mnl 443 / mnl 80 / sg 443 全部** `OperationDenied.ServiceManagedResource`「the current resource is managed resource」。⇒ **不是建议，是平台级技术强制**。
+- **归属证明**：ALB 标签 `ack.aliyun.com=<集群ID>` + `ingress.k8s.alibaba/albconfig=kube-system/mnl-alb` + `ingress.k8s.alibaba/resource=ApplicationLoadBalancer` ⇒ 实例/监听/**规则/服务器组全由 ACK Controller 派生**，控制台那一列是**渲染结果**。
+- **控制台表现**：转发规则页「插入新规则 / 排序 / 批量删除」为**灰态不可点**（与 API 行为一致）。
+- **即使能改也不该改**：① Controller 持续 reconcile ⇒ 手改规则**静默消失** ② **RuleId 无稳定性**（会跨 Host 复用/重编号）③ 造成 IaC 漂移 ⇒ "神秘回滚"。
+- **正确姿势五步**：① 定 Host / 端口 / 后端 Service:port ② 选载体（转发 → 加进已声明 `listen-ports` 的 Ingress 或新建；跳转 → `actions.<伪名>` + `RedirectConfig` + `httpCode`）③ 定 `order`（**要压过兜底必须 < 50**；跳转类用 1）④ 443 证书覆盖（通配符 `*.likha.hk` + 裸域覆盖 www/sg/根域；**不含 `.internal.`、不含多级域、不含 IP**）⑤ **验收两步**：先 `ListRules` 看 `RuleActions[].Type/HttpCode/HostConfig.Values`（错字段名会静默失败且 **仍回 200**），再 curl **HTTP/HTTPS 各一遍** ⑥ 回写真源。
+- **★ 两地 Ingress 地图（2026-10-12 实测，权威）**：
+  - **mnl**（6 个）：`new-api-http-redirect`(order1, 80, www+根域→301) · `new-api-https-canonical`(order1, 443, 根域→308) · `new-api-canary-weight`(45, 80) · `new-api-canary-header`(46, 80) · **`new-api-stable-ip`(order50, 80+443, `(无Host)`→stable 兜底)** · `new-api-catchall-404`(order100, FixedResponse 404)。
+  - **sg**（4 个）：`new-api-sg-http-redirect`(order1, 80) · `new-api-sg-https-canonical`(order1, 443) · `new-api-ph-standby`(默认10, 80+443, 内部域+`sg.likha.hk`) · **`new-api-ph-standby-ip`(order50, 80+443, `(无Host)` 兜底)**。
+- **★ 静默失败清单**：`httpDefaultActions`/`defaultActions` 不生效 · `CertIdentifier`→须 `CertificateId` · `redirectConfig`/`statusCode`→须 `RedirectConfig`/`httpCode` · `service.name` 与 `actions.<name>` 必须同名 · `port.name` 改 `number` 会去找不存在的 Service · **漏 `listen-ports` ⇒ 该端口完全无规则** · 443 无匹配 Host ⇒ **502**。
+- **★ 两条操作细则（本次修正/新增）**：
+  - **DryRun 探针法的准确边界**：参数**齐备**才回托管拒绝；参数**不齐**会**先回参数校验错**（实测 `MissingRuleActions.1.Order`）⇒ 看起来像"未被拦截"，**极易误判**。结论不变：DryRun **无法预演参数**，仅能确证托管拒绝。
+  - **`ListRules` 偶发返回空**：本次 80 监听计数一度 **6→0**，重试 1 次即恢复（301 规则完好）⇒ 计数/断言**必须重试 ≥3 次 + 校验合法 JSON**。
+- **★ Ingress ↔ ALB 规则对账模型（2026-10-12 实测 · 原始 ID 级）**：**1 个 Ingress → N 条规则**，`N = (host×path 组合数) × listen-ports 数`。控制台「路由」页按 **Ingress 聚合**、ALB「转发规则」页按 **规则平铺**（**不带 Ingress 归属**）⇒ **非 1:1**，这是"看着对不上"的唯一原因（典型例：`new-api-stable-ip` 2 path × 2 端口 = 4 条 → 443 上就是 `rule-443-2`(具名 host) + `rule-443-3`(无 Host)）。
+  - 实测展开：**mnl 443 = 3**（`https-canonical` 1 + `stable-ip` 2）· **mnl 80 = 6**（`http-redirect` 2 + `canary-header` 1 + `canary-weight` 1 + `stable-ip` 1 + `catchall-404` 1）· **SG 443 = 4**（`sg-https-canonical` 1 + `ph-standby` 2 + `ph-standby-ip` 1）· **SG 80 = 5**（`sg-http-redirect` 2 + `ph-standby` 2 + `ph-standby-ip` 1）。**SG 侧完全 1:1 展开、无合并 ⇒ 最干净的验证样本**。
+  - **RuleName = `rule-<port>-<该监听内序号>`** ⇒ 与「第几个 Ingress」**无关**，**不可作对账锚点**（RuleId 更会跨 Host 复用）。
+  - **★ 服务器组同名不同 ID**：`new-api-new-api-canary-80` 有 2 个 ID（`sgp-slwubl6v6sb2xtsxrz` header 用 / `sgp-1eevkvsn0c32t3e1ya` weight 用）；`new-api-new-api-ph-standby-80` 有 2 个 ID（`sgp-rlxs1mqishcxcfkx7u` 显式 Host 用 / `sgp-8m8eknlyw0z1busl6r` **无 Host 兜底**用）⇒ **一律按 `ServerGroupId` 引用，勿按名字**。命名规则 `<ns>-<svc>-<port>`。
+  - **★ MNL 80 只有 6 条（非 7）**：`stable-ip` 的 `Host=ph-verify` path 与 canary-weight 规则**条件相同被合并**（目标组 canary w5 + stable w95 = `canary-weight=5` 的语义）——**推断**，依据是条件相同 + 目标组内含 stable。
+  - **★ `order` ≠ 最终优先级**：`order` 与 `Priority` 大体同向（1 最先 / 50 居中 / 100 最后），但 **canary 那一对相反**（`canary-header` order=46 排在 `canary-weight` order=45 **之前**）⇒ **必须实查 `ListRules` 的 `Priority`**。
+- **★★ 服务器组派生粒度 = Ingress（2026-10-12 定论）**：**组数 = 引用该 Service:Port 的「不同 Ingress 数」** —— **同 Ingress 内多条 rule 复用一组；跨 Ingress 各派生一组**（哪怕 backend 完全相同）。
+  - 判定归属**只看标签 `ingress.k8s.alibaba/ingress_name`**（组名 `<ns>-<svc>-<port>` 会撞车，**同名必不同 ID**）。
+  - 实证：SG `new-api-ph-standby-ip`(`sgp-8m8eknlyw0z1busl6r`) vs `new-api-ph-standby`(`sgp-rlxs1mqishcxcfkx7u`) 两组**后端/协议/调度/健康检查/VPC 全同**（`10.1.19.127:3000` + `10.1.38.123:3000`，各 w100），唯一差异就是 `ingress_name`。mnl 侧对应形态**放在同一个 Ingress** `new-api-stable-ip`（`hosts=ph-verify.internal.likha.hk,(无 Host)`）⇒ **只有 1 个组** `sgp-j4qrgy3f7bcv1r67na`。差异纯属任务 19 / 任务 25 落地形态不同，**功能等价**。
+  - **★ 托管服务器组删不掉（三重拦截）**：① `DeleteServerGroup` 先撞 **`ResourceInUse.ServerGroup`**（被规则引用）；② 标签 `ack.aliyun.com` + `ingress.k8s.alibaba/*` ⇒ 托管派生，写操作回 `ServiceManagedResource`；③ 绕过也**被 reconcile 重建**。⚠ `DryRun` 在 ① 就短路，**不能反推「非托管就能删」**。删掉 = 该组承载规则立刻 **502**。
+  - **★ 合并多 rule 时 `order` 是 Ingress 级**：含「无 Host」rule 的 Ingress **必须用默认 order**（或确保整组排在具名规则之后），否则无 Host rule 会**吃掉全部流量**。合并路径 = 把 noHost rule 挪进具名 Ingress → **先 apply 合并版（瞬时 3 组）再 delete 旧的** → GC 回落 1 组，规则布局与合并前**逐条等价**。
+- 完整口径与证据：`deploy/docs/新增域名转发配置口径_Ingress优先_2026-10-12.md`（§7 四张对账表）+ `deploy/docs/服务器组同名重复_成因与处置_2026-10-12.md`（成因/删除可行性/合并 SOP）。
+
+## ★ 云助手回传通道的两个硬限制（2026-10-12 实测 · 做工具时踩到）
+
+1. **`RunCommand` 的 `Output` 有 ~24 KB 上限，且截断是「掐中间」**（保留头尾、丢掉中间一段）：
+   - 实测 A（真实数据）：节点侧 `NODE_SIZE=25236` → 本地收 `24371`，**行数 424/424 完全一致**，但中间丢了 865 字节 ⇒ JSON 报 `Expecting ':' delimiter`，**极易误判成集群数据损坏**。
+   - 实测 B（规律数据复现）：节点侧 30040 B（5×6008）→ 本地收 24386 B，**第 2 行整段消失、第 1 行被拼接变长**。
+   - ⇒ **铁律：经 `ack_remote.sh` 回传的载荷一律压到 < 2 KB**；需要结构化数据时用 `kubectl -o go-template` 打**紧凑 TSV**（一行一条），**不要 `-o json`**。
+2. **`kubectl get <名字> -o go-template='{{range .items}}'` 静默输出空**：指定资源名时 kubectl 返回**单个对象**、无 `.items` ⇒ range 空转，**不报错、退出码 0**。回读一律 `kubectl get ingress`（不带名字）。
+3. **`kubectl -o custom-columns` 取不到带 `/` 的注解键**：`…:.metadata.annotations.alb\.ingress\.kubernetes\.io/listen-ports` 实测**全输出 `<no value>`/`<none>`**（静默失败）⇒ 改用 `go-template` + `{{with .metadata.annotations}}{{index . "alb.ingress.kubernetes.io/listen-ports"}}{{end}}`。
+
+## ★ 工具 `deploy/ops/add-domain.sh`（2026-10-12 建 · 加域名一条命令）
+
+`plan | apply | verify | ls | delete`，封装「生成真源 → 预检 → apply（云助手）→ 云端对账 → 回写真源」。
+- **预检 8 项**：order<50 · 证书覆盖（`*.likha.hk`+裸域）· 跳转目标**三态可达性**（explicit/fallback/missing）· 目标 host 已存在规则 · **Service 存在性（远端 apply 前拦截，零变更，9 s 返回）** · 真源冲突 · 自跳死循环 · 非法状态码/IP。
+- **对账 3 项**（只看 curl 不够）：`Host=` 规则存在 · 该规则 `Priority < 兜底 Priority`（否则**永不命中**）· `RuleActions[].Type` 未被静默降级。
+- 默认 `forward` 的 `--order 40` / `redirect` 的 `--order 1`；redirect 一律 80→**301**、443→**308**；真源写 `deploy/manifests/ingress-<site>-<prefix>-{forward,http-redirect,https-canonical}.yaml`（**须 git commit**）。
+- 调试：`ADD_DOMAIN_KEEP=1` 保留远端原始输出并打印路径。
+- **附带确证**：每个新 Ingress 派生**独立服务器组**（同名不同 ID 的成因）；**删 Ingress 后 Controller 会 GC 该组**（实测 6→5）。
+- 全文与自测矩阵：`deploy/docs/域名加配置_一条命令_add-domain_2026-10-12.md`。
+
+## ★ 两文档口径冲突对照表（② xlsx v2.3 vs ① 指南 · 一律按 ①）
+
+| 项 | ② xlsx v2.3 | ① 指南（采信） |
+|---|---|---|
+| 排期 | 2 人×5 天 = 120 人时 | 1 人×4 天×2 窗（A 08:30–14:00 / B 14:00–22:00）；backlog 顺延 T+14 |
+| 日志库 | 马尼拉 CK 社区版 + 新加坡 CK | **F9** 仅马尼拉 CK **企业版单 AZ**；日志不入 SLA 证据链 + 写失败必须降级 |
+| 镜像源 | 双地域 ACR | **单地域马尼拉 ACR**；SG 走公网端点拉（RTO 须含拉取耗时） |
+| 连接收敛 | RDS 代理独享型 | **F10 已撤销**（改用 RDS PG **内置托管 PgBouncer**）；**F11** `max_connections=800` 不可改 → 预算 640 |
+| 机型 | `g8i.2xlarge` | **F1 `ecs.g9i.2xlarge`**（g8i 马尼拉全系未上架），备 `g8ine` |
+| ALB 超时 | 180s | **600s（上限）**；SSE 靠 15–20s ping 保活 |
+| ACK | 1.31+ | **1.35**（1.31/1.33 已 EOL） |
+| 证据目录 | `.deploy/evidence/` | `deploy/evidence/` |
+
+## ★ G0 门禁全量复核 + 任务 1、2 收口（2026-10-12）
+
+**结论（2026-10-12 裁定后口径）**：**任务 2 ✅ 完成 · 任务 1 ✅ 本卡收口**；G0 门禁 **12 项过 8 / 未过 4（G6/G7/G11/G13）**，**G8 经裁定移出门禁（T+14 后补）**、**G9 经裁定闭合（降权不做 · 知情接受）**。报告 `deploy/docs/Day1任务1_2_G0收口与NS复核_执行报告_2026-10-12.md`（**§七 = 裁定登记与遗留风险**）。⚠ 原「13 项过 7 / 未过 6」口径**已作废**。
+
+### 本卡实测（三步全过）
+- 配额工单：`ListQuotaApplications` → mnl `b140e263-685…` = 64 / sg `e117bf2b-e8e…` = 96，**均 `Status=Agree`**
+- 可用区：`ap-southeast-6a` / `6b`（仅两个）
+- 机型：`ecs.g9i.2xlarge` 在 6a/6b **均 `WithStock`**；备用 **`ecs.g8ine.2xlarge` 同** ⇒ ⚠ **`ecs.g9ine.2xlarge` 查无此机型**（勿再引用）
+- NS：权威 `DescribeDomainInfo` 与递归 `dig` **双验一致**
+
+### 未过 4 项 + 2 项裁定（2026-10-12）
+
+| 项 | 实测 | 归属 |
+|---|---|---|
+| G6 模板 PR | 13 件落盘 `deploy/aliyun/ph/`，`albconfig.rendered.yaml` / `placeholder-svc-ingress.yaml` **未提交** | 仓库协作 |
+| G7 产品开通 | 主要实例均已建（=已开通）；**缺白名单书面确认** | 控制台 |
+| G11 连接预算表 | 未产出；现存答疑用 **16C64G / 800 / HPA16**，与实况 **2C8G / HPA13** 不符 | 任务 41 |
+| G13 staging | 无文档 | Day 3 |
+| ~~G8 探针~~ | ⏸ **移出门禁 → T+14 后补**（实测 `healthz`/`readyz` 0 命中、`/metrics` 未注册）。过渡口径：探针用 `/api/status`+TCP；Tair 故障 **fail-closed**（全站 429/503 风险 + P1 告警）；`MIGRATE_MODE` 不生效；`G8-EV-1` 邮件闸门滞后 | **后补项**（不阻塞 G0） |
+| ~~G9 降权~~ | ✅ **裁定「本轮不做」⇒ 知情接受闭合**（ActionTrail `Enable` + MFA 4 台已达成）。风险：主账号仍持 `AdministratorAccess`，日后收紧须先确认无自动化依赖其 AK | 已收口 |
+
+### 四处口径偏差（已就地修订指南正文）
+1. **prepay 配额过时**：实测 `q_ecs_enterprise_prepay_c` = mnl **1024** / sg **5120**（旧写 100/100）⇒ 按量 `postpay_c` 64/96 仍是唯一核量口径，prepay 仅对照。
+2. **按量配额已占一半（扩容门禁）**：`TotalUsage` → mnl **32/64**（= 4 节点 × 8 vCPU）、sg **16/96**（= 2 节点 × 8）⇒ **mnl 仅余 4 个 `ecs.g9i.2xlarge` 的额度**，是 HPA 的硬顶。
+3. **NS 名写错**：卡内期望 `ns*.aliyuncs.com` → 实为 **`ns*.alidns.com`**。
+4. **「改记录后 SOA 序列号递增」判据不成立**：10-05 之后新增 `_dnsauth` TXT 与 `sg` 两条记录，序列号**仍为 `2026100517`** ⇒ 验记录生效**只能逐条 `dig` 目标记录名**。
+
+### 任务 2 的顺延项（非遗漏）
+- `ops`（前置 = 堡垒机/VPN = 任务 46）· `static`（前置 = DCDN 未启用）—— **不建悬空记录**，随前置落地时补建。
+- `www` **TTL 60 不可达**（免费版下限 600s，实测 600）；`www` 形态由 CNAME→GTM 改为 **A→ALB**（GTM 已挂起）。
+
+### 附带确认（工具口径）
+- `quotas ListProductQuotas --MaxResults` **上限 100**（传 300 报 `INVALID.MAX.RESULTS`）。
+- `aliyun ram GetAccountSummary` **不是合法 API**（国际站 CLI 报 "not a valid api"）⇒ 查 RAM 用 `ListUsers` / `ListVirtualMFADevices` / `ListPoliciesForUser`。
+- 集群实况：**mnl 4 节点 / sg 2 节点**（`cs DescribeClusterNodes`）。

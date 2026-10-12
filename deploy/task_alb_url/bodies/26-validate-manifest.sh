@@ -22,7 +22,7 @@ spec:
     - name: http
       protocol: TCP
       port: 80
-      targetPort: 3000
+      targetPort: http
       nodePort: 32656
 YAML
 kubectl apply --dry-run=client -f /tmp/newapi-np-validate.yaml 2>&1

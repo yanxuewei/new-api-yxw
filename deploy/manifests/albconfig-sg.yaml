@@ -2,7 +2,7 @@
 # 集群：ca75829e3492d491d9d434de087913798（ap-southeast-1，2 节点 1.35.7）
 # 对应 IngressClass：`alb`（parameters.name = sg-alb，已建 2026-10-06）
 #
-# ⚠️ 状态：**尚未 apply**（等待两项前置，见文末「阻塞」）。本文件是渲染就绪件。
+# ✅ 状态：**已 apply**（2026-10-06 建 ALB 骨架；2026-10-12 追加 443 + TLS 证书，验收通过）。
 #
 # 与马尼拉同构（`deploy/aliyun/ph/albconfig.rendered.yaml`）的三处**有意差异**：
 #   ① config.name = alb-newapi-sg（马尼拉 alb-newapi-mnl）
@@ -41,41 +41,42 @@ spec:
       - { key: env, value: prod }
 
   # ────────────────────────────────────────────────────────────────────────────
-  # listeners（2026-10-06 用户裁定：**先建 ALB，仅 80，无 TLS**）
+  # listeners（★ 2026-10-12 更新：443 已上线并验收）
   #
-  # 采用**官方最小形态**：只给 port + protocol，**不写 default action**。
-  #   依据：官方《通过 AlbConfig 配置 ALB 实例》创建示例即
-  #     listeners:
-  #       - port: 80
-  #         protocol: HTTP
-  #   监听器的默认动作由 Controller 自管（命名规范 `ingress-auto-listener-{port}`）。
-  #   ⇒ 好处：**零字段名猜测** —— 马尼拉现网写的 `httpDefaultActions` 是否为有效字段名
-  #     至今未验证（CRD 是 x-kubernetes-preserve-unknown-fields，错名静默忽略），
-  #     此处不复制该不确定性。
-  #
-  # ★★ 超时已在本段实配并**实测生效**（`idleTimeout: 60` / `requestTimeout: 600`，
-  #   云端回读一致）⇒ **马尼拉任务 19 的 V1b 未达标，根因就是马尼拉 AlbConfig 里
-  #   从未写过这两项**（其 listeners 只有 port / protocol / httpDefaultActions），
-  #   与「ALB 不支持」无关。补齐即可，但马尼拉侧按用户 13:15 裁定暂不动。
+  # 80：官方最小形态（只给 port + protocol + 超时），**不写 default action**。
+  #   依据：官方《通过 AlbConfig 配置 ALB 实例》创建示例即 `- port: 80 / protocol: HTTP`；
+  #   监听器默认动作由 Controller 自管（命名 `ingress-auto-listener-{port}`，默认动作指向
+  #   占位组 `kube-system-fake-svc-<port>`）。好处：**零字段名猜测**。
   #
   # ★★ 绝不要在这里写 `defaultActions` / `httpDefaultActions`（**实测均无效**）：
-  #   2026-10-06 SG 侧零风险探针 —— 写入 `defaultActions: [{type: FixedResponse,
-  #   fixedResponseConfig: {httpCode: "404"}}]`，k8s 侧 spec 保留该字段，
-  #   但云端 `GetListenerAttribute` 回读 `DefaultActions` **仍是**
-  #   `ForwardGroup → sgp-p1qg1z0rqgbovj3yqd`（Controller 派生的占位组
-  #   `kube-system-fake-svc-80`）。⇒ **Controller 一律用自己的 ForwardGroup 覆盖**
-  #   AlbConfig 的 default action。推论：马尼拉那颗「谁把 httpDefaultActions 改成
-  #   官方名 defaultActions 就会激活 Redirect、打断直连 IP 通道」的定时炸弹
-  #   **不存在** —— 正确字段名同样不生效。
+  #   2026-10-06 SG 侧零风险探针 —— 写入 `defaultActions: [{type: FixedResponse, ...}]`，
+  #   k8s 侧 spec 保留该字段，但云端 `GetListenerAttribute` 回读 `DefaultActions` **仍是**
+  #   Controller 派生的 ForwardGroup 占位组。⇒ 80 上的 HTTP→HTTPS 301 **不能**写在这里。
   #
-  # ⏳ 待补（各自独立，就绪后追加）：
-  #   · 443 + TLS：需 CAS 证书（`CERT_ID_SG`）。实测 `aliyun cas ListUserCertificateOrder
-  #     --region ap-southeast-1` ⇒ **TotalCount=0**，账号内零证书（G5 未闭环）。
-  #   · 后端：备站 Service `new-api-ph-standby` 尚不存在（任务 28 未做，ns 内 0 workload）；
-  #     无 Ingress ⇒ 80 监听器此时无业务转发规则（事件 `AlbconfigZeroIngress` 属预期）。
+  # ★★ 443 证书字段名（2026-10-12 血泪）：`certificates[].**CertificateId**`，
+  #   **值**才是 CertIdentifier（如 `606823-ap-southeast-1`）。写成 `CertIdentifier:` 会被
+  #   CRD 的 `x-kubernetes-preserve-unknown-fields` **静默忽略**（不报错、证书不绑定）。
+  #   注意 SG 是 ap-southeast-1（与证书本地同地域）；马尼拉 ap-southeast-6 用**同一个**
+  #   CertIdentifier 也成功 Associated（跨地域可用，详见 albconfig.rendered.yaml 尾注）。
+  #
+  # 验收实测（2026-10-12，SG 侧）：
+  #   Listener lsn-iqn5i233mvv7eu4u6w · 443 · HTTPS · Running
+  #   ListListenerCertificates → 606823-ap-southeast-1 / Server / IsDefault / Associated
+  #   openssl s_client -servername sg-standby.internal.likha.hk → CN=*.likha.hk，Verify 0 (ok)
+  #   curl --resolve sg-standby.internal.likha.hk:443:{43.98.186.238,47.237.68.142} → 200 / 200
+  # ────────────────────────────────────────────────────────────────────────────
   listeners:
     - port: 80
       protocol: HTTP
       idleTimeout: 60          # ✅ SG 侧实测生效（2026-10-06 回读 IdleTimeout=60）
       requestTimeout: 600      # ✅ SG 侧实测生效（回读 RequestTimeout=600；ALB 硬上限）
+    - port: 443
+      protocol: HTTPS
+      idleTimeout: 60
+      requestTimeout: 600
+      caEnabled: false
+      securityPolicyId: tls_cipher_policy_1_2_strict_with_1_3
+      certificates:
+        - CertificateId: 606823-ap-southeast-1   # ← 字段名必须是 CertificateId
+          IsDefault: true
   # ────────────────────────────────────────────────────────────────────────────

@@ -302,14 +302,12 @@ if [[ -n "$CERT_ID_ALB" ]]; then
 elif [[ "$WITHOUT_TLS" == "1" ]]; then
   warn "未提供 CERT_ID_ALB 且显式 --without-tls：将**只创建 80 监听**（无 TLS，仅内部验证用，任务 40 补齐）"
 else
-  fail "CERT_ID_ALB 未提供：443 监听无法创建（G5 证书未闭环，CAS TotalCount=0）"
+  fail "CERT_ID_ALB 未提供：443 监听无法创建"
   say ""
-  say "  阻塞说明："
-  say "   · aliyun cas ListUserCertificateOrder → TotalCount=0（账号内无任何证书）"
-  say "   · dig NS likha.hk → ns21/ns22.domaincontrol.com（GoDaddy），G4「NS 指向阿里云」亦未闭环"
-  say "   · 影响：443 监听、TLS 策略、证书链、SNI 反例四项验收（指南 V1/V3/V4 及部分 V2）全部无法执行"
-  say "  处置：① 先闭环 G4+G5（购买付费通配符 *.likha.hk 并完成 DCV）后重跑本脚本；或"
-  say "        ② 显式接受降级：bash deploy/tasks/task19/alb_mnl.sh --without-tls （仅建 ALB + 80 监听）"
+  say "  ★ 2026-10-12 状态更新：G5 证书**已闭环**（CertIdentifier=606823-ap-southeast-1，见 deploy/docs/G5闭环_PlanC_DV通配符签发_2026-10-12.md），"
+  say "    且任务 19 的 443+TLS **已通过 AlbConfig 声明式直接落地并验收 V1–V5**（见 deploy/docs/Day2任务19-25_443TLS闭环_2026-10-12.md）。"
+  say "    ⇒ 常规情况下**不需要再跑本脚本**；如需重放，直接 apply deploy/aliyun/ph/albconfig.rendered.yaml（证书已硬编码回填）。"
+  say "  ⚠ 本脚本 --without-tls 分支仍按旧字段名开发，若使用请先对照 rendered 文件订正。"
   say ""
   say "证据目录：$OUTDIR"
   exit 3

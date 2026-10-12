@@ -1,0 +1,70 @@
+# 任务 19 · V4（HTTP → HTTPS 301）· 马尼拉 ALB
+# 落地时间：2026-10-12（G5 证书闭环后）· 集群：cd57e40ce9a634c1698c2f5c5e09bd93c（ap-southeast-6）
+# 验收实测（2026-10-12）：
+#   GET http://www.likha.hk/api/status  → 301，Location: https://www.likha.hk/api/status
+#   GET http://likha.hk/api/status      → 301，Location: https://likha.hk/api/status
+#   跳转链端到端 → 最终 200 @ https://www.likha.hk/api/status
+#   回归：裸 IP 直访 http://8.212.161.49/api/status → 200（不跳转，既有确认项保留）
+#   回归：ph-verify.internal.likha.hk :80 → 200（canary/内部验收不受影响）
+#
+# ✅ 2026-10-12 15:33 **已 apply**（www canonical 生效）—— 仓库与集群一致
+#   实测：http://likha.hk → 301 → https://www.likha.hk（**一跳到位**）· http://www.likha.hk → 301 → https://www.likha.hk
+#   决策：canonical 主域名定为 `www.likha.hk`（用户 2026-10-12 定），根域 likha.hk 全链路收敛到 www。
+#   本文件改动（仅 1 处）：`RedirectConfig.host` 由变量 `${host}` 改为**字面量 `www.likha.hk`**。
+#     效果：http://likha.hk     → 301 → https://www.likha.hk   （**一跳到位**，消除原先的双跳）
+#           http://www.likha.hk → 301 → https://www.likha.hk   （仅升级协议，Host 不变）
+#   配套件：**新建** Ingress `new-api-https-canonical`（443 侧，`likha.hk` → **308** → `www.likha.hk`）
+#           → 见 deploy/manifests/ingress-mnl-https-canonical.yaml
+#   方案全文：deploy/docs/域名规范化与Host收敛_最佳实践方案_2026-10-12.md
+#   ⚠️ 回退：把 host 改回 `${host}` 并重新 apply（注意 301 会被客户端长期缓存，回退对已访问者无效）
+#
+# ★★★ 字段名坑（2026-10-12 一次失败后订正，务必照抄）★★★
+#   官方《自定义ALB Ingress的转发规则》：https://www.alibabacloud.com/help/zh/doc-detail/2788772.html
+#     正确：{"type":"Redirect","RedirectConfig":{...}}      —— 配置对象名 PascalCase
+#     正确：状态码字段名是 "httpCode"                        —— 不是 statusCode
+#     错误（实测被忽略，且**不报错**）：{"type":"Redirect","redirectConfig":{"statusCode":"301"}}
+#       → Controller 识别不了 → 退化成 ForwardGroup + 额外 404 规则（HTTP 仍 200，误导性极强）
+#   `type` 值 PascalCase（Redirect / FixedResponse / ForwardGroup），内层键 camelCase。
+#
+# ★ 设计取舍：**只对 www.likha.hk / likha.hk 两个 host 跳转**，不用「全 host 跳转」。
+#   原因：`Ingress/new-api-stable-ip` 的无 Host 兜底规则承载「裸 IP 直访」这一既有确认项
+#   （用户 2026-10-06 裁定 A）。若做全 host 301，裸 IP 直访会被跳走 ⇒ 破坏既有验收项。
+#   （任务 47「G5+DNS 后删 nohost Ingress 并复测伪造 Host 404」是**独立**议题，未在本次执行。）
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: new-api-http-redirect
+  namespace: new-api
+  labels:
+    app: new-api
+    env: prod
+    project: new-api
+    site: ph-mnl
+    purpose: http-to-https
+  annotations:
+    alb.ingress.kubernetes.io/actions.redirect: '[{"type":"Redirect","RedirectConfig":{"host":"www.likha.hk","path":"${path}","port":"443","protocol":"HTTPS","query":"${query}","httpCode":"301"}}]'
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80}]'
+    alb.ingress.kubernetes.io/order: "1"
+spec:
+  ingressClassName: alb
+  rules:
+    - host: www.likha.hk
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: redirect          # 必须与注解 actions.<name> 同名
+                port:
+                  name: use-annotation  # 固定值
+    - host: likha.hk
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: redirect
+                port:
+                  name: use-annotation

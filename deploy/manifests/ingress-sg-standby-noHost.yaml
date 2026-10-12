@@ -1,17 +1,35 @@
-# 任务 25 追加件 · 新加坡（备站）**无 Host** Ingress `new-api-ph-standby-ip`
+# 任务 25 追加件 · 新加坡（备站）**无 Host 兜底** Ingress `new-api-ph-standby-ip`
 # 集群：ca75829e3492d491d9d434de087913798（ap-southeast-1）
 # 目的：让 **ALB 公网 IP 直访**（浏览器直接输 IP / curl 不带 Host）也能命中备站，
 #       无需 `-H "Host: ..."`、无需改 /etc/hosts。
 #
+# ===== 状态（2026-10-12 更新 · 域名对齐 mnl）=====
+#   ✅ listen-ports 由 [{"HTTP":80}] 扩为 **[{"HTTP":80},{"HTTPS":443}]**（与 mnl 的
+#      `Ingress/new-api-stable-ip` 完全对称）。原因：SG 443 侧原先**没有**无-Host 兜底 ⇒
+#      `https://www.likha.hk` 落到监听器默认动作 ⇒ 派生占位组 ⇒ **502**；而 www 是 canonical，
+#      必须在 SG 侧「可达但**不跳转**」（与 mnl 一致：mnl 的 www 也走 443 兜底命中业务）。
+#   ✅ 新增 `order: "50"`（对齐 mnl `new-api-stable-ip` 的 50）⇒ 兜底规则**明确排在**
+#      redirect(order=1) / canonical(order=1) / 显式 Host 规则(order 默认 10) **之后**，
+#      消除「同为默认 order=10 时相对顺序不确定」的隐患。
+#
 # == 原理 ==
-#   ALB 监听器同时挂两条规则：
-#     [1] Host=sg-standby.internal.likha.hk  AND Path=/*   → 主 Ingress 派生组（有 Host 的优先）
-#     [2] Path=/*（无 Host 条件）                            → 本 Ingress 派生组
-#   请求带匹配 Host → 走 [1]；否则落 [2]。均不再落 default → 不再 503。
+#   ALB 监听器同时挂多条规则（按 order 升序 = 优先级降序）：
+#     [1] order=1  redirect / canonical（Host 精确匹配）      → 跳转
+#     [2] order=10 主 Ingress 派生（Host=sg-standby.internal / sg.likha.hk）→ 备站组
+#     [3] order=50 **本件**（仅 Path=/*，无 Host 条件）        → 备站组（兜底）
+#   带匹配 Host 的请求走 [1]/[2]；其余（含 `www.likha.hk`、裸 IP）落 [3]。均不再落 default → 不再 502。
+#
+# == 与 mnl 的对称性 ==
+#   | 角色        | mnl                          | sg（本次对齐后）               |
+#   | 80 跳转     | new-api-http-redirect (1)    | new-api-sg-http-redirect (1)   |
+#   | 443 canonical| new-api-https-canonical (1) | new-api-sg-https-canonical (1) |
+#   | 无 Host 兜底 | new-api-stable-ip (50, 80+443)| 本件 (50, 80+**443**)         |
 #
 # == 已知副作用（接受）==
-#   规则 [2] 会**吃掉所有未被任何 Host 规则命中的流量**。当前备站仅一个域名、
-#   ALB 上无其他 Ingress，无冲突。**将来若加第二个域名到这台 ALB，须重新评估本条。**
+#   规则 [3] 会**吃掉所有未被任何 Host 规则命中的流量**（含任意伪造 Host 的 HTTPS）。
+#   ⚠️ 2026-10-12 复核：新增的公网域名 `www.likha.hk` **有意**不建显式 Host 规则，就是要让它
+#   落 [3]（=不跳转、直出业务），**与 mnl 的 www 行为一致**；`likha.hk` 则由 order=1 的 canonical
+#   先捕获（308）⇒ 不受本件影响。⇒ 本次复用该「吃掉」特性是**设计要求**，非副作用。
 #
 # == 由来 ==
 #   马尼拉侧做到「IP 直访可通」靠的是手工把 80 监听器 default 改成 ForwardGroup，
@@ -23,10 +41,10 @@
 #   curl --noproxy '*' http://43.98.186.238/api/status     # 期望 200
 #   curl --noproxy '*' http://47.237.68.142/api/status     # 期望 200
 #   curl -H "Host: sg-standby.internal.likha.hk" http://43.98.186.238/api/status  # 仍 200，不受影响
+#   curl -k --resolve www.likha.hk:443:43.98.186.238 https://www.likha.hk/api/status  # 期望 200（走本件兜底）
 #
 # == 退役条件 ==
-#   证书到位（G5）→ 443 + TLS 上线 → 公网 DNS/GTM 就绪后，本件可删
-#   （届时走域名，不需要 IP 直访）。
+#   公网 DNS/GTM 就绪、且切换流程不再依赖 IP 直访后，本件可删（届时走域名）。
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -39,8 +57,10 @@ metadata:
     purpose: ip-direct-access
   annotations:
     alb.ingress.kubernetes.io/backend-protocol: HTTP
-    # 与主 Ingress 一致；证书到位后同步改回 '[{"HTTPS":443}]'
-    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80}]'
+    # 2026-10-12：补 443（对齐 mnl new-api-stable-ip；证书来自 AlbConfig，无需 certificate-id）
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
+    # 2026-10-12：显式 order=50，与 mnl new-api-stable-ip 对齐（兜底排在 redirect/canonical/显式 Host 之后）
+    alb.ingress.kubernetes.io/order: "50"
     alb.ingress.kubernetes.io/healthcheck-enabled: "true"
     alb.ingress.kubernetes.io/healthcheck-path: /api/status
     alb.ingress.kubernetes.io/healthcheck-method: GET

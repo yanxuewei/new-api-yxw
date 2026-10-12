@@ -33,5 +33,5 @@ spec:
     - name: http
       protocol: TCP
       port: 80          # ClusterIP 端口（集群内）
-      targetPort: 3000  # 容器内 new-api 监听端口
+      targetPort: http  # 命名端口（containerPort 3000），与 stable/canary/standby 口径一致
       nodePort: 32656   # ★ 固化值，勿改；ALB 服务器组依赖此端口

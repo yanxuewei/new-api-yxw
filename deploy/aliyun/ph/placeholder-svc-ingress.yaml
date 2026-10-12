@@ -32,7 +32,8 @@ spec:
   type: ClusterIP
   selector: { app: new-api-master }        # 任务 18 之前无 Pod 命中 → endpoints 为空（预期）
   ports:
-    - { name: http, port: 80, targetPort: 3000, protocol: TCP }
+    # targetPort 用命名端口（与 stable/canary/standby 口径一致）；容器名 http = containerPort 3000
+    - { name: http, port: 80, targetPort: http, protocol: TCP }
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress

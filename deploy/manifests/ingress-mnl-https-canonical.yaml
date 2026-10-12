@@ -1,0 +1,72 @@
+# 443 侧 canonical 收敛 · 马尼拉 ALB（mnl）
+# 集群：cd57e40ce9a634c1698c2f5c5e09bd93c（ap-southeast-6）· ALB `alb-1riqckb1h8ezm0y7s9`
+# 创建：2026-10-12 · ✅ **已 apply 并验收（15:38 HKT）**
+#   实测：https://likha.hk/api/status → HTTP/2 **308** → Location: https://www.likha.hk（-L 终到 200，redirects=1）
+#   规则：443 `Host=likha.hk` → RuleActions[].Type=**Redirect** / HttpCode=**308**，**prio=1**（压过兜底 prio=3）
+#   P0：curl -L -d '' → code=404 redirects=1 ⇒ POST 未被降级为 GET（308 的核心收益）
+#   上线前探针 `canon-probe.likha.hk` 试跑 308 已通过，**验后已删除**（无残留）
+# 方案全文：deploy/docs/域名规范化与Host收敛_最佳实践方案_2026-10-12.md
+#
+# 目的：canonical 主域名 = `www.likha.hk`；把 **根域 `likha.hk` 的 HTTPS 访问**收敛到 www。
+#   现状（未 apply 前）：https://likha.hk 与 https://www.likha.hk **都是 200**
+#     （两者都命中 443 的无 Host 兜底 `rule-443-2`，来自 Ingress `new-api-stable-ip` order=50）
+#     ⇒ 同一份内容两个规范 URL（duplicate content）⇒ 没有 canonical。
+#
+# ★★★ 三条硬约束（违反任一条 = 静默失效 或 打挂站点）★★★
+#   ① `order: "1"` 必须**小于** `new-api-stable-ip` 的 50 —— 否则压不过 443 兜底规则，等于没写。
+#   ② `host:` **只能放 `likha.hk`（根域）** —— 放 `www.likha.hk` 就是 canonical 跳自己 ⇒ **无限 308 循环**。
+#   ③ `service.name` 必须与注解后缀 `actions.<name>` **逐字同名**（此处 = `redirect`），
+#      且 `port.name` 必须是 `use-annotation`。二者必须成对：写成真实 Service 名 ⇒ Controller 找不到该
+#      Service ⇒ **规则不生成且不报错**；注解名不匹配 ⇒ 找不到动作 ⇒ 同样静默不生成。
+#      （`redirect` 不是 Service，是「伪服务名/注解键」，ACK 控制台「规则」列只会原样回显它，不可用于诊断。）
+#
+# ★ 状态码决策：**308 而非 301** ——
+#   301/302/303 下客户端会把 **POST 降级为 GET 并丢弃 body**；`likha.hk` 很可能被客户填作 API base_url
+#   （POST /v1/chat/completions）⇒ 用 301 会「静默调用失败」。308 = 永久重定向 + **保留方法与 body**，
+#   SEO 上 Google 对 301/308 视为等价。
+#   依据：ALB `CreateRule` 的 `RedirectConfig.HttpCode` 取值 = 301/302/303/307/308（官方文档核实）；
+#   另：**HTTPS 监听只允许跳转到 HTTPS 协议**（本件正是 HTTPS→HTTPS，符合）。
+#   ⚠️ `RedirectConfig` 是 PascalCase、状态码键是 `httpCode`（写 `redirectConfig`/`statusCode` 会被静默忽略
+#      且退化成 ForwardGroup + 404，**HTTP 仍 200**，伪装性极强 —— 详见 ingress-mnl-http-redirect.yaml 头注）。
+#
+# ★ 不可逆性：301/308 会被浏览器/中间层长期缓存 ⇒ **发布后回退对已访问过的客户端无效**。
+#   建议先按方案 §5.1 用临时 host 试跑（确认 Controller 接受 308），若想留反悔余地可先用 307 再切 308。
+#
+# ★ 前置/配套：
+#   - 443 监听与证书已就绪（证书来自 AlbConfig 的 443 listener，通配符 `*.likha.hk` 覆盖 www），本件**不需要** `certificate-id`。
+#   - 443 侧**无 404 兜底**（`new-api-catchall-404` 未设 listen-ports，只在 80 生效）⇒ 伪造 Host 走 https 仍 200；对应「任务 47」。
+#   - 裸 IP 直访（`http://<ALB-IP>` → 200）为 10-06 裁定 A 的既有验收项，本件**不影响**它。
+#
+# 应用：kubectl -n new-api apply -f ingress-mnl-https-canonical.yaml
+# 回退：kubectl -n new-api delete ingress new-api-https-canonical
+# 验收：aliyun alb ListRules --region ap-southeast-6 --ListenerIds.1 <443监听ID>
+#        期望出现 RuleConditions=[Host=likha.hk] 且 RuleActions[].Type=Redirect / HttpCode=308
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: new-api-https-canonical
+  namespace: new-api
+  labels:
+    app: new-api
+    env: prod
+    project: new-api
+    site: ph-mnl
+    purpose: canonical-host-redirect
+  annotations:
+    alb.ingress.kubernetes.io/actions.redirect: '[{"type":"Redirect","RedirectConfig":{"host":"www.likha.hk","path":"${path}","port":"443","protocol":"HTTPS","query":"${query}","httpCode":"308"}}]'
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/order: "1"
+spec:
+  ingressClassName: alb
+  rules:
+    # ⚠️ 只放根域。放 www.likha.hk = 自跳死循环。
+    - host: likha.hk
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: redirect          # 必须与注解 actions.<name> 同名（非真实 Service）
+                port:
+                  name: use-annotation  # 固定值：告诉 Controller 去读注解而非查 Service

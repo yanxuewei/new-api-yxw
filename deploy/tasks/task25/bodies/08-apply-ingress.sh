@@ -10,7 +10,7 @@ metadata:
     env: prod
   annotations:
     alb.ingress.kubernetes.io/backend-protocol: HTTP
-    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80}]'
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
     alb.ingress.kubernetes.io/healthcheck-enabled: "true"
     alb.ingress.kubernetes.io/healthcheck-path: /api/status
     alb.ingress.kubernetes.io/healthcheck-method: GET
@@ -23,8 +23,20 @@ metadata:
     alb.ingress.kubernetes.io/connection-drain-timeout: "120"
 spec:
   ingressClassName: alb
+  # 规则顺序与集群实况一致（2026-10-12 取证并回改）：
+  #   规则1 = 内部域名（优先级 1），规则2 = 公网域名（优先级 2）
   rules:
     - host: sg-standby.internal.likha.hk
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: new-api-ph-standby
+                port:
+                  number: 80
+    - host: sg.likha.hk
       http:
         paths:
           - path: /

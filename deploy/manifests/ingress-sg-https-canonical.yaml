@@ -1,0 +1,60 @@
+# 域名规范化 · 新加坡（备站）443 侧 canonical · 与 mnl `new-api-https-canonical` 同口径
+# 集群：ca75829e3492d491d9d434de087913798（ap-southeast-1）· ALB `alb-amdwm60xmznh7s1nae`
+# 监听：lsn-iqn5i233mvv7eu4u6w（443 HTTPS，证书 606823-ap-southeast-1 来自 AlbConfig sg-alb）
+# 创建：2026-10-12（用户指令：「SG 侧对 www.likha.hk 和 likha.hk 的处理与 mnl 保持一致」）
+#
+# 目的：把 **根域 `likha.hk` 的 HTTPS 访问**收敛到 canonical `www.likha.hk`：
+#   https://likha.hk → 308 → https://www.likha.hk
+#   而 `https://www.likha.hk` **不跳转**（走 `new-api-ph-standby-ip` 的 order=50 兜底 → 备站业务）
+#
+# ★ 为什么是 308 而不是 301（与 mnl 同一决策，同一条理由）：
+#   301/302/303 下客户端会把 **POST 降级为 GET 并丢弃 body**；`likha.hk` 很可能被客户填作 API
+#   base_url（`POST /v1/chat/completions`）⇒ 用 301 会「静默调用失败」。308 = 永久重定向 +
+#   **保留方法与 body**；SEO 上 Google 对 301/308 视为等价。
+#   （2026-10-12 马尼拉侧已实测坐实：`curl -L -d ''` → `404 redirects=1` ⇒ POST 未被降级。）
+#   依据：ALB `RedirectConfig.HttpCode` 取值 = 301/302/303/307/308；HTTPS 监听只能跳 HTTPS。
+#
+# ★★★ 三条硬约束（违反任一条 = 静默失效 或 打挂站点）★★★
+#   ① `order: "1"` 必须**小于**兜底 Ingress `new-api-ph-standby-ip` 的 50 ⇒ 否则压不过兜底，等于没写。
+#   ② `host:` **只能放根域 `likha.hk`** —— 放 `www.likha.hk` 就是 canonical 跳自己 ⇒ **无限 308 循环**。
+#   ③ `service.name` 必须与注解后缀 `actions.<name>` **逐字同名**（此处 = `redirect`），
+#      且 `port.name` 必须是 `use-annotation`。二者必须成对（详见 80 侧 redirect 件头注）。
+#
+# ★ 前置：`Ingress/new-api-ph-standby-ip` 已加 `{"HTTPS":443}` 兜底 —— 否则
+#   `https://likha.hk` 308 到 `https://www.likha.hk` 后，SG 443 无规则可匹配 ⇒ **502**。
+#   ⇒ **上线顺序必须是「先兜底、后 canonical」，不可颠倒。**
+#
+# ★ 与 mnl 的对称性：本件 ≡ mnl `Ingress/new-api-https-canonical`（order=1、同一段 actions 注解，仅 site 标签不同）。
+#
+# 应用：kubectl -n new-api apply -f ingress-sg-https-canonical.yaml
+# 回退：kubectl -n new-api delete ingress new-api-sg-https-canonical
+# 验收：aliyun alb ListRules --region ap-southeast-1 --ListenerIds.1 lsn-iqn5i233mvv7eu4u6w
+#        期望：RuleConditions=[Host=likha.hk]，RuleActions[].Type=Redirect / HttpCode=308，且 Priority 最小
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: new-api-sg-https-canonical
+  namespace: new-api
+  labels:
+    app: new-api
+    env: prod
+    site: ph-sg
+    purpose: canonical-host-redirect
+  annotations:
+    alb.ingress.kubernetes.io/actions.redirect: '[{"type":"Redirect","RedirectConfig":{"host":"www.likha.hk","path":"${path}","port":"443","protocol":"HTTPS","query":"${query}","httpCode":"308"}}]'
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/order: "1"
+spec:
+  ingressClassName: alb
+  rules:
+    # ⚠️ 只放根域。放 www.likha.hk = 自跳死循环。
+    - host: likha.hk
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: redirect          # 必须与注解 actions.<name> 同名（非真实 Service）
+                port:
+                  name: use-annotation  # 固定值
