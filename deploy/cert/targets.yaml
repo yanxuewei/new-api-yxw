@@ -2,10 +2,10 @@
 #
 # 用途：v2.0 旧时序在 D1 空跑部署任务找不到资源、后续靠手工补，D6 才发现某处仍用自签/旧证书。
 #       本文件把"证书要落到哪些资源"显式列成清单，执行时逐项销账。
-# 消费方式：ALB 侧用云 API 关联 CertIdentifier；K8s 侧
-#   kubectl -n new-api create secret tls new-api-tls \
-#     --cert=/root/.deploy_secrets/TLS_WILDCARD_CRT --key=/root/.deploy_secrets/TLS_WILDCARD_KEY
-#   （走文件参数，私钥绝不出现在命令行明文里）
+# 消费方式：**只有 AlbConfig 声明式这一条路**（deploy/aliyun/ph/albconfig.rendered.yaml、
+#   deploy/manifests/albconfig-sg.yaml 的 listeners[].certificates[].CertificateId）。
+#   ⚠ 不要直调 ALB OpenAPI 换绑（ServiceManagedResource 被拒），也不要在 ALB 控制台改监听（会被调谐覆盖）。
+#   ⚠ 现网 443 链路没有 K8s TLS Secret（无 spec.tls）；如将来改走 Secret 路径，见下方 renewal.R4.note。
 # ⚠ 本文件只登记资源标识与状态，**不得**写入任何私钥/口令。
 #
 # 证书本体（2026-10-12 G5 闭环）：
@@ -16,8 +16,11 @@
 #   notBefore/notAfter 2026-10-12 / 2027-04-28（198 天，CA/B 新规）
 #   AutoReissue       enable（2026-10-12 经授权 UpdateInstance 开启；写前 disable，GetInstanceDetail
 #                     与 ListInstances 双路回读均为 enable）
-#                     ⚠ 开关已开 ≠ 443 自动续期：ListDeploymentJob / ListCloudResources(alb) 实测全空
-#                     ⇒ ALB 是直接绑 CertIdentifier、无 CAS 部署联动，新证书须人工换绑（见下方 renewal）
+#                     ⚠ 开关已开 ≠ 443 自动续期（2026-10-12 二次取证，指南任务 3 卡 ★ 段）：
+#                     监听只认 AlbConfig 里钉死的 CertificateId，而 ACK 原文明确「Listener 不会使用
+#                     自动发现证书，优先使用 AlbConfig 指定的证书」⇒ 新证签发后须改 AlbConfig 再 apply。
+#                     ⚠ 换绑**不能**走 ALB OpenAPI：本批 ALB 是 ServiceManagedResource，
+#                     自有 AK 直调写操作 3/3 回 OperationDenied.ServiceManagedResource（实测）。
 #   保管目录（600）    /root/.deploy_secrets/TLS_WILDCARD_{CRT,KEY}
 #   到期告警          控制台已配（2026-10-12 负责人自配；CAS 无提醒类 API，故无回读证据）
 
@@ -44,6 +47,10 @@ targets:
         listener_https: lsn-iqn5i233mvv7eu4u6w
         readback: "GetListenerAttribute → ListenerProtocol=HTTPS, Certificates[0].CertificateId=606823-ap-southeast-1"
     notes: 80 监听由 Ingress/new-api-http-redirect（order=1）对 www.likha.hk / likha.hk 做 HTTP→HTTPS 301
+    evidence_20261012:
+      listener_certs: "ListListenerCertificates 实测两地各 1 张、CertificateId=606823-ap-southeast-1、IsDefault=true（无多证书兜底）"
+      controller: "两集群 addon alb-ingress-controller = v3.1.1 / state=active（cs list-cluster-addon-instances）"
+      cas_inventory: "CAS 侧可见性：ListCloudResources --CloudName aliyun --CloudProduct ALB → Id=37274711(mnl lsn) / 37274712(sg lsn)、Status=Running、DefaultResource=1；⚠ 这是资源登记，不等于托管会自动写入"
 
   - target: waf
     status: not-in-this-round   # ⏸ 2026-10-12 裁定（指南 §0.5 F15）：本轮不购买 WAF 3.0 ⇒ 不下发
@@ -55,9 +62,12 @@ targets:
     notes: 若启用 DCDN，证书须另行下发并校验回源协议
 
 # ── 续签窗口动作（2027-03 前，notAfter=2027-04-28 的 30 天前）──────────────────
-# 为什么要人工做：实测 CAS 侧 ListDeploymentJob Total=0、ListCloudResources --CloudName alb Total=0，
-# 而两地 ALB 的 HTTPS 监听是**直接引用 CertIdentifier** 绑定的（非部署任务联动）。
-# AutoReissue=enable 只会让 CAS 签出**新的 CertId**，监听不会自动换绑 ⇒ 不补这一步，443 会在旧证到期当晚挂。
+# 为什么要人工做：监听只认 AlbConfig 里钉死的 CertificateId，而 ACK 原文「Listener 不会使用自动发现证书，
+# 优先使用 AlbConfig 指定的证书」⇒ AutoReissue=enable 只会让 CAS 签出**新的 CertId**，监听不会自动换绑。
+# ⚠ 通道唯一：ALB 是 ServiceManagedResource，直调 `alb UpdateListenerAttribute` 被服务端拒
+#   `OperationDenied.ServiceManagedResource`（本仓实测 3/3）⇒ 只能改 AlbConfig 再 apply。
+# 不补这一步，443 会在旧证到期当晚挂（两地各只绑 1 张证，无多证书兜底）。
+# ★ 免人工的改法见指南任务 3 卡 ★ 段（路①双证共存 / 路②Secret 自动触发），实施前需两次授权取证。
 renewal:
   due_by: "2027-03-29"
   steps:
@@ -67,20 +77,29 @@ renewal:
       expect: 出现新的 issued 记录（CertId ≠ 606823），SAN 仍含 *.likha.hk 与 likha.hk
       gate: 未取得新 CertIdentifier 前不执行 R2/R3
     - id: R2
-      name: 换绑两地 HTTPS 监听
+      name: 改 AlbConfig 的 CertificateId 并 apply（唯一合法通道）
       cmd: |
-        # 先用 --dryrun 验参数形态，再去掉 --dryrun 执行；监听 ID 以本文件 targets.alb 为准
-        aliyun alb UpdateListenerAttribute --region ap-southeast-6 --ListenerId lsn-hjl2cz2g9oqvee4eix \
-          --Certificates.1.CertificateId <new-cert-identifier> --dryrun
-        aliyun alb UpdateListenerAttribute --region ap-southeast-1 --ListenerId lsn-iqn5i233mvv7eu4u6w \
-          --Certificates.1.CertificateId <new-cert-identifier> --dryrun
-      expect: 两监听 GetListenerAttribute 回读 Certificates[0].CertificateId == <new-cert-identifier>
+        # ⚠ 不要调 alb UpdateListenerAttribute：本批 ALB 是 ServiceManagedResource，直调写操作被拒
+        #   OperationDenied.ServiceManagedResource（实测 3/3）。改这两件后走 ack_remote apply：
+        #   deploy/aliyun/ph/albconfig.rendered.yaml:57（mnl-alb）
+        #   deploy/manifests/albconfig-sg.yaml:80（sg-alb）
+        #   字段名必须是 CertificateId（值才是 CertIdentifier），写错名会被 CRD 静默忽略。
+        # ⚠ 未证风险：AlbConfig listeners 是 Replace 语义（官方原文：改监听属性会删旧建新）⇒
+        #   ListenerId 可能变化（本文件 readback 的 lsn-* 台账作废），须在低峰窗口做并备回滚。
+        bash deploy/lib/ack_remote.sh mnl <renewal-body>   # kubectl -n new-api apply -f albconfig
+      expect: ListListenerCertificates 回读出现新 CertIdentifier 且 IsDefault=true；两地各测一次
     - id: R3
       name: 重新落保管目录并验配对（旧副本覆盖，不留第二份）
       cmd: "bash deploy/logs/tls_store_20261012.sh   # 需把 CertId 改为新值；严禁开 bash -x"
       expect: ls -l 两文件 600、cert_blocks=3、-modulus md5 两侧一致
     - id: R4
-      name: 集群内 TLS Secret 重建 + 端到端验 443
-      cmd: "kubectl -n new-api create secret tls new-api-tls --cert=... --key=... --dry-run=client -o yaml | kubectl apply -f -"
-      expect: curl -svI https://www.likha.hk 的证书 notAfter 为新日期；两地各测一次
+      name: 端到端验 443（现网 443 不经 K8s Secret，见下方注）
+      cmd: "curl -svI https://www.likha.hk -o /dev/null 2>&1 | grep -E 'subject:|expire date:'   # 两地各测一次（www.likha.hk / sg.likha.hk）"
+      expect: expire date 为新证的 2027-xx 日期；openssl s_client 的 server cert 链与 SAN 不变
+      note: |
+        ⚠ 本仓现网 443 链路里**没有** TLS Secret（grep 'spec.tls' 于 deploy/manifests、deploy/aliyun
+        = 0 命中），证书完全来自 AlbConfig ⇒ 不要在此建 new-api-tls，那是一条无消费者的假动作。
+        只有改走指南任务 3 卡 ★ 段的**路②（Ingress spec.tls + Secret）**时，本步骤才替换为
+        kubectl -n new-api create secret tls … --from-file（走文件参数，私钥不出现在命令行明文），
+        且需同时改 Ingress 并撤掉 AlbConfig 里钉死的 certificates 字段（否则 AlbConfig 优先）。
   also_note: 若同时决定接 WAF（F15 复评），WAF 域名证书须一并换绑；本文件 waf 条目当前 not-in-this-round。

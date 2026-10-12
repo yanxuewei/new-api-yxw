@@ -187,7 +187,7 @@ bash deploy/ops/add-domain.sh delete --site mnl --prefix api-likha-hk --yes
 | ---------------------- | ----------------------------------------------------------------------- |
 | 加 DNS 记录               | `bash deploy/manifests/dns-likha-hk.sh add`（`RR=<前缀> IPS='<ALB 双 IP>'`） |
 | 改监听端口 / 证书 / 超时 / 访问日志 | `deploy/manifests/albconfig-{mnl,sg}.yaml`（集群级，改一处两地生效）                 |
-| 申请 / 续签证书              | `bash deploy/ops/cas_dv_cert.sh`（⚠ 2027-04-28 到期；`AutoReissue=enable` 只保证 CAS 签出新证，**ALB 换绑要人工**：`deploy/cert/targets.yaml` R1–R4，2027-03-29 前） |
+| 申请 / 续签证书              | `bash deploy/ops/cas_dv_cert.sh`（⚠ 2027-04-28 到期；`AutoReissue=enable` 只保证 CAS 签出新证。监听只认 AlbConfig 钉死的 `CertificateId`，ALB 又是 `ServiceManagedResource`（直调 OpenAPI 换绑被拒）⇒ 换绑＝**改 AlbConfig 再 apply**：`deploy/cert/targets.yaml` R1–R4，2027-03-29 前） |
 | 删服务器组 / 手动改 ALB 规则     | **不提供**（托管资源；删 Ingress 后 Controller 自动 GC）                              |
 
 
