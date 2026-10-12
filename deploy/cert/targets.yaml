@@ -2,10 +2,13 @@
 #
 # 用途：v2.0 旧时序在 D1 空跑部署任务找不到资源、后续靠手工补，D6 才发现某处仍用自签/旧证书。
 #       本文件把"证书要落到哪些资源"显式列成清单，执行时逐项销账。
-# 消费方式：**只有 AlbConfig 声明式这一条路**（deploy/aliyun/ph/albconfig.rendered.yaml、
-#   deploy/manifests/albconfig-sg.yaml 的 listeners[].certificates[].CertificateId）。
+# 消费方式（2026-10-12 三次取证后定口径）：**目标方案 = 路②（Ingress spec.tls + TLS Secret）**，
+#   由负责人裁定采纳；在它落地前，现网 443 的证书来源仍只有 AlbConfig 声明式那一条路
+#   （deploy/aliyun/ph/albconfig.rendered.yaml、deploy/manifests/albconfig-sg.yaml 的
+#    listeners[].certificates[].CertificateId），仓库内 grep 'spec.tls' 仍 = 0 命中。
 #   ⚠ 不要直调 ALB OpenAPI 换绑（ServiceManagedResource 被拒），也不要在 ALB 控制台改监听（会被调谐覆盖）。
-#   ⚠ 现网 443 链路没有 K8s TLS Secret（无 spec.tls）；如将来改走 Secret 路径，见下方 renewal.R4.note。
+#   ⚠ CAS 部署任务通道实测能跑到 success 但**不能判它改得动 CertId**（同证探针无法区分 no-op），
+#     不作为免人工依据 —— 见下方 evidence_20261012.probe_cas_deploy。
 # ⚠ 本文件只登记资源标识与状态，**不得**写入任何私钥/口令。
 #
 # 证书本体（2026-10-12 G5 闭环）：
@@ -51,6 +54,32 @@ targets:
       listener_certs: "ListListenerCertificates 实测两地各 1 张、CertificateId=606823-ap-southeast-1、IsDefault=true（无多证书兜底）"
       controller: "两集群 addon alb-ingress-controller = v3.1.1 / state=active（cs list-cluster-addon-instances）"
       cas_inventory: "CAS 侧可见性：ListCloudResources --CloudName aliyun --CloudProduct ALB → Id=37274711(mnl lsn) / 37274712(sg lsn)、Status=Running、DefaultResource=1；⚠ 这是资源登记，不等于托管会自动写入"
+      probe_cas_deploy: |
+        2026-10-12 写探针（授权内，执行器 deploy/logs/t_p2_w3_casrun.sh）：CreateDeploymentJob --JobType user
+        --CertIds 606823 --ResourceIds 37274712 --ContactIds 10232 → JobId=7588，状态机 editing→pending→scheduling
+        后 worker Status=success（SuccessCount 1 / FailedCount 0 / CostCount 0，--estimate-cost 回 no pricing ⇒ 不计费），
+        未被 ServiceManagedResource 拦。⚠ 判据上限：同证同监听 ⇒ "success" 无法区分"写入"与"已一致短路"，
+        不能据此认定 CAS 能改 CertId；且 AutoReissue=enable 本身不产生作业（写前 ListDeploymentJob Total=0）。
+        作业已 DeleteDeploymentJob，复验 Total=0，无残留。
+      probe_secret_route: |
+        2026-10-12 路② 结构探针（sg 备站，一次性自签证书，未搬动生产私钥；执行器 t_p2_probe2_body.sh /
+        t_p2_probe2_rollback.sh / t_p2_alb_state.sh / t_p2_final_check.sh）：
+          ① 不重建监听：加 spec.tls 前后 443 ListenerId 恒为 lsn-iqn5i233mvv7eu4u6w，原 4 条 RuleId 逐字保留
+             （只有 Priority 因新 Ingress order 重排 ⇒ 台账按 RuleId 记，不按 Priority）⇒ Replace 风险只在路①。
+          ② 共存成立：监听证书变 2 张，Secret 证 IsDefault=false，AlbConfig 钉死的 606823 仍 IsDefault=true，
+             且 AlbConfig spec 未被改写（仅 status 回显）。
+          ③ 机制：控制器把 Secret 上传成 CAS 证书再绑定，命名 {ns}-{ingress}-{identity}
+             （实测 new-api-new-api-tls-probe-3c13f0，InstanceId=cas-upload-wsurj5，端点在 cn-hangzhou 而非资源地域）
+             ⇒ 每次换证新增一条上传证书记录，需纳入清理与命名预期。
+          ④ 瞬态告警：Secret 生效瞬间其余 4 件 Ingress 各报一轮 FailedApplyModel「名称重复」（77s 内 x5 后停止，
+             未阻塞绑定结果）⇒ 路② 验收把这条列为预期内瞬态，不能当故障回滚。
+          ⑤ 回滚干净：删探针 Ingress+Secret 后 15s 监听回到 1 张证，www.likha.hk 端到端 200 + Verification OK，
+             mnl 未受影响；孤儿上传证已 DeleteUserCertificate --region cn-hangzhou --CertId 27793254 并复验。
+      probe_open: |
+        ⚠ 路② 最后一证未闭合：同域名下 Secret 证与 AlbConfig 钉死证的 SNI 选优顺序。探针用的是异域名
+        （tls-probe.likha.hk），实测 SNI=www.likha.hk 仍回钉死证 ⇒ 无法证明"到期当晚会自动切 Secret 里的新证"。
+        闭合必须在 sg 用真实 *.likha.hk 证装 Secret 挂到 www 的 443 Ingress 回读，代价＝生产私钥进集群 etcd
+        （2026-10-05 裁定不用 KMS ⇒ Secret 是唯一载体）⇒ 需负责人单独放行。
 
   - target: waf
     status: not-in-this-round   # ⏸ 2026-10-12 裁定（指南 §0.5 F15）：本轮不购买 WAF 3.0 ⇒ 不下发
@@ -62,14 +91,18 @@ targets:
     notes: 若启用 DCDN，证书须另行下发并校验回源协议
 
 # ── 续签窗口动作（2027-03 前，notAfter=2027-04-28 的 30 天前）──────────────────
-# 为什么要人工做：监听只认 AlbConfig 里钉死的 CertificateId，而 ACK 原文「Listener 不会使用自动发现证书，
-# 优先使用 AlbConfig 指定的证书」⇒ AutoReissue=enable 只会让 CAS 签出**新的 CertId**，监听不会自动换绑。
+# 现状口径（路② 落地前）：监听只认 AlbConfig 里钉死的 CertificateId，而 ACK 原文「Listener 不会使用自动发现证书，
+#   优先使用 AlbConfig 指定的证书」⇒ AutoReissue=enable 只会让 CAS 签出**新的 CertId**，监听不会自动换绑。
 # ⚠ 通道唯一：ALB 是 ServiceManagedResource，直调 `alb UpdateListenerAttribute` 被服务端拒
 #   `OperationDenied.ServiceManagedResource`（本仓实测 3/3）⇒ 只能改 AlbConfig 再 apply。
 # 不补这一步，443 会在旧证到期当晚挂（两地各只绑 1 张证，无多证书兜底）。
-# ★ 免人工的改法见指南任务 3 卡 ★ 段（路①双证共存 / 路②Secret 自动触发），实施前需两次授权取证。
+# ★ 目标态（负责人 2026-10-12 裁定采纳路②）：证书来源迁到 Ingress spec.tls + Secret，由集群内定时任务
+#   从 CAS 拉新证写 Secret（Secret 变更自动触发 ALB Ingress Controller 调谐）⇒ 下面 R2/R3 整体替换为
+#   「刷 Secret」，人工动作归零。落地前置 = probe_open 那条同域名 SNI 验证（需放行私钥进 etcd）+
+#   定时任务的 CAS 读凭据（按惯例由负责人自配）。
 renewal:
   due_by: "2027-03-29"
+  target_state: 路②（Ingress spec.tls + Secret + 集群内定时刷 Secret）— 未落地，R2 仍是当前有效兜底
   steps:
     - id: R1
       name: 确认新证书已签发
@@ -77,7 +110,7 @@ renewal:
       expect: 出现新的 issued 记录（CertId ≠ 606823），SAN 仍含 *.likha.hk 与 likha.hk
       gate: 未取得新 CertIdentifier 前不执行 R2/R3
     - id: R2
-      name: 改 AlbConfig 的 CertificateId 并 apply（唯一合法通道）
+      name: 改 AlbConfig 的 CertificateId 并 apply（路② 落地前的唯一合法通道）
       cmd: |
         # ⚠ 不要调 alb UpdateListenerAttribute：本批 ALB 是 ServiceManagedResource，直调写操作被拒
         #   OperationDenied.ServiceManagedResource（实测 3/3）。改这两件后走 ack_remote apply：
@@ -86,6 +119,7 @@ renewal:
         #   字段名必须是 CertificateId（值才是 CertIdentifier），写错名会被 CRD 静默忽略。
         # ⚠ 未证风险：AlbConfig listeners 是 Replace 语义（官方原文：改监听属性会删旧建新）⇒
         #   ListenerId 可能变化（本文件 readback 的 lsn-* 台账作废），须在低峰窗口做并备回滚。
+        #   对照：路② 的 spec.tls 改动实测**不**重建监听（见 targets.alb.evidence_20261012.probe_secret_route ①）。
         bash deploy/lib/ack_remote.sh mnl <renewal-body>   # kubectl -n new-api apply -f albconfig
       expect: ListListenerCertificates 回读出现新 CertIdentifier 且 IsDefault=true；两地各测一次
     - id: R3
@@ -97,9 +131,10 @@ renewal:
       cmd: "curl -svI https://www.likha.hk -o /dev/null 2>&1 | grep -E 'subject:|expire date:'   # 两地各测一次（www.likha.hk / sg.likha.hk）"
       expect: expire date 为新证的 2027-xx 日期；openssl s_client 的 server cert 链与 SAN 不变
       note: |
-        ⚠ 本仓现网 443 链路里**没有** TLS Secret（grep 'spec.tls' 于 deploy/manifests、deploy/aliyun
-        = 0 命中），证书完全来自 AlbConfig ⇒ 不要在此建 new-api-tls，那是一条无消费者的假动作。
-        只有改走指南任务 3 卡 ★ 段的**路②（Ingress spec.tls + Secret）**时，本步骤才替换为
-        kubectl -n new-api create secret tls … --from-file（走文件参数，私钥不出现在命令行明文），
-        且需同时改 Ingress 并撤掉 AlbConfig 里钉死的 certificates 字段（否则 AlbConfig 优先）。
+        ⚠ 本仓现网 443 链路里**还没有** TLS Secret（grep 'spec.tls' 于 deploy/manifests、deploy/aliyun
+        = 0 命中），证书完全来自 AlbConfig ⇒ 现在手工建 new-api-tls 是一条无消费者的假动作。
+        路② 落地时本步骤替换为：新证由定时任务写入 Secret（kubectl create secret tls … --from-file，
+        私钥不出现在命令行明文），AlbConfig 的 certificates 字段**保留**（实测可与 Secret 共存且仍为默认，
+        见 probe_secret_route ②），到期当晚的选证依据是「同域名 Secret 优先 / 不选已过期的证书」——
+        ⚠ 这条在同域名场景仍属未证（见 probe_open），验证通过前不得宣称已免人工。
   also_note: 若同时决定接 WAF（F15 复评），WAF 域名证书须一并换绑；本文件 waf 条目当前 not-in-this-round。
