@@ -898,3 +898,67 @@ alb.ingress.kubernetes.io/actions.redirect: >-
 - `quotas ListProductQuotas --MaxResults` **上限 100**（传 300 报 `INVALID.MAX.RESULTS`）。
 - `aliyun ram GetAccountSummary` **不是合法 API**（国际站 CLI 报 "not a valid api"）⇒ 查 RAM 用 `ListUsers` / `ListVirtualMFADevices` / `ListPoliciesForUser`。
 - 集群实况：**mnl 4 节点 / sg 2 节点**（`cs DescribeClusterNodes`）。
+
+## ★ G11 连接数预算表 —— 线上实况核实（2026-10-12）
+
+**交付物**：`deploy/docs/G11连接数预算表_线上核实_2026-10-12.md`（正式预算表 + 偏差登记 + ActionTrail 追溯）
+
+### 实测左端输入（**禁止手填**，全部取实况）
+
+| 项 | 值 |
+|---|---|
+| RDS 实例 | `pgm-5tstdhko64x2c01w` · PG 17.0 · `pg.n4.2c.2m`(2C8G) · HA · `PGBouncerEnabled=true` · `MaxConnections=800` |
+| 池参数 | `max_client_conn=2000` · `default_pool_size=50` · **`pool_mode=session`** · `stats_users=newapi_ops` · `ignore_startup_parameters=extra_float_digits` · `query_wait_timeout=120` · `server_idle_timeout=600` · `ConfigParameters=空`（全生效） |
+| mnl Pod 内生效 | `SQL_MAX_OPEN_CONNS=100` / `SQL_MAX_IDLE_CONNS=50`（**来自 CM `new-api-config`，env 未覆盖**）· `SQL_DSN` 端口 `6432`（stable/canary）· master `5432` · `LOG_SQL_DSN` 端口 `9000`=CK |
+| sg Pod 内生效 | `OPEN=10` / `IDLE=5`（**Deployment env 覆盖 CM 的 100/50**）· `SQL_DSN` 端口 `6432` · `LOG_SQL_DSN` 端口 `9000` |
+| 副本/HPA | mnl stable 4→13 · canary 1 · master 1；sg standby 2→16（任务 44 将抬 20） |
+| 服务端实况连接数 | `ConnectionUsage` ≈ **2%（≈16 条）**（零负载） |
+
+### 三不变量 + 新增 I-4
+
+| 不变量 | 算式 | 判定 |
+|---|---|---|
+| **I-1** 客户端 ≤ 2000 | `13×100 + 1×100 + 20×10 = 1600`（保守上界 16/24 口径 = 1840） | ✅ 余量 400 |
+| **I-2** 服务端 ≤ 640 | 池 `(newapi,newapi)` ≤50 + `(newapi_sg,newapi)` ≤50 + master 直连 ≤100 + 预留 20 = **≤220** | ✅ 余量 420 |
+| **I-3** 迁移旁路 | master `SQL_DSN` 端口实测 `5432` | ✅ |
+| **I-4** 并发服务能力（**本次新增**） | 接管态 `1300 client : 50 server` = **26:1** 排队；`query_wait_timeout=120s` ⇒ 超时报错。session 下 client 独占 server **直到断开**（非事务结束） | ⚠️ **不成立** |
+
+### ★ 核心发现：`pool_mode` 未登记变更（ActionTrail 实证）
+
+近 35 天全部 `ModifyParameter`：
+
+| 时间（HKT） | 操作者 | 参数 | 登记 |
+|---|---|---|---|
+| 2026-09-29 11:47 | `root` | `default_pool_size=50`、`max_client_conn=2000` | ✅ |
+| 2026-09-29 16:25 | `yanxuewei` | `ssl_min_protocol_version=TLSv1.2` | ✅ |
+| 2026-09-29 18:31 | `yanxuewei` | `stats_users=newapi_ops` | ✅ |
+| **2026-09-30 09:33** | **`root`** | **`pool_mode=session`** | ❌ **未登记** |
+
+⇒ 任务 41 卡 09-30 执行记录「**未执行任何 `pool_mode` 写操作**，实例仍为 `transaction`」**与事实冲突**（该行已就地更正）。**教训**：读参数模板 flag 证明"能热改" ≠ "没改过"；运行值只能用 `RunningParameters` 读，且须配 ActionTrail 追溯。
+
+### ★ 修正任务卡一处错误论断
+
+任务 41 卡原写「session 模式下 client 独占 server，`default_pool_size=50` **不再是上限**」⇒ **不准确**。`default_pool_size` 在任何 `pool_mode` 下都是每池 `(user,db)` 的 server 连接上限；session 的真实后果是 **client 排队**。故 **I-2 在两种模式下数值相同且均成立**（≤220），真正被 session 打破的是新增的 **I-4**。
+
+### 其他偏差
+
+| 项 | 文档 | 实况 | 处置 |
+|---|---|---|---|
+| HPA CPU 目标 | `65%`（F14 取证 + 真源 YAML） | **`70%`**（mnl/sg 两侧） | 真源 drift；疑似任务 23 V4 测试临时降 1% 后恢复写成 70 ⇒ 回改 65 或同步真源 |
+| sg HPA 上限 | `2–20`（F12 连带） | `2–16` | 待办（任务 44 / Day 3），非缺陷 |
+| ConfigMap 名 | `newapi-config`（卡内命令） | **`new-api-config`** | 文档笔误（已在本节更正） |
+| `SQL_MAX_LIFETIME` | 「必须显式给值」 | 未设置（代码默认 60s = 期望值） | 等效，登记 |
+
+### RDS 到期风险（同库，非 G11 范围）
+
+`ExpireTime = 2026-10-28T16:00:00Z` ⇒ **距今 16 天**。生产库到期停服 ⇒ 到期前必须完成续费或迁移决策。
+
+### 复核命令
+
+```bash
+aliyun rds DescribeDBInstanceAttribute --DBInstanceId pgm-5tstdhko64x2c01w --RegionId ap-southeast-6
+aliyun rds DescribeParameters          --DBInstanceId pgm-5tstdhko64x2c01w --RegionId ap-southeast-6
+kubectl -n new-api exec deploy/new-api-stable -- sh -c 'env | grep -E "^(SQL_|LOG_SQL)"'   # CM 名是 new-api-config
+aliyun rds DescribeDBInstancePerformance --Key ConnectionUsage --DBInstanceId <id> --region ap-southeast-6 --StartTime <ISO> --EndTime <ISO>
+aliyun actiontrail LookupEvents --LookupAttribute.1.Key EventName --LookupAttribute.1.Value ModifyParameter --StartTime <ISO> --EndTime <ISO>
+```

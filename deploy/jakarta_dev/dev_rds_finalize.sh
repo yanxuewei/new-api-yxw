@@ -77,11 +77,17 @@ rebuild_dsn() {
   APP=$(cat "$SEC_DIR/dev_app"); MIG=$(cat "$SEC_DIR/dev_migrate")
   local HOST=pgm-d9j9p421lzx4gw73.pgsql.ap-southeast-5.rds.aliyuncs.com
   # dev 无 PgBouncer（实测 6432 BLOCKED）⇒ 全部 5432；SSL 已绑定内网串 ⇒ 后续可升 verify-full
-  printf 'host=%s port=5432 dbname=newapi user=newapi password=%s sslmode=require' "$HOST" "$APP" \
+  #
+  # 必须是 **URL 形式**（`postgres://…`），不能用 libpq 的 `host=… dbname=…` k/v 形式：
+  #   model/main.go:151 ⇒ chooseDB() 只按 DSN **前缀**选驱动（postgres://|postgresql:// 才走 PG），
+  #   k/v 形式会掉进 main.go:168 的 MySQL 分支，实测报
+  #   "using MySQL as database … invalid DSN: missing the slash separating the database name"（2026-10-12 dev 首启 CrashLoop）。
+  # 口令已实测纯字母数字（len=19），无需 URL 编码；若以后换强口令，需先 percent-encode。
+  printf 'postgres://newapi:%s@%s:5432/newapi?sslmode=require' "$APP" "$HOST" \
     > "$SEC_DIR/SQL_DSN"
-  printf 'host=%s port=5432 dbname=newapi user=newapi_migrate password=%s sslmode=require' "$HOST" "$MIG" \
+  printf 'postgres://newapi_migrate:%s@%s:5432/newapi?sslmode=require' "$MIG" "$HOST" \
     > "$SEC_DIR/SQL_DSN_MIGRATE"
-  printf 'host=%s port=5432 dbname=newapi_logs user=newapi password=%s sslmode=require' "$HOST" "$APP" \
+  printf 'postgres://newapi:%s@%s:5432/newapi_logs?sslmode=require' "$APP" "$HOST" \
     > "$SEC_DIR/LOG_SQL_DSN"
   chmod 600 "$SEC_DIR/SQL_DSN" "$SEC_DIR/SQL_DSN_MIGRATE" "$SEC_DIR/LOG_SQL_DSN"
   for f in SQL_DSN SQL_DSN_MIGRATE LOG_SQL_DSN; do
@@ -159,6 +165,7 @@ verify() {
 case "$ACTION" in
   --rotate) rotate; rebuild_dsn; verify ;;
   --grant)  grant; verify ;;
+  --dsn)    rebuild_dsn; verify ;;
   --verify) verify ;;
-  *) notice "未知参数：$ACTION（可用 --rotate / --grant / --verify）"; exit 2 ;;
+  *) notice "未知参数：$ACTION（可用 --rotate / --grant / --dsn / --verify）"; exit 2 ;;
 esac

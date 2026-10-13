@@ -326,3 +326,137 @@ NAT + EIP：按量，CLI 无法报价（CU + 出向流量），保守另计
 
 - API Server 仅内网，本地无法直接 `kubectl`；节点上有 `/usr/bin/kubectl` 但**无 kubeconfig**，kubelet 自带凭据权限不足。后续 k8s 侧操作二选一：① 云助手 + 临时下发 admin kubeconfig（会把凭据留在 `DescribeInvocationResults` 里，用完需清）；② 给集群开公网端点 + SLB ACL 白名单。**本轮未采用任何一种**，本轮 k8s 侧只做了 `crictl pods`（零凭据）。
 - 伸缩链路证据取自 `ess DescribeScalingGroups` / `DescribeScalingActivities`，比看控制台更可靠。
+
+## 12. Phase 2d 工作负载 + 三库冒烟 + Phase 3 隔离验收（2026-10-12，**已闭合**）
+
+### 12.0 执行位定版（回答 §11.5 留下的二选一）
+
+两个"执行位"本轮都用了**同一条既有通道**，没有新增凭据面：
+
+| 面 | 执行位 | 凭据形态 | 实测收口 |
+|---|---|---|---|
+| `kubectl` | 云助手 → dev 节点内 `/usr/bin/kubectl`（`deploy/lib/ack_remote_jkt_dev.sh`） | `DescribeClusterUserKubeconfig --TemporaryDurationMinutes 15 --PrivateIpAddress true`，节点侧临时目录 700 / 文件 600，跑完 `rm -rf` | 每次回显 `cleaned=YES`，本机侧凭据同轮删除 |
+| SQL | **集群内临时 psql Pod**（`postgres:17-alpine`，DSN 经 `secretKeyRef` 注入） | 口令只经临时 `Secret/t2d-dba` 进集群，同一调用内删除 | 残留检查 `NotFound` ×2 |
+
+与生产同构（任务 13/27 用的是同一种"Pod 里跑 psql"形状），差别只在 dev 的 kubeconfig 换成 15 分钟临时凭据。**没有**开集群公网端点，**没有**留任何长期凭据。
+
+### 12.1 本卡产物（全部新增文件，未改动 fork 里的既有业务代码）
+
+```
+deploy/jakarta_dev/newapi-dev.yaml          # Namespace/Quota/SA/CM/Deploy/Svc 六合一（4 处有意偏差写在文件头）
+deploy/jakarta_dev/dev_deploy.sh            # 执行器：--precheck/--render-check/--apply-base/--secret/--grants/
+                                            #   --db-owner-probe/--db-owner-fix/--apply-app/--verify/--logs/--smoke/--isolation/--status/--delete
+deploy/jakarta_dev/dev_grants.sql           # 权限 SQL（scope|SQL 逐行，runner 一条一次 psql -c）
+deploy/jakarta_dev/dev_rds_finalize.sh      # 口令轮转 / DSN 重建 / 只读复核（--rotate/--dsn/--grant/--verify）
+deploy/jakarta_dev/bodies/{apply_base,apply_secret,apply_grants,apply_app,verify,logs,smoke,status,delete,
+                            db_owner_fix,db_owner_probe,isolation,isolation_rbac}.sh
+deploy/lib/ack_remote_jkt_dev.sh            # 15 分钟临时凭据版远端通道
+```
+
+### 12.2 权限模型：一次真实走偏 + 非破坏纠偏（坑 11 的现场版）
+
+**走偏**：本轮曾按"生产 API 口径"调 `GrantAccountPrivilege --AccountPrivilege DBOwner`。RDS 回 `RequestId` 成功，但 `DescribeAccounts` 回读 `DatabasePrivileges` 仍是空 —— 即坑 11 说的"API 侧看不到、但实际动了库 owner"。`--grants` 的生效判据回读把它抓了出来：
+
+```
+db_owner=newapi          （主库）  ⇒ has_create_runtime=true
+db_owner=newapi_migrate  （日志库）
+```
+
+运行账号成了库 owner ⇒ schema 级 ACL 形同虚设，最小化没有真正生效。
+
+**纠偏可达路径（全部实测）**：
+
+| 尝试 | 结果 |
+|---|---|
+| `ALTER DATABASE … OWNER TO aurora` | `ERROR: must be able to SET ROLE "aurora"` —— owner 校验已过，卡在目标角色 |
+| `SET ROLE aurora` | `permission denied`；`newapi_ops` 只有 `pg_rds_superuser`（admin=false） |
+| `RevokeAccountPrivilege`（回到 API 侧零权限的正确形状） | 回 `RequestId` 成功，但 **owner 不变** ⇒ RDS 没有"还原内部账号 owner"的通路 |
+| `ALTER DATABASE … OWNER TO newapi_ops` | **成功**，两库 owner 均已交回应用绝不使用的高权限账号 |
+
+`pg_rds_superuser` 也测过（`SET ROLE` 可用），但拿保留组角色当库 owner 属未验证用法，**没有采用**。
+
+纠偏后判据（`--grants` 回读，非计划值）：
+
+```
+[main]  db_owner=newapi_ops  has_create_migrate=true  has_create_runtime=false
+        nspacl=pg_database_owner=UC/…,newapi_migrate=UC/pg_database_owner,newapi=U/pg_database_owner
+        default_acl=newapi_migrate={newapi=arwd/…} {newapi=rU/…}
+[logs]  db_owner=newapi_ops  has_create_runtime=true  has_create_migrate=false   ← dev 有意偏差：日志库 DDL 由 newapi 承担
+```
+
+### 12.3 新坑（建议并入指南任务 13/17 的坑表）：PG 的 DSN 必须是 URL 形态
+
+`--apply-app` 首启即 `CrashLoopBackOff`，容器日志：
+
+```
+[SYS] using MySQL as database
+[error] failed to initialize database, got error invalid DSN: missing the slash separating the database name
+```
+
+根因在代码里，与云侧无关：`model/main.go:151` 的 `chooseDB()` **只按 DSN 前缀**（`postgres://` / `postgresql://`）判定 PG；libpq 的 `host=… dbname=… password=…` k/v 形态会直接掉进 `main.go:168` 的 MySQL 分支。dev 的 DSN 原本正是 k/v 形态。
+
+处置：`dev_rds_finalize.sh` 的 `rebuild_dsn()` 改产 URL 形态，三键重建（口令已实测纯字母数字，无需百分号编码；这与**坑 10** 是同一条约束的另一侧 —— `#` 等保留字符必须转义）。`bodies/apply_secret.sh` 加了硬闸门：DSN 前缀不是 `postgres://` 就**直接 exit 1**，不允许把这个错误带进 Pod。
+
+**可泛化判据**：凡"用 psql 验证通过"的 DSN 都不能代表应用能用 —— 应用只认 URL 前缀，psql 两种形态都认。与坑 10 的"`redis-cli` 通不代表 `go-redis` 通"完全同构。
+
+### 12.4 首启与三库冒烟（`--verify` / `--smoke` 实测）
+
+```
+Pod new-api-dev-d6cfd49ff-4zj9s 1/1 Running（节点 ap-southeast-5.10.2.36.199，SA new-api-app，
+    镜像 acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com/newapi-dev/newapi-master:20261012-a8e646954）
+New API ready in 446 ms
+[GIN] GET /api/status → 200 ×N（探针）
+S1 /api/status 200 ｜ S2 / 200 ｜ S3 svc DNS new-api-dev.newapi-dev.svc=172.23.5.57:80 → 200
+S4 三 DSN 落库面：SQL_DSN_MIGRATE tables=36 ｜ SQL_DSN tables=36 ｜ LOG_SQL_DSN tables=2
+S5 权限链：select users ⇒ 0 行；update users ⇒ 成功 0 行；create table _t2d_forbid ⇒ ERROR: permission denied for schema public
+S6 越界清理：public_tables_left=36，无 _t2d 残留
+S7 DDL/迁移日志行数=38（SQL_SLOW_THRESHOLD_MS=1 生效，与生产 master 同构）
+```
+
+`S5` 那条 `permission denied for schema public` 就是坑 11 想要的最终证据：运行账号读得到、改得动、**建不了表**，建表只有 `newapi_migrate` 能做。
+
+### 12.5 Phase 3 隔离验收 V1–V11（全部实测；`bodies/isolation.sh` + `bodies/isolation_rbac.sh`）
+
+网络面在 **Pod 网络命名空间**里测（terway 直接给 Pod 分 VPC IP，比 §11.4 的节点侧更贴近应用真实路径），探针 Pod 复用已缓存的 `postgres:17-alpine`（busybox `nc` / `nslookup`）。
+
+| 编号 | 判据 | 实测 | 结论 |
+|---|---|---|---|
+| V1 | dev 出网只用**自己**的 NAT EIP | Pod 侧 `147.139.170.11`、节点侧 `147.139.170.11` | ✅ |
+| V2 | 生产 RDS 公网端点不可达 | `43.118.96.65:5432 ⇒ BLOCKED` | ✅ |
+| V3 | 马尼拉生产 VPC 内网不可达 | `10.0.16.20:6443`、`10.0.0.1:443`、`10.0.22.220:6443` 全 `BLOCKED` | ✅ |
+| V4 | 新加坡生产 API Server 不可达 | `10.1.19.73:6443 ⇒ BLOCKED` | ✅ |
+| V5 | 生产 ACR EE 的 **VPC 域名不可达**，只有公网入口可达 | `-vpc` 解析到 `10.0.22.220` 但 `443 ⇒ BLOCKED`；公网域名解析 `8.220.143.202` 且 `443 ⇒ OPEN` | ✅（"能解析"≠"能连通"。dns() 首版把 CoreDNS 地址当成应答，已修） |
+| V6 | dev RDS 只有 5432 通 | `…:5432 ⇒ OPEN` / `…:6432 ⇒ BLOCKED` | ✅（清单偏差③复核） |
+| V7 | dev SA 零 RBAC | ns 内 Role/RoleBinding=0、引用 `new-api-app` 的 ClusterRoleBinding=0、全 ns RoleBinding=0；6 条 `can-i --as=` 全 `no`，同轮对照 admin `can-i get nodes ⇒ yes` ⇒ 判据通道有效 | ✅ |
+| V8 | 免密拉取只圈 dev | addon `managed-aliyun-acr-credential-helper` **active v24.01.29.1-5318af4-aliyun**，config 回读 `watchNamespace=newapi-dev` / `serviceAccount=new-api-app` / `AcrInstanceInfo=cri-avfqy9xkqi5bj8ee@ap-southeast-6` / `enableRRSA=false`；`acr-credential-secret-aggregation` **只存在于 newapi-dev**（kube-system / default 无） | ✅ |
+| V9 | Secret 里不含任何生产端点/网段 | 逐键 base64 解码后按 `pgm-5tstdhko64x2c01w` / `43.118.96.65` / `new-api-prod` / `10.0.` / `10.1.` / `registry-vpc` 匹配 ⇒ **零命中**（只打印命中与否，值不外泄） | ✅ |
+| V10 | 日志库分家 | Pod env 解析：`SQL_DSN`/`SQL_DSN_MIGRATE` ⇒ dev 实例 `:5432/newapi`，`LOG_SQL_DSN` ⇒ dev 实例 `:5432/newapi_logs` | ✅ |
+| V11 | 资源面 + 云端结构性通路 | ns 内 1 deploy / 1 svc / 2 cm（含 `kube-root-ca.crt`）/ 2 secret / 2 sa / 1 pod，临时对象 0；`cbn DescribeCens TotalCount=0`；`vpcpeer ListVpcPeerConnections` 在 `ap-southeast-5 / 6 / 1` 三站均 `TotalCount=0` | ✅ |
+
+**Phase 3 结论：dev 与生产之间不存在任何通路** —— 网络层 V2–V5 实测阻断、结构层 V11 零 CEN / 零 Peering、身份层 V7 零 RBAC、数据面 V9/V10 零串台。唯一被许可的跨区动作仍只是"从马尼拉 EE **公网入口**拉镜像"这一条，且它是只读出向、不附带任何生产内网通路。
+
+### 12.6 台账纠错（§11.3 的两处与实际不符）
+
+| 项 | §11.3 原记 | 实测回读 |
+|---|---|---|
+| 引擎版本 | PostgreSQL 17.0 | **17.10**（临时 psql Pod `select version()`） |
+| 付费方式 | `Postpaid` | **`Prepaid`，`ExpireTime=2026-11-12T16:00:00Z`** ⇒ 到期即释放，见 §12.8 |
+
+教训：`CreateDBInstance` 传入的 `--InstanceChargeType` 与最终形态不一定一致（RDS 对新购 PG 走了包月默认值），**付费口径只能以 `DescribeDBInstanceAttribute` 为准**。
+
+### 12.7 凭据暴露与自查（诚实记录，本轮一次自伤）
+
+- **本轮我自己的打码 bug 把两个 dev 口令（旧值）漏进了会话记录**：`--precheck` 的 `sed` 只按 URL 形态 `user:pw@host` 打码，而当时 DSN 是 k/v 形态 ⇒ 漏打。发现后立即 `--rotate` 轮换两个账号，**旧值当场作废**（轮换发生在任何 Secret 落集群之前，所以集群里从未存在过泄露值）。`mask_dsn()` 现已同时覆盖 `password=` 与 `://u:pw@` 两种形态。
+- 口令随 `--secret` / `--grants` 的命令体经云助手投递**一次**，与任务 13 跳板 ECS 的既有口径同级；补偿控制 = 用完即轮转 + 载荷文件 `shred -u` + 临时 Secret 同轮删除。
+- kubeconfig：15 分钟临时、私网、节点侧 700 目录 / 600 文件，`rm -rf` 后回显 `cleaned=YES`。
+- **一次 `--apply-app` 被云助手按 `Timeout` 判失败**（`rollout --timeout=300s` 与 `RunCommand --Timeout 300` 撞在同一秒）⇒ 命令被杀，节点侧临时目录清理没跑。已手工 `rm -rf /tmp/ackctl-*` 并复核；同时把三层上限错开：**rollout 240s < RunCommand 900s ≤ 本地轮询 190×5s**。另修了轮询逻辑：`DescribeInvocationResults` 偶发返回空状态曾被当成"命令结束"，现改为空则继续轮询。
+- 云助手命令体上限实测：`CmdContent.ExceedLimit` 出现在 ~16KB；Base64 二次膨胀 1.35× ⇒ body 改为静态文件 + 引号化 heredoc，`--isolation` 拆成两个 body（合并后 15.6KB 被本地闸门拦下）。
+- dev 节点**没有 `jq`**（`rc=127`）也**没有 `psql`**、`registry-ap-southeast-5.aliyuncs.com` NXDOMAIN；所有远端回读改用 `kubectl -o go-template/jsonpath`。
+- ACR EE 的 `ListRepoTag` 必须用 `--RepoId`（不是 namespace/name），且实例在马尼拉 ⇒ 所有 `cr` 调用带 `--region ap-southeast-6`。
+
+### 12.8 待负责人裁定（不阻塞本次交付）
+
+1. **dev RDS 是包月、2026-11-12 到期** ⇒ 续费 / 转按量 / 到期即释放（dev 可重建）。到期未续会连带 §12.5 的 V6/V10 证据失效。
+2. **dev 节点池现有 2 台 2C/8G**（计划 `min=1`）⇒ 保留双节点（可用性）还是缩到 1 台（省一台费用）。
+3. **库 owner 口径**：本轮把它纠到 `newapi_ops`（非破坏，最小化已实测生效）。若要求与生产逐字同构（owner=`aurora`），唯一路径是**删库重建** —— 两库现有对象仅 `main=36` / `logs=2` 张应用表，重建等于清空 dev 数据 ⇒ 属破坏性操作，需明确核准后才动。
+4. **生产 ACR EE 公网 ACL 仍未收口**（`0.0.0.0/1` + `128.0.0.0/1`，§3 既有缺口）：dev 现在正是走这个公网入口，收口前不要改绑 IP 段，否则 dev 拉镜像会断。
