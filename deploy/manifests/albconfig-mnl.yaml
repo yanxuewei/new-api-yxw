@@ -3,6 +3,19 @@
 # 对应 IngressClass：`alb`（spec.parameters.name = mnl-alb，2026-09-30 建）
 # 对应 ALB 实例：alb-1riqckb1h8ezm0y7s9 / alb-newapi-mnl
 #
+# ★ SSOT 提示（2026-10-12）：本文件是任务 19 的历史清单副本；已 apply 并验收的那份是
+#   `deploy/aliyun/ph/albconfig.rendered.yaml`（含 443 + 证书 + 渲染说明）。两份内容现已一致，
+#   改证书/监听器请优先改那份并回填本副本，避免再次分叉。
+#
+# == 现网回读基线（2026-10-12，经跳板机 `newapi-ops-mnl` 内 kubectl 实读）==
+#   mnl-alb spec.listeners =
+#     [{port:80,protocol:HTTP,idleTimeout:60,requestTimeout:600},
+#      {port:443,protocol:HTTPS,caEnabled:false,idleTimeout:60,requestTimeout:600,
+#       securityPolicyId:tls_cipher_policy_1_2_strict_with_1_3,
+#       certificates:[{CertificateId:"606823-ap-southeast-1",IsDefault:true}]}]
+#   证据：deploy/logs/cert_align_20261012/mnl_albconfig_live.out
+#   （同一批次 sg-alb 回读见 sg_albconfig_live.out，两地域监听器结构一致）
+#
 # == 本文件与 2026-10-06 之前线上形态的差异（本次收敛，对齐新加坡 sg-alb）==
 #
 # 1) **删除 `listeners[].httpDefaultActions`**（关键）
@@ -52,9 +65,14 @@ spec:
       protocol: HTTP
       idleTimeout: 60             # ✅ 目标值（原 15）
       requestTimeout: 600         # ✅ 目标值（ALB 硬上限，原 60）
-  # ⏳ 443 + TLS 待 G5 证书（账号内 CAS 证书数为 0）；就绪后在此追加：
-  #    - port: 443
-  #      protocol: HTTPS
-  #      certificates: [{ CertificateId: "${CERT_ID_MNL}" }]
-  #      idleTimeout: 60
-  #      requestTimeout: 600
+      # ⚠ 不要写 httpDefaultActions/defaultActions（实测被 Controller 的 ForwardGroup 覆盖）
+    # ✅ 2026-10-12 G5 闭环后已上线；本段与现网回读逐字一致（见文件头「现网回读基线」）
+    - port: 443
+      protocol: HTTPS
+      idleTimeout: 60
+      requestTimeout: 600
+      caEnabled: false
+      securityPolicyId: tls_cipher_policy_1_2_strict_with_1_3
+      certificates:
+        - CertificateId: 606823-ap-southeast-1   # ⚠ 字段名必须是 CertificateId（值才是 CertIdentifier）
+          IsDefault: true

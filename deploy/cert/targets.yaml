@@ -77,17 +77,21 @@ renewal:
       expect: 出现新的 issued 记录（CertId ≠ 606823），SAN 仍含 *.likha.hk 与 likha.hk
       gate: 未取得新 CertIdentifier 前不执行 R2/R3
     - id: R2
-      name: 改 AlbConfig 的 CertificateId 并 apply（唯一合法通道）
+      name: 换绑两地 HTTPS 监听（**声明式，唯一路径**）
       cmd: |
-        # ⚠ 不要调 alb UpdateListenerAttribute：本批 ALB 是 ServiceManagedResource，直调写操作被拒
-        #   OperationDenied.ServiceManagedResource（实测 3/3）。改这两件后走 ack_remote apply：
-        #   deploy/aliyun/ph/albconfig.rendered.yaml:57（mnl-alb）
-        #   deploy/manifests/albconfig-sg.yaml:80（sg-alb）
-        #   字段名必须是 CertificateId（值才是 CertIdentifier），写错名会被 CRD 静默忽略。
-        # ⚠ 未证风险：AlbConfig listeners 是 Replace 语义（官方原文：改监听属性会删旧建新）⇒
-        #   ListenerId 可能变化（本文件 readback 的 lsn-* 台账作废），须在低峰窗口做并备回滚。
-        bash deploy/lib/ack_remote.sh mnl <renewal-body>   # kubectl -n new-api apply -f albconfig
-      expect: ListListenerCertificates 回读出现新 CertIdentifier 且 IsDefault=true；两地各测一次
+        # ⚠ 禁止 aliyun alb UpdateListenerAttribute：ACK 托管的 ALB 是 ServiceManagedResource，
+        #   直接调 alb OpenAPI 会被服务端拒绝（OperationDenied.ServiceManagedResource，2026-10-12 实测），
+        #   控制台同样改不了；只能改 AlbConfig 再 apply（CRD 无 schema ⇒ 写错字段名会被静默忽略）。
+        # 1) 改声明（两地域各一份，SSOT = deploy/aliyun/ph/albconfig.rendered.yaml / deploy/manifests/albconfig-sg.yaml）
+        #      listeners[].certificates[].CertificateId: <new-cert-identifier>   ← 字段名必须是 CertificateId
+        # 2) apply：马尼拉走跳板机 kubectl（云助手→跳板机 或 ops-access 临时放行），新加坡走 deploy/lib/ack_remote.sh sg
+        kubectl apply -f deploy/aliyun/ph/albconfig.rendered.yaml      # 马尼拉（albconfig mnl-alb）
+        # 新加坡：kubectl apply -f deploy/manifests/albconfig-sg.yaml（经 ack_remote.sh sg 下发）
+      expect: |
+        两监听云端回读一致（这是唯一可信判据，k8s 侧 spec 写错也会"看着已配"）：
+          aliyun alb GetListenerAttribute --region ap-southeast-6 --ListenerId lsn-hjl2cz2g9oqvee4eix | jq '.Certificates'
+          aliyun alb GetListenerAttribute --region ap-southeast-1 --ListenerId lsn-iqn5i233mvv7eu4u6w | jq '.Certificates'
+        ⇒ Certificates[0].CertificateId == <new-cert-identifier>
     - id: R3
       name: 重新落保管目录并验配对（旧副本覆盖，不留第二份）
       cmd: "bash deploy/logs/tls_store_20261012.sh   # 需把 CertId 改为新值；严禁开 bash -x"

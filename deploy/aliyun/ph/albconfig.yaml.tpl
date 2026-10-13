@@ -1,6 +1,10 @@
 # G6 配置模板 · 马尼拉 ALB AlbConfig（对应指南 §3.8 / §6.3 任务 19）
 # 渲染方式：envsubst 或 Kustomize helmChartPostRenderer 替换 ${...} 后 kubectl apply。
 # 管理红线（§6.3 坑 4）：ALB 只能经 AlbConfig/Ingress 声明式管理，禁止控制台手工改 listener/转发规则。
+#   ★ 技术强制（2026-10-12 实测）：ACK 托管的 ALB 是 **ServiceManagedResource**，直接调 alb OpenAPI
+#     会被服务端拒绝 `OperationDenied.ServiceManagedResource` ⇒ 控制台/OpenAPI 想改也改不了。
+#   ★ 现网基线（2026-10-12，443 已上线）：`deploy/aliyun/ph/albconfig.rendered.yaml`（本模板的渲染件，
+#     已按实况回填真实 ID 与 CertIdentifier `606823-ap-southeast-1`）；改证书/监听器请以该件为 SSOT。
 #
 # 占位符清单（D1–D3 产出后回填 Git，不在本文件硬编码）：
 #   ${VSW_MNL_PUB_A}  马尼拉公网 vSwitch 6a（§4.1 产出）
@@ -14,7 +18,7 @@ apiVersion: alibabacloud.com/v1
 kind: AlbConfig
 metadata:
   name: mnl-alb
-  namespace: new-api
+  # ⚠ AlbConfig 是 **Cluster-scoped**（实测 spec.scope=Cluster）⇒ **不写 namespace**（旧模板误带，2026-10-12 订正）
 spec:
   config:
     name: alb-newapi-mnl
@@ -31,10 +35,12 @@ spec:
       - { key: env, value: prod }
   listeners:
     - port: 80
-      protocol: HTTP                  # 仅用于 301 跳转 HTTPS
-      httpDefaultActions:
-        - type: Redirect
-          redirectConfig: { host: api.likha.com, https: on, port: "443" }
+      protocol: HTTP
+      idleTimeout: 60
+      requestTimeout: 600
+      # ⚠ 不要写 `httpDefaultActions`/`defaultActions`：实测被 Controller 的 ForwardGroup 覆盖（2026-10-06 定论），
+      #   旧写法还带已废弃域名 `api.likha.com`。HTTP→HTTPS 301 走 Ingress：
+      #   deploy/manifests/ingress-mnl-http-redirect.yaml（order=1，对 www.likha.hk / likha.hk）
     - port: 443
       protocol: HTTPS
       securityPolicyId: tls_cipher_policy_1_2_strict_with_1_3   # 显式指定，否则可协商 TLS1.0 被安全核查判不合格（坑 3）
@@ -42,13 +48,17 @@ spec:
       requestTimeout: 600             # 硬上限，见文件头注释
       idleTimeout: 60
       certificates:
-        - CertIdentifier: ${CERT_ID_ALB}
+        # ⚠⚠ 字段名**必须是 `CertificateId`**（值才是 CertIdentifier，如 `606823-ap-southeast-1`）。
+        #   写成 `CertIdentifier:` 会被 CRD `x-kubernetes-preserve-unknown-fields` **静默忽略**
+        #   ⇒ 证书不绑定、443 形同虚设，且不报任何错（2026-10-12 实测订正，本模板旧写法即此坑）。
+        - CertificateId: ${CERT_ID_ALB}
+          IsDefault: true
 ---
 apiVersion: networking.k8s.io/v1
 kind: IngressClass
 metadata:
   name: alb
-  namespace: new-api
+  # ⚠ IngressClass 亦为集群级资源 ⇒ 不写 namespace（旧模板误带，2026-10-12 订正）
 spec:
   controller: ingress.k8s.alibabacloud/alb
   parameters:

@@ -1,5 +1,10 @@
 # G6 配置模板 · 证书部署任务清单（对应指南 §3.8 / §4.7 任务 3 / §9.8 任务 40）
 
+> ⚠ **2026-10-12 状态提示（本文件是预置模板，勿当现状读）**：G5 已于 2026-10-12 闭环，证书
+> `CertIdentifier=606823-ap-southeast-1`（CAS 实例 `cas_intl-sg-4rf4zyk0u00s`，有效期至 2027-04-28），
+> 两地 ALB 443 已**经 AlbConfig 声明式**上线并验收。**现状与续期动作的 SSOT 是 `deploy/cert/targets.yaml`**；
+> 本模板里的 `${...}` 占位符与"私钥只在 CAS/KMS"等表述均为 D1 预置口径，实况见该台账。
+
 > 时序红线（v2.0 教训）：**D1 只做"证书就绪 + 本模板预置"，部署动作固定排 D6（任务 40）**——ALB/WAF 在 D3/D5 才建，提前部署会找不到资源、最终靠手工补、D6 才发现残留自签/旧证书。
 
 ## 1. 证书真源与就绪状态（D1 收口）
@@ -17,7 +22,7 @@
 
 | # | 目标 | 绑定方式 | 资源 ID（D6 回填） | 完成 |
 | --- | --- | --- | --- | --- |
-| 1 | 马尼拉 ALB 443 listener | **只经 AlbConfig 声明式管理**（`certificates: [{CertIdentifier: ${CERT_ID_ALB}}]`，见 albconfig.yaml.tpl），禁止控制台手工挂载 | `${ALB_MNL_ID}` / `${HTTPS_LISTENER_MNL_ID}` | ☐ |
+| 1 | 马尼拉 ALB 443 listener | **只经 AlbConfig 声明式管理**（`certificates: [{CertificateId: <CertIdentifier>}]` —— ⚠ 字段名必须是 `CertificateId`，写成 `CertIdentifier:` 会被 CRD 静默忽略；见 albconfig.yaml.tpl），禁止控制台手工挂载（ACK 托管 ALB 是 ServiceManagedResource，OpenAPI 写也会被拒） | `alb-1riqckb1h8ezm0y7s9` / `lsn-hjl2cz2g9oqvee4eix` | ✅ 2026-10-12 |
 | 2 | 新加坡 ALB 443 listener | 同上（备 region AlbConfig 复用同一 CertId） | `${ALB_SG_ID}` | ☐ |
 | 3 | WAF 3.0（马尼拉/新加坡） | 云原生接入模式下证书仍在 ALB 一份（§7.1.1 方案①）；若回退 CNAME 接入则 WAF 侧绑定同一 CertId 并改 HTTPS 回源 | `${WAF_MNL_ID}` / `${WAF_SG_ID}` | ☐ |
 | 4 | DCDN（如启用） | OpenAPI 绑定同一 CertId；未启用则记录"不适用" | `${DCDN_DOMAIN}` | ☐ |
