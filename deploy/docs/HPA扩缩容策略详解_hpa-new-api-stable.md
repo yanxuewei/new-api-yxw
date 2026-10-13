@@ -5,6 +5,10 @@
 > 实况抓取：**2026-10-06 23:10 (GMT+8)**，经 `deploy/lib/ack_remote.sh mnl` 从集群内直读
 > 抓取脚本：`deploy/hpa/bodies/00-get-hpa.sh`（HPA spec + 实时用量）、`deploy/hpa/bodies/01-node-capacity.sh`（节点可分配量）
 
+> ⚠️ **本文正文中的 `70%` 为 2026-10-06 抓取时的 drift 值**。
+> **2026-10-13 更新**：用户裁定「回改」⇒ 两地 HPA 已 `kubectl patch` 为 **`cpu@65%`**（`hpa-new-api-stable` + `hpa-new-api-ph-standby`），现网与真源 `stable-deployment.yaml` 已一致，**§8.1 的 DRIFT 已消除**。
+> 正文算式（§三/§五/§八 中的 `70%`）**保留为当时的分析快照**，若要按现行口径重算，把 `70` 换 `65` 即可（阈值线 `65% × 2C = 1.3C/Pod`）。裁定与实证见 `deploy/docs/G11连接数预算表_线上核实_2026-10-12.md` §6.3。
+
 ---
 
 ## 一、实况快照
@@ -238,6 +242,11 @@ ScalingLimited / TooFewReplicas
 **风险**：下次任何人用 `kubectl apply -f <旧 manifest>` 落地，会把 70 **静默改回 65** —— 阈值变了，行为也变，但没人在 diff 里看到。
 
 **处理**：确认 70 是否是有意为之；是则回写 manifest 并重新 apply 对齐，否则 revert。
+
+> ✅ **2026-10-13 已闭环**：用户裁定「**回改**」⇒ 维持真源的 `65`，把现网改回：
+> `kubectl -n new-api patch hpa hpa-new-api-stable --type=merge -p '{"spec":{"metrics":[{"type":"Resource","resource":{"name":"cpu","target":{"type":"Utilization","averageUtilization":65}}}]}}'`
+> 复核实测 = `cpu@65%`；备站 `hpa-new-api-ph-standby` 同步回改 65（此前亦为 70）。
+> **drift 根治方向**：HPA 由 `kubectl apply -f` 管理，控制台/`kubectl edit` 手改一律会与真源分叉 ⇒ 见 `deploy/docs/新增域名转发配置口径_Ingress优先_2026-10-12.md` 的同类纪律（"能声明式就不要手改"）。
 
 ### 8.2 ⚠️ `maxReplicas: 13` 装不下 —— 会 Pending
 

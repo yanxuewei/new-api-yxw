@@ -953,6 +953,22 @@ alb.ingress.kubernetes.io/actions.redirect: >-
 
 `ExpireTime = 2026-10-28T16:00:00Z` ⇒ **距今 16 天**。生产库到期停服 ⇒ 到期前必须完成续费或迁移决策。
 
+### ★ 2026-10-13 裁定落地（三项裁定 + 一项新增判定）
+
+| # | 事项 | 裁定（2026-10-13） | 落地 |
+|---|---|---|---|
+| 1 | `pool_mode` 回切 `transaction` | **先不切** ⇒ 维持 `session` | 登记为**知情接受的持续偏离**；**I-4 继续不成立**；复核触发 = 真实流量压测前 / 任务 44 接管演练前 / HPA 打到 `maxReplicas` 的时段 |
+| 2 | HPA CPU 目标 65 vs 70 | **回改** | ✅ 两地已 patch → `cpu@65%`（`hpa-new-api-stable` 4/13 · `hpa-new-api-ph-standby` 2/16）。⚠ **备站 HPA 此前无任何 IaC 真源**（现网对象无 `last-applied` 注解）⇒ 已在 `deploy/aliyun/ph/standby-deployment.yaml` **末尾补写 HPA 块**（与 live 一致；**无 `behavior`**，与主站的自定义 behavior 不同） |
+| 3 | RDS 到期 / 续费 | **已设自动续费** | ✅ `bssopenapi QueryAvailableInstances` → `RenewStatus=AutoRenewal`、`RenewalDuration=1 M`（10-28 停服风险解除；仍须保余额）。⚠ **`bssopenapi` 无 ap-southeast-6 端点**（须 `--region ap-southeast-1`）；**`--Region`（大写）= API 参数、`--region`（小写）= CLI 地域开关**，写错会静默用 profile 地域报 `unknown endpoint` |
+| 4 | **备站 conns 覆盖 `10/5` 被删** | **判定：不建议删，建议恢复**（待用户确认） | 2026-10-13 10:56 备站 Deployment 移除 `SQL_MAX_OPEN_CONNS=10` / `SQL_MAX_IDLE_CONNS=5` ⇒ Pod 回落 CM 的 `100/50`。**删后 worst-case I-1 = `1300+100+20×100 = 3400 > 2000` ⛔**；且备站与主站**共用同一 PgBouncer**（`…pub.pgsql…:6432`），`(newapi_sg,newapi)` 池 server 侧仍被 `default_pool_size=50` 封顶 ⇒ **抬 client 槽位不增吞吐、只增排队与挤占**；`IDLE 5→50` 还让每 Pod 常驻 50 条空闲连接（16 副本=800 条） |
+
+**备站 conns 覆盖恢复命令**（幂等，需在集群内或经 `deploy/lib/ack_remote.sh sg <body>`）：
+```bash
+kubectl -n new-api patch deploy new-api-ph-standby --type=json -p='[
+  {"op":"add","path":"/spec/template/spec/containers/0/env/-","value":{"name":"SQL_MAX_OPEN_CONNS","value":"10"}},
+  {"op":"add","path":"/spec/template/spec/containers/0/env/-","value":{"name":"SQL_MAX_IDLE_CONNS","value":"5"}}]'
+```
+
 ### 复核命令
 
 ```bash
