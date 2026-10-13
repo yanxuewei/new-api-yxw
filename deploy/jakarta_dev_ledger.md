@@ -460,3 +460,146 @@ S7 DDL/迁移日志行数=38（SQL_SLOW_THRESHOLD_MS=1 生效，与生产 master
 2. **dev 节点池现有 2 台 2C/8G**（计划 `min=1`）⇒ 保留双节点（可用性）还是缩到 1 台（省一台费用）。
 3. **库 owner 口径**：本轮把它纠到 `newapi_ops`（非破坏，最小化已实测生效）。若要求与生产逐字同构（owner=`aurora`），唯一路径是**删库重建** —— 两库现有对象仅 `main=36` / `logs=2` 张应用表，重建等于清空 dev 数据 ⇒ 属破坏性操作，需明确核准后才动。
 4. **生产 ACR EE 公网 ACL 仍未收口**（`0.0.0.0/1` + `128.0.0.0/1`，§3 既有缺口）：dev 现在正是走这个公网入口，收口前不要改绑 IP 段，否则 dev 拉镜像会断。
+## 13. 任务 13（追加）：负责人手建 Deployment `fanyan-new-api-master` 拉不到镜像 —— 免密拉取定位（2026-10-13）
+
+### 13.0 现象
+
+控制台「使用镜像创建」建的无状态负载，落在 dev ns `newapi-dev`，`0/2` 一直起不来；同 ns 的 `new-api-dev` 是 `1/1`。
+镜像填的是 `acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com/newapi-prod/newapi-master:20261009-a8e646954`。
+
+### 13.1 先排除"镜像不存在"这条误判（云端只读，`aliyun cr`，region 必须 ap-southeast-6）
+
+EE 实例 `cri-avfqy9xkqi5bj8ee` 共 8 个仓库，`newapi-prod/newapi-master` = `crr-eo15b1p46wt8yeek`，`RepoStatus=NORMAL`；
+其 tag `20261009-a8e646954` **存在**，`Status=NORMAL`，`ImageSize=78071398`，
+`Digest=829a4277fe4791dc341ce759f9a4d5d2008d949f28109b547327872fd510fff0` —— 与 dev 正在跑的
+`newapi-dev/newapi-master:20261012-a8e646954`（以及 `20261013-d481f5ba2`、`yxw-test`）**digest 完全相同**。
+
+⇒ 结论：不是 tag 写错、不是仓库不存在。指向 prod 与指向 dev 拉到的是同一份镜像内容，**只是命名/隔离口径不对**（见 13.5）。
+
+### 13.2 集群侧实测（`deploy/jakarta_dev/dev_deploy.sh --diagnose-pull`，body `bodies/diagnose_pull.sh`，全程只读）
+
+D1 三要素对照（免密只认「镜像 / SA / imagePullSecrets」）：
+
+```
+fanyan-new-api-master  sa=（=default）  pullSecrets=（空）   img=…/newapi-prod/newapi-master:20261009-a8e646954
+new-api-dev            sa=new-api-app   pullSecrets=（空）   img=…/newapi-dev/newapi-master:20261012-a8e646954
+```
+
+D2 原始报错串（决定性证据，两个阶段各有原因）：
+
+| 时间 | 用的域名 | 报错原文（要点） | 性质 |
+|---|---|---|---|
+| 早期 `847cc75465-*` | `acr-newapi-mnl-registry**-vpc**.ap-southeast-6…` | `dial tcp 10.0.22.220:443: i/o timeout` | **网络不可达**（跨区私网入口） |
+| 现在 `77bdff6b7-*`/`c4bb97798-*` | `acr-newapi-mnl-registry.ap-southeast-6…`（公网入口） | `pull access denied … insufficient_scope: authorization failed` | **根本没带凭据**（匿名拉私有库） |
+
+D3 `Secret/acr-credential-secret-aggregation` 在 `newapi-dev` 内存在，`auths` 同时登记了 `-vpc` 与公网两个域名（值应打码，见 13.4 事故）。
+D4 ns 内 2 个 SA：`default` 的 `imagePullSecrets` **为空**；`new-api-app` 挂着 `acr-credential-secret-aggregation`。
+D5 `kube-system/acr-configuration` ConfigMap **不存在** —— 该集群的 helper 是托管形态，作用域只在 CS API 侧
+（§12.5 V8 已回读：`serviceAccount=new-api-app`、`watchNamespace=newapi-dev`、`AcrInstanceInfo=[cri-avfqy9xkqi5bj8ee @ ap-southeast-6]`）。
+
+**根因一句话**：ACR 免密组件是**按名字把临时凭据挂到指定 ServiceAccount** 的，不是"ns 里有 Secret 就自动生效"。
+控制台「使用镜像创建」默认用 `default` SA 且不写 `imagePullSecrets`，所以 Pod 一个凭据都拿不到 ⇒ `insufficient_scope`。
+
+### 13.3 免密拉取的三条路径（都已对着实测证据核过）
+
+| 方案 | 做法 | 代价 / 适用 |
+|---|---|---|
+| **A（推荐，零组件改动）** | 把该 Deployment 的 Pod 模板 `serviceAccountName` 改成 **`new-api-app`**（控制台：修改部署 → 高级配置 → 服务账户），随后 `rollout restart` | 与 `new-api-dev` 完全同构：免密由 SA 承载、Pod 不写 `imagePullSecrets`。多应用共用一个 SA 在 dev 可接受 |
+| B（保持 `default` SA） | Pod 模板显式写 `imagePullSecrets: [{name: acr-credential-secret-aggregation}]` | 立即可用，但该 Secret 由 helper 托管、随 `watchNamespace` 生灭；把它当业务依赖会让" Secret 从哪来"变难追。适合救急，不适合作长期约定 |
+| C（长期干净） | 为该应用建独立 SA（如 `fanyan-app`），再到 CS 控制台「组件管理 → managed-aliyun-acr-credential-helper → 配置」把该名字加进 `serviceAccount`（逗号分隔多个） | 唯一与"每个工作负载自己的 SA"权限模型一致的做法，但要改集群组件配置（作用域仍只在 `watchNamespace=newapi-dev`，不影响生产） |
+
+三条都**不需要**自建长期 AK 的 docker-server Secret——那会绕过免密、把口令留在人手抄的清单里，违反 §12 的凭据纪律。
+
+### 13.4 本轮新增坑（写进复用清单）
+
+- **坑 15｜跨区复用 EE 时 `-vpc` 域名不可路由**：`acr-newapi-mnl-registry-vpc.ap-southeast-6…` 解析到**马尼拉侧 VPC 的私网 IP**（实测 `10.0.22.220`），
+  雅加达 dev VPC 与三区之间按计划**没有 CEN/Peering**（§12.5 V11 = 0 条）⇒ 必然 `i/o timeout`，且这个报错长得像"防火墙问题"，极易误判。
+  结论：dev 复用马尼拉 EE 走公网入口，**镜像域名必须不带 `-vpc`**（与「acr ee 比较贵，暂时复用马尼拉 EE 走公网入口跨区拉」的裁定一致）。
+- **坑 16｜helper 只绑"配置里点名"的 SA**：`Secret` 存在 ≠ Pod 拿得到。判断顺序应为
+  `Pod 的 SA` → `SA.imagePullSecrets` → `Secret 是否在 ns`，而不是先看 Secret。
+- **坑 17｜打码正则漏大写**：ACR `dockerconfigjson` 的键名是 **`Username`/`Password`**（首字母大写），
+  小写正则 `(username|password)` 完全没命中 ⇒ 见 13.6。
+
+### 13.5 顺带要纠的口径（不是故障，是隔离设计）
+
+`newapi-prod/*` 是**生产命名空间**。免密令牌是**实例级**的，技术上 dev 能拉到 prod 仓库，但这与
+「正式环境和开发/测试环境彻底隔离」的要求相冲突（隔离是命名+权限口径上的，网络层已按 V1–V11 证实不通）。
+且 §13.1 已证明 prod 那个 tag 与 dev 的 `20261012-a8e646954` 是同一 digest —— 指 prod **没有任何收益**。
+⇒ 建议 dev 的手建负载一律用 `acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com/newapi-dev/newapi-*:<tag>`。
+另注意该负载 `replicas=2`，跨区公网每副本拉 78 MB，dev 配额是 `pods 20`，不是问题但会明显拖慢首启。
+
+### 13.6 凭据暴露事件（第二次，同类成因）—— 如实记录
+
+- **事实**：D3 原 body 用小写打码正则（坑 17），把 dev 集群里 `acr-credential-secret-aggregation` 的
+  **临时拉取口令原文（`cr_temp_user` + STS 型 token）输出进了会话记录**。用户名与实例 ID 同批可见。
+- **有效窗口**：token 内 `time` 字段 = `1791931523000` ⇒ 到期 **2026-10-13 22:45 UTC / 10-14 06:45 CST**，
+  即自暴露起约 **20.5 小时**后自然失效；helper 的 `expiringThreshold=15m` 会在那之前换新值（集群内副本会换，**已外泄的这条不会因此提前失效**）。
+- **权限面**：该 token 是**实例级**凭据，覆盖 `cri-avfqy9xkqi5bj8ee` 全部命名空间（含 `newapi-prod`），
+  即 §12.8 第 4 项仍未收口的公网 ACL（`0.0.0.0/1` + `128.0.0.0/1`）也一并适用 ⇒ **风险叠加**，不是"只影响 dev"。
+- **本卡已做的纠偏**：打码正则改为 `-i` + 值整体替换 + 长串一律省略，并已用合成样本本地验证输出只剩 `***`（未再上集群取真值）。
+- **不可用的补救（写清楚，避免误判）**：ACR EE 没有"吊销单个临时 token"的 OpenAPI；删掉集群里的 Secret 只会让 helper 生成新值，
+  **不会让已外泄的旧值提前失效**。真正能压窗口的只有：① 收紧 EE 公网入口 ACL（但会立刻断掉 dev 跨区拉取，需与 §12.8-4 一起裁定）；
+  ② 等自然到期（≤20.5 h）。**未擅自执行任一项**，因两者都会动到共享入口/生产可达面。
+- 与 §12.7 同一类根因：**打码是"事后正则"而不是"结构性不取值"**。后续任何 body 一律遵循
+  "能只打印键名/长度就不打印值"，需要结构时用 `go-template` 取指定字段，禁止整份 `dockerconfigjson` 落地。
+
+### 13.7 本卡产物 / 动作
+
+- 新增：`deploy/jakarta_dev/bodies/diagnose_pull.sh`（只读，命令体 4.3 KB，无载荷）。
+- 修改：`deploy/jakarta_dev/dev_deploy.sh` 加 `--diagnose-pull` 分发与 `render_check` 覆盖（该 body 走**零凭据 header**，
+  刻意不复用 `SEC_B64` 分支，免得诊断脚本白带一份 DSN）。
+- 云端只读：`aliyun cr ListRepository` / `ListRepoTag`（region ap-southeast-6）。
+- **未做任何集群写入**：没有 patch 该 Deployment、没有改 SA、没有改 helper 配置、没有改 ACL。
+  13.3 的 A/B/C 三条都等负责人选定后再落，落法与回读口径同 §12。
+### 13.8 方案 A 已执行（负责人 2026-10-13 裁定「选A」）—— 写入面与回读证据
+
+**产物**：新增 `deploy/jakarta_dev/bodies/fix_pull_sa.sh`（只 patch `serviceAccountName`，命令体 4.0 KB）；
+`dev_deploy.sh` 加 `--fix-pull-sa <deploy>` 分发（**必须显式给负载名**，不给就直接拒，刻意无默认值）与 `render_check` 覆盖。
+
+**实际写入（唯一一处）**：
+
+```
+=== F0 闸门   before: name=fanyan-new-api-master  sa=（default）  replicas=1
+             image=acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com/newapi-prod/newapi-master:20261009-a8e646954
+             SA=new-api-app 的 imagePullSecrets=acr-credential-secret-aggregation（非空才允许动手）
+=== F1 patch  deployment.apps/fanyan-new-api-master patched
+```
+
+没有碰的：helper 组件配置、Secret、RBAC、镜像名、replicas、`new-api-dev` 全部对象。
+
+**回读（生效判据只认回读，不认 patch 返回码）**：
+
+```
+=== F2  after: sa=new-api-app   deploy级pullSecrets=（空）  ⇒ 与 new-api-dev 同构（免密挂在 SA 上）
+        新 RS fanyan-new-api-master-768f8495d6  sa=new-api-app des/cur=1/0
+        旧 RS 77bdff6b7 / 7b7b7c5f7f / 847cc75465  sa=（default） des/cur=0/0  ← 滚动过程中的残留
+=== F3  deployment "fanyan-new-api-master" successfully rolled out   rollout_rc=0
+=== F4  ready=1/1  updated=1
+        fanyan-new-api-master-768f8495d6-vnjgt  ready=true  restarts=0
+        imageID=…/newapi-dev/newapi-master@sha256:829a4277fe4791dc341ce759f9a4d5d2008d949f28109b547327872fd510fff0
+```
+
+复采（`--diagnose-pull`，只读）里的决定性一行 —— 拉取真的成功了，不再是 `insufficient_scope`：
+
+```
+30s  Normal  Pulling  pod/fanyan-…-768f8495d6-vnjgt  Pulling image "acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com/newapi-prod/…"
+29s  Normal  Pulled   pod/fanyan-…-768f8495d6-vnjgt  Successfully pulled image "…" in 574ms (574ms including waiting). Image size: 78074406 bytes.
+D6  只剩 new-api-dev ready=1/1 ⇒ ns 内已无未就绪负载
+```
+
+**证据边界（不把话说满）**：
+
+1. `574ms` + `imageID` 落在 `newapi-dev/…@sha256:829a42…` ⇒ **manifest/tag 解析是走公网入口凭据成功的**（这一步才是本次修的），
+   但**镜像层由节点本地缓存命中提供**（同 digest 早被 `new-api-dev` 拉过）。所以本次证明的是"授权链路通了"，
+   **没有**证明"78 MB 层数据能跨区公网下载"。要验那条得换一个节点上没有的 tag（会产生跨区下行流量），未擅自执行。
+2. `Image size` 两次读数不同：F4 侧事件 `78074406` vs `aliyun cr` 侧 `78071398`（压缩层合计与 CRI 口径差异），不作为异常。
+3. `replicas` 本轮读到 **1**，而 §13.2 D6 时是 **2** ⇒ 期间负载被人从控制台改过副本数（本卡命令体里没有 replicas 相关写操作，
+   F1 的 patch JSON 只有 `serviceAccountName` 一个字段）。记录以防后续对不上数。
+
+**13.6 暴露事件的后续处置**：把 D3 从"事后正则打码"改成**结构性只取域名**
+（`go-template` 取 `dockerconfigjson` → `grep -oE '[a-z0-9.-]*\.cr\.aliyuncs\.com' | sort -u`，值通道从命令里彻底消失），
+已用合成样本验证输出只含两个域名。外泄的临时 token 仍按 §13.6 结论**等自然到期（2026-10-14 06:45 CST）**，
+收紧公网 ACL 与 §12.8-4 一起裁定，不单动。
+
+**仍待办（负责人侧决定）**：该负载镜像仍指向 `newapi-prod/*`。技术上能拉（本次已证），但与"dev/prod 彻底隔离"的命名口径相冲，
+且 §13.1 已证与 `newapi-dev/newapi-master:20261012-a8e646954` 同 digest ⇒ 换成 dev 命名空间零损失。改动只需一次 `set image`，等指令。

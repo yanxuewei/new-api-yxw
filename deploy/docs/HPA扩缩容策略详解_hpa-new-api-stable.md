@@ -15,7 +15,7 @@
 |---|---|
 | `minReplicas` | **4** |
 | `maxReplicas` | **13** |
-| `metrics` | **仅 cpu**，`target.averageUtilization = 70`（`type: Utilization`） |
+| `metrics` | **仅 cpu**，`target.averageUtilization = 65`（`type: Utilization`）｜**2026-10-13 已回改**：现网曾 drift 为 `70`，按用户裁定改回 `65`（与真源 `stable-deployment.yaml` 一致） |
 | `currentReplicas` | 4 |
 | `desiredReplicas` | 4 |
 | 当前 CPU 指标 | `averageUtilization: 0`（`averageValue: 1m`） |

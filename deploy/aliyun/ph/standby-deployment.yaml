@@ -201,3 +201,34 @@ spec:
     - name: http
       port: 80
       targetPort: http
+---
+# HPA：备站接管自动扩容
+#   ★ 2026-10-13 补登记 —— 此前备站 HPA **无任何 IaC 真源**（现网对象无 last-applied 注解，
+#     由命令式创建），属历史缺口。本块按 2026-10-13 现网实测值补写，与 live 逐字段一致。
+#   * 现网实测：min 2 / max 16 / metrics 仅 cpu / target.averageUtilization = 65
+#   * CPU 目标：**2026-10-13 用户裁定「回改」** —— 现网原为 70，与文档/真源 65 不符
+#     （drift，疑源于任务 23 V4 测试临时降 1% 后恢复写成 70），已改回 **65**（与主站同口径）。
+#   * maxReplicas：现为 **16**；任务 44（Day 3）按 F12 二次裁定抬到 **20**
+#     （= 主站 13 × 1.5 ≈ 19.5），本卡不改。
+#   * **无 `behavior` 块** = 使用 K8s 默认伸缩行为（scaleUp stabilizationWindowSeconds 0 /
+#     scaleDown 300）。⚠ 与主站 `hpa-new-api-stable` 的自定义 behavior **不同**；
+#     若要统一，须先改本文件再 apply，并复核现网。
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: hpa-new-api-ph-standby
+  namespace: new-api
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: new-api-ph-standby
+  minReplicas: 2
+  maxReplicas: 16
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 65

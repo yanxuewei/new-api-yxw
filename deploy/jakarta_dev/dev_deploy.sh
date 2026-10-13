@@ -193,9 +193,10 @@ render_check() {
   secret_payload 1                       # 含 DSN_OPS_* 与 grants.sql，供 grants 的组装检查
   local DOCS SEC; DOCS=$(pack_dir "$WORK/docs"); SEC=$(pack_dir "$WORK/sec")
   local b full
-  for b in apply_base.sh apply_secret.sh apply_grants.sh apply_app.sh verify.sh smoke.sh status.sh delete.sh db_owner_fix.sh db_owner_probe.sh logs.sh isolation.sh isolation_rbac.sh; do
+  for b in apply_base.sh apply_secret.sh apply_grants.sh apply_app.sh verify.sh smoke.sh status.sh delete.sh db_owner_fix.sh db_owner_probe.sh logs.sh isolation.sh isolation_rbac.sh diagnose_pull.sh fix_pull_sa.sh; do
     case "$b" in
       apply_base.sh|apply_app.sh) full="$WORK/rc_$b"; { header "DOCS_B64=$DOCS"; cat "$BODIES/$b"; } > "$full" ;;
+      diagnose_pull.sh|fix_pull_sa.sh) full="$WORK/rc_$b"; { header; cat "$BODIES/$b"; } > "$full" ;;
       db_owner_fix.sh|db_owner_probe.sh) full="$WORK/rc_$b"; { header "SEC_B64=$SEC"; cat "$BODIES/$b"; } > "$full" ;;
       *)                           full="$WORK/rc_$b"; { header "SEC_B64=$SEC";  cat "$BODIES/$b"; } > "$full" ;;
     esac
@@ -235,6 +236,11 @@ db_owner_probe() {
 }
 verify()  { run_body verify.sh verify; }
 logs()    { run_body logs.sh logs; }
+diag_pull() { run_body diagnose_pull.sh diagpull; }
+fix_pull_sa() {
+  [ -n "${TGT:-}" ] || die "--fix-pull-sa 必须显式给第二参目标负载名（刻意不设默认，避免误伤）"
+  run_body fix_pull_sa.sh fixpull "TARGET=$TGT"
+}
 isolation() {
   run_body isolation.sh isolation-net
   run_body isolation_rbac.sh isolation-rbac
@@ -244,6 +250,7 @@ status()  { run_body status.sh status; }
 del_all() { run_body delete.sh delete; }
 
 A="${1:---precheck}"
+TGT="${2:-}"
 case "$A" in
   --precheck)    precheck ;;
   --render-check) render_check ;;
@@ -255,9 +262,11 @@ case "$A" in
   --apply-app)  apply_app ;;
   --verify)     verify ;;
   --logs)       logs ;;
+  --diagnose-pull) diag_pull ;;
+  --fix-pull-sa) fix_pull_sa ;;
   --isolation)  isolation ;;
   --smoke)      smoke ;;
   --status)     status ;;
   --delete)     del_all ;;
-  *) die "未知子命令：$A（--precheck/--render-check/--apply-base/--secret/--grants/--db-owner-probe/--db-owner-fix/--apply-app/--verify/--logs/--smoke/--isolation/--status/--delete）" ;;
+  *) die "未知子命令：$A（--precheck/--render-check/--apply-base/--secret/--grants/--db-owner-probe/--db-owner-fix/--apply-app/--verify/--logs/--diagnose-pull/--fix-pull-sa <deploy>/--smoke/--isolation/--status/--delete）" ;;
 esac
