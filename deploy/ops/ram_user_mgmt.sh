@@ -255,15 +255,16 @@ for k in ks: print('    %s  %s  %s' % (k.get('AccessKeyId'), k.get('Status'), k.
 
 # ── 新增 ──────────────────────────────────────────────────────────────
 add_user() {
-  local name="" disp="" want_ak=0 want_console=0 grp=""
+  local name="" disp="" want_ak=0 want_console=0 grp_csv="" email=""
   name="${1:-}"; shift || true
-  [ -n "$name" ] || die "用法: deploy/ops/ram_user_mgmt.sh add-user <登录名称> [显示名称] [--ak] [--console] [--group G]"
+  [ -n "$name" ] || die "用法: deploy/ops/ram_user_mgmt.sh add-user <登录名称> [显示名称] [--ak] [--console] [--group G1,G2] [--email 邮箱]"
   if [ $# -gt 0 ] && [ "${1#--}" = "$1" ]; then disp="$1"; shift; fi
   while [ $# -gt 0 ]; do
     case "$1" in
       --ak) want_ak=1 ;;
       --console) want_console=1 ;;
-      --group) shift; grp="${1:-}" ;;
+      --group) shift; grp_csv="${1:-}" ;;
+      --email) shift; email="${1:-}" ;;
       *) fail "未知参数：$1"; return 1 ;;
     esac
     shift
@@ -272,16 +273,33 @@ add_user() {
   [ "$want_ak" = 1 ] && [ "$want_console" = 1 ] && \
     info "提示：同时开控制台+AK 会产生「人被 MFA 保护、AK 绕过 MFA」的缺口，建议拆成两个用户"
 
+  # --group 支持逗号分隔多个组：dev_group,ops-prod_group（顺带容错空格与空项）
+  local groups=() g
+  if [ -n "$grp_csv" ]; then
+    while IFS= read -r g; do
+      g="${g// /}"
+      [ -n "$g" ] && groups+=("$g")
+    done < <(printf '%s\n' "$grp_csv" | tr ',' '\n')
+  fi
+
   head1 "新增用户：$name"
-  say "  显示名称：$disp    控制台：$([ $want_console = 1 ] && echo 是 || echo 否)    AK：$([ $want_ak = 1 ] && echo 是 || echo 否)    加入组：${grp:-（无）}"
+  say "  显示名称：$disp    控制台：$([ $want_console = 1 ] && echo 是 || echo 否)    AK：$([ $want_ak = 1 ] && echo 是 || echo 否)"
+  say "  加入组：${grp_csv:-（无）}    安全邮箱：${email:-（无）}"
   confirm "即将创建用户" || return 1
 
   local out
   out=$(ram GetUser --UserName "$name")
   if is_ok "$out"; then
     skip "用户已存在：$name"
+    if [ -n "$email" ]; then
+      # UpdateUser 的 --NewUserName 是必填参数；传同名字符串 = 只改安全邮箱
+      out=$(ram UpdateUser --UserName "$name" --NewUserName "$name" --NewEmail "$email")
+      if is_ok "$out"; then ok "已补设安全邮箱：$email"; else fail "安全邮箱设置失败：$(err_msg "$out")"; fi
+    fi
   else
-    out=$(ram CreateUser --UserName "$name" --DisplayName "$disp")
+    local create=(--UserName "$name" --DisplayName "$disp")
+    [ -n "$email" ] && create+=(--Email "$email")
+    out=$(ram CreateUser ${create[@]+"${create[@]}"})
     if is_ok "$out"; then ok "创建用户 ${name}（UserId=$(printf '%s' "$out" | jq_get "User.UserId")）"
     else fail "创建失败：$(err_msg "$out")"; return 1; fi
   fi
@@ -319,9 +337,9 @@ add_user() {
     fi
   fi
 
-  if [ -n "$grp" ]; then
-    join_group "$grp" "$name"
-  fi
+  for g in ${groups[@]+"${groups[@]}"}; do
+    join_group "$g" "$name"
+  done
 }
 
 add_group() {
@@ -577,8 +595,11 @@ ram_user_mgmt.sh —— 阿里云 RAM 用户/组/策略 增删改查
   who <user>                     查单个用户全貌（组/策略/AK/MFA/登录）
 
 新增
-  add-user <名称> [显示名] [--ak] [--console] [--group G]
+  add-user <名称> [显示名] [--ak] [--console] [--group G1,G2] [--email 邮箱]
                                  建用户；--ak 建 AK；--console 开控制台登录并打印初始密码
+                                 --group 可用逗号分隔一次性加入多个组
+                                 --email 设置安全邮箱（仅中国站 aliyun.com 支持；用户已存在时补设）
+                                 例：add-user yxw yxw --console --group dev_group,ops-prod_group --email yxw@5108890064395960.onaliyun.com
   add-group <组名> [备注]        建用户组
   attach <组> <策略> [Custom|System]   给组绑策略
   join <组> <用户>               把用户加入组
