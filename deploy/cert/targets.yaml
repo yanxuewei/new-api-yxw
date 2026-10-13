@@ -81,6 +81,32 @@ targets:
         闭合必须在 sg 用真实 *.likha.hk 证装 Secret 挂到 www 的 443 Ingress 回读，代价＝生产私钥进集群 etcd
         （2026-10-05 裁定不用 KMS ⇒ Secret 是唯一载体）⇒ 需负责人单独放行。
 
+  - target: oss
+    status: done                # ✅ 2026-10-13 img.likha.hk 绑定完成并端到端验证
+    sites:
+      - name: image-static
+        region: ap-southeast-6
+        bucket: img-likha
+        domain: img.likha.hk
+        cert_type: CAS
+        readback: "ossutil api list-cname --bucket img-likha → Certificate{CertId,Status=Enabled,Fingerprint,ValidEndDate}"
+    notes: |
+      ⚠ OSS 自定义域名的 HTTPS 证书**按 CertId 引用**（Type=CAS），**不读 AlbConfig** ——
+      换证 = 重新 put-cname，与 ALB 的「改 AlbConfig + apply」是**两条独立通道**，必须分别做。
+      ⚠ 判「公共读是否生效」**不能**只看 GetBucketAcl：新建桶的桶级「阻止公共访问」(BPA) 默认为 true，
+      会让 public-read **静默失效**（匿名访问 403，而 ACL 读回仍是 public-read）⇒ 须显式
+      `ossutil api put-bucket-public-access-block --bucket img-likha --public-access-block-configuration '{"BlockPublicAccess":false}'`。
+    evidence_20261013:
+      bind: "create-cname-token → 写 TXT _dnsauth.img → put-cname（归属验证是硬门槛，直接 put-cname 回 NeedVerifyDomainOwnership）"
+      cert_field: "证书节点名必须是 **CertificateConfiguration**；写成 Certificate 会被**静默忽略**（调用仍返回成功但证书不生效）"
+      baseline: "OSS 绑定侧 Fingerprint=74:94:59:28:43:BF:B9:62:87:D2:6D:73:08:38:E0:E7:16:2E:42:B3 / ValidEndDate=Apr 28 23:59:59 2027 GMT，与实际握手证书逐字一致"
+      e2e: "https://img.likha.hk/LIKHA.png → 200 / ssl_verify_result=0；不存在对象 404；匿名 ListObjects 403（未暴露对象清单）"
+    renew_action: |
+      R1 换证后若 CertId ≠ 606823-ap-southeast-1 ⇒ 必须重绑本目标（**与两地 ALB 的 AlbConfig 换绑是两件独立的事**）：
+        ossutil api put-cname --bucket img-likha \
+          --cname-configuration '{"Cname":{"Domain":"img.likha.hk","CertificateConfiguration":{"CertId":"<新CertId>","Force":true}}}'
+      若 CertId 未变（同证内容更新），仍须复验 list-cname 的 Fingerprint/ValidEndDate 是否跟上新证。
+
   - target: waf
     status: not-in-this-round   # ⏸ 2026-10-12 裁定（指南 §0.5 F15）：本轮不购买 WAF 3.0 ⇒ 不下发
     blocked_on: 业务量增长后复评购买（控制台订阅，waf-openapi 无 CreateInstance）
@@ -108,6 +134,11 @@ renewal:
       name: 确认新证书已签发
       cmd: "aliyun cas ListInstances --region ap-southeast-1 --cli-query 'InstanceList[].[InstanceId,Spec,CertificateStatus,CertificateId,CertIdentifier,AutoReissue]'"
       expect: 出现新的 issued 记录（CertId ≠ 606823），SAN 仍含 *.likha.hk 与 likha.hk
+      note: |
+        ⚠ 若确实是**新 CertId**，除 R2 的两地 ALB 换绑外，**还必须重绑 OSS 目标**
+        （`- target: oss` 的 renew_action，bucket=img-likha / domain=img.likha.hk）——
+        OSS 不读 AlbConfig，漏了它 `img.likha.hk` 会在旧证到期当晚 HTTPS 失效。
+        若 CertId 未变（同证内容更新），仍须复验 OSS 绑定侧 Fingerprint/ValidEndDate 是否跟上。
       gate: 未取得新 CertIdentifier 前不执行 R2/R3
     - id: R2
       name: 换绑两地 HTTPS 监听（**声明式，唯一路径**）
@@ -131,8 +162,8 @@ renewal:
       expect: ls -l 两文件 600、cert_blocks=3、-modulus md5 两侧一致
     - id: R4
       name: 端到端验 443（现网 443 不经 K8s Secret，见下方注）
-      cmd: "curl -svI https://www.likha.hk -o /dev/null 2>&1 | grep -E 'subject:|expire date:'   # 两地各测一次（www.likha.hk / sg.likha.hk）"
-      expect: expire date 为新证的 2027-xx 日期；openssl s_client 的 server cert 链与 SAN 不变
+      cmd: "curl -svI https://www.likha.hk -o /dev/null 2>&1 | grep -E 'subject:|expire date:'   # 三入口各测一次（www.likha.hk / sg.likha.hk / img.likha.hk）"
+      expect: expire date 为新证的 2027-xx 日期；openssl s_client 的 server cert 链与 SAN 不变；img.likha.hk 同时复验 OSS 绑定侧指纹（见下方 oss 目标的 renew_action）
       note: |
         ⚠ 本仓现网 443 链路里**还没有** TLS Secret（grep 'spec.tls' 于 deploy/manifests、deploy/aliyun
         = 0 命中），证书完全来自 AlbConfig ⇒ 现在手工建 new-api-tls 是一条无消费者的假动作。
@@ -141,3 +172,6 @@ renewal:
         见 probe_secret_route ②），到期当晚的选证依据是「同域名 Secret 优先 / 不选已过期的证书」——
         ⚠ 这条在同域名场景仍属未证（见 probe_open），验证通过前不得宣称已免人工。
   also_note: 若同时决定接 WAF（F15 复评），WAF 域名证书须一并换绑；本文件 waf 条目当前 not-in-this-round。
+  oss_note: |
+    OSS（bucket=img-likha / domain=img.likha.hk）换证是**独立通道**（put-cname，不读 AlbConfig），
+    与 R2 的 ALB 换绑必须分别执行 —— 见下方 oss 目标的 renew_action；R4 复验含 img.likha.hk。
