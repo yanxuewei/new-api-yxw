@@ -65,9 +65,28 @@
 ## 容灾与切换
 - **SLA 链**：`0.9999^5 ≈ 0.9996` → 月不可用 **17.28 min**；预算 21.6 min → 仅余 **4.32 min**。（注：`impl_deploy_fix.md:751-772` 已修正为 `0.9999^5 = 0.99950`，即**刚好达标、零余量**。）
 - **ACK 控制面 SLA ≠ 可选形态（2026-09-29 更正）**：ACK SLA（生效 2023-04-01）§1.4/§1.5 —— **区域级集群 regional = 所在地域 AZ 数 ≥3**；**可用区级集群 zonal = AZ 数 ≤2**；§2.2 承诺 99.95% / **99.50%**。**马尼拉 `ap-southeast-6` 只有 6a/6b 两个 AZ → 恒为 zonal、承诺 99.50%（月不可用上限 ≈3.6 h），无任何建簇选项可提升**。且 **ACK 控制面不在上面那条五项串联链内**（链路为 GA/ALB/应用数据面/RDS PG/Tair）→ **§8.2 推导不受 ACK SLA 影响**。指南原「选 regional 得 99.95%，否则 8.2 从根上错」系**双重误判，已在 `-v2.0.md` / `.md` / `-ch.md` / `wf2/part2a.md` 四份更正**（工具 `deploy/patch_ack_task10.py`）。对冲：控制面停摆**不影响已运行 Pod**（数据面继续服务），但**部署/扩缩容/HPA 停摆** → 冻结期内不得依赖临时扩缩容。
-- **切换三层**：① GTM 判定摘除 45–60s（可控）② DNS 传播 理论 60s / **实际 5–30 min**（运营商 LocalDNS，**不可控**）③ 客户端长连接（SSE 已建立**不迁移**）。**RTO**：乐观 2.3 min · 中位 6.3 min（**已超 4.32**）· 长尾 31.3 min。GTM TTL 最小 **1s**、探测最小 **15s**；探测节点**无菲律宾**；探测源 IP 须进 WAF 白名单。
+- **切换三层**：① GTM 判定摘除 45–60s（可控）② DNS 传播 理论 60s / **实际 5–30 min**（运营商 LocalDNS，**不可控**）③ 客户端长连接（SSE 已建立**不迁移**）。**RTO**：乐观 2.3 min · 中位 6.3 min（**已超 4.32**）· 长尾 31.3 min。GTM TTL 最小 **1s**（2026-10-13 实测 `Ttl=60` 生效 ⇒ 卡片「TTL 60 不可达」只对云解析普通记录成立）、探测最小 **15s**（⚠ 官方注明「**面向旗舰版实例开放**」；按量付费取 **60s**，见下「GTM 3.0 落地实况」）；探测节点**无菲律宾**（可选 46 节点，海外仅 吉隆坡/新加坡/香港/东京/法兰克福/加州）；探测源 IP 须进 WAF 白名单（**F15**：本账号无 WAF 实例 ⇒ 当前无触发对象）。
 - **GTM 池间语义 = 主备 failover，不是分摊**：主池健康 → 备池零流量；`pool-sg` 绝不进主地址池集合；**可用 IP 最小阈值 = 1**（马尼拉 ALB 仅 2 IP，设 2 → 单 AZ 抖动误切）。
 - **备站容量 = 并列第二段 RTO**（HPA 爬坡 + 节点扩容 90–180s）；`impl_deploy.md §7.4.4` 只写 `replicas: 2`（**缺 HPA**）vs 指南 `:208`「HPA 2-24」→ 待统一。
+
+### ★ GTM 3.0 落地实况（2026-10-13 · 任务 21 完成）
+
+> 报告 `deploy/docs/Day2任务21_GTM实例与访问池_执行报告_2026-10-13.md` · 真源 `deploy/aliyun/ph/gtm-address-pool.md` · IaC `deploy/tasks/task21/gtm_setup.sh`
+
+| 项 | 值 / 结论 |
+|---|---|
+| 模型 | **GTM 3.0 按量付费**，实例随接入域名自动生成（`ChargeType=postpay`，`VersionCode=postpay_standard`，无规格档、**无需购买/控制台**） |
+| 接入方式 | **直接接管业务域名** `www.likha.hk`（**不是** CNAME 挂接；那是旧版实例型 GTM 模型）⇒ 卡片步骤 1「控制台购买」与步骤 3「AddDomainRecord CNAME」**均作废** |
+| 实测 ID | `cfg-2109945017409681408` / 实例 `gtm-post-2109945017262880768` / 池 `pool-mnl`=`pool-2109945348675815424`（domain 型）/ 地址 `addr-2109945408285264896` / 模板 `mtp-2109945303977115648` |
+| 探测 | **https / 443** + `host=www.likha.hk` + `sni=true` + `path=/api/status` + `code=500`；**60s** / 超时 5000ms / 重试 3 / **失败率 100%**；节点 **HK 569 + SG 375 + Tokyo 576**（马尼拉不在 46 个可选节点里） |
+| 策略 | 池间 **`sequence` + `preemptive`**（主备顺序）；池内 `round_robin`；池/地址健康判定均 **`any_ok`** |
+| TTL | `Ttl=60` **实测生效**（权威直答 `www.likha.hk. 60 IN CNAME …`）⇒ **「TTL 60 不可达」只对云解析普通记录成立**，GTM 应答不受免费版 600s 限制 |
+| 验证 | 权威 `ns7/ns8` + 公共 `223.5.5.5`/`8.8.8.8` 均返回 CNAME → mnl ALB；`https /api/status` **200**；探测首轮 `MonitorStatus=ok`（启用后 ≈6 min 出数）；`@`/`sg` 未受影响 |
+| **成本** | 接入域名 `0.015 USD/个/天` + 探测 `1.5 USD/万次` + 解析 `0.004 USD/万次`。探测次数 = **地址数 × 节点数 × (86400÷间隔)** ⇒ 本例 1×3×1440=4,320 次/天 ⇒ **≈21 USD/月**；**15s ⇒ ≈78**；**备池入池（地址 +1）⇒ +19.4**。⚠ **禁用接入域名不禁费**（探测照跑） |
+| 回退 | 云解析 `www` 的 2 条 A（`8.212.161.49`/`8.212.183.7`，RecordId `2107455274482150400`/`2107455278295137280`）**刻意保留** ⇒ `disable`/`teardown` 后立即回落 |
+| ★ 坑 | ① GTM 3.0 的数组参数 meta 标 **`"style":"json"`** ⇒ CLI 点号展开（`--IspCityNodes.1.CityCode`）**报未赋值**，必须**整体传 JSON 串**（`aliyun_rpc.py` 或 CLI 直接给 JSON）；② `CreateCloudGtmInstanceConfig`/`CreateCloudGtmAddressPool`/`Update*` 在 CLI 3.5.1 元数据缺失（`--help` 回产品级帮助）⇒ 参数只能查 `https://api.aliyun.com/meta/v1/products/alidns/versions/2015-01-09/apis/<Action>/api.json`；③ 实例 `MonitorTaskQuota=0` **不代表不能探测**（是预付费口径，后付费实测任务已建并出数） |
+| ★ 设计取舍 | **失败率阈值取 100%**：备池为空 ⇒ 误摘主池 = 全站解析失败，故最保守；**备池入池后须重评**（建议降到 50–80%）。间隔取 60s 而卡片写 15s：15s 官方注明「面向旗舰版开放」且成本 ×4 |
+
 - **降 RTO 正解 = 切换下沉到 DCDN 回源层**：ALB 实例地址配为源站（主备优先级 20/30），主动探测 **2.5s×3 = 7.5s**，客户端连边缘 **IP 不变**、不吃运营商缓存 → RTO **10–20s**，净增 **≈ +74 USD/月**。三硬约束：① 探测是**四层 TCP** → 对「ALB 活但 Pod 全挂」的 5xx 免疫（须工单开七层或叠加 GTM）；② 动态资源**默认性能优先回源**会绕过主备优先级；③ 回源读超时**默认 30s** → SSE 截断（调 120–150s）。**DCDN 不支持内网源站**。全文与工单模板 → `.deploy/DCDN回源层切换_方案.md`。
 - **双活被四重否决**：单写者（主库只在 MNL/BKK）+ 跨区 RTT 45–70 ms 进 TTFT + 就近解析已否需求（PH→MNL 5–15 ms vs PH→SG 30–45 ms）+ 需新增跨区仲裁点。真正该砍的是 CK 备站复用（1,728.32 ≈ 备站节点的 2.8×）。
 
@@ -892,7 +911,8 @@ alb.ingress.kubernetes.io/actions.redirect: >-
 
 ### 任务 2 的顺延项（非遗漏）
 - `ops`（前置 = 堡垒机/VPN = 任务 46）· `static`（前置 = DCDN 未启用）—— **不建悬空记录**，随前置落地时补建。
-- `www` **TTL 60 不可达**（免费版下限 600s，实测 600）；`www` 形态由 CNAME→GTM 改为 **A→ALB**（GTM 已挂起）。
+- ~~`www` **TTL 60 不可达**（免费版下限 600s，实测 600）；`www` 形态由 CNAME→GTM 改为 **A→ALB**（GTM 已挂起）。~~
+  → **2026-10-13 更新**：**GTM 已解挂**（任务 21 完成），`www.likha.hk` 由 **GTM 3.0 直接接管**（权威直答 `60 IN CNAME alb-1riqckb1h8ezm0y7s9.ap-southeast-6.alb.aliyuncsslbintl.com`）；「TTL 60 不可达」仅对**云解析普通记录**成立。云解析残留 2 条 A **保留作回退兜底**。
 
 ### 附带确认（工具口径）
 - `quotas ListProductQuotas --MaxResults` **上限 100**（传 300 报 `INVALID.MAX.RESULTS`）。
@@ -960,14 +980,15 @@ alb.ingress.kubernetes.io/actions.redirect: >-
 | 1 | `pool_mode` 回切 `transaction` | **先不切** ⇒ 维持 `session` | 登记为**知情接受的持续偏离**；**I-4 继续不成立**；复核触发 = 真实流量压测前 / 任务 44 接管演练前 / HPA 打到 `maxReplicas` 的时段 |
 | 2 | HPA CPU 目标 65 vs 70 | **回改** | ✅ 两地已 patch → `cpu@65%`（`hpa-new-api-stable` 4/13 · `hpa-new-api-ph-standby` 2/16）。⚠ **备站 HPA 此前无任何 IaC 真源**（现网对象无 `last-applied` 注解）⇒ 已在 `deploy/aliyun/ph/standby-deployment.yaml` **末尾补写 HPA 块**（与 live 一致；**无 `behavior`**，与主站的自定义 behavior 不同） |
 | 3 | RDS 到期 / 续费 | **已设自动续费** | ✅ `bssopenapi QueryAvailableInstances` → `RenewStatus=AutoRenewal`、`RenewalDuration=1 M`（10-28 停服风险解除；仍须保余额）。⚠ **`bssopenapi` 无 ap-southeast-6 端点**（须 `--region ap-southeast-1`）；**`--Region`（大写）= API 参数、`--region`（小写）= CLI 地域开关**，写错会静默用 profile 地域报 `unknown endpoint` |
-| 4 | **备站 conns 覆盖 `10/5` 被删** | **判定：不建议删，建议恢复**（待用户确认） | 2026-10-13 10:56 备站 Deployment 移除 `SQL_MAX_OPEN_CONNS=10` / `SQL_MAX_IDLE_CONNS=5` ⇒ Pod 回落 CM 的 `100/50`。**删后 worst-case I-1 = `1300+100+20×100 = 3400 > 2000` ⛔**；且备站与主站**共用同一 PgBouncer**（`…pub.pgsql…:6432`），`(newapi_sg,newapi)` 池 server 侧仍被 `default_pool_size=50` 封顶 ⇒ **抬 client 槽位不增吞吐、只增排队与挤占**；`IDLE 5→50` 还让每 Pod 常驻 50 条空闲连接（16 副本=800 条） |
+| 4 | **备站 conns 覆盖 `10/5` 被删** | ✅ **已恢复**（用户 10-13 17:1x 裁定「恢复」并执行） | 2026-10-13 10:56 备站 Deployment 移除 `SQL_MAX_OPEN_CONNS=10` / `SQL_MAX_IDLE_CONNS=5` ⇒ Pod 回落 CM 的 `100/50`。**删后 worst-case I-1 = `1300+100+20×100 = 3400 > 2000` ⛔**；且备站与主站**共用同一 PgBouncer**（`…pub.pgsql…:6432`），`(newapi_sg,newapi)` 池 server 侧仍被 `default_pool_size=50` 封顶 ⇒ **抬 client 槽位不增吞吐、只增排队与挤占**；`IDLE 5→50` 还让每 Pod 常驻 50 条空闲连接（16 副本=800 条）。**恢复后**：generation `6→7`、RS `5f8484cffb` 2/2、两 Pod `10/5` 实测、跨 AZ 1a/1b、HPA `2–16@65%`、自探 reachable ⇒ **I-1 回 `1600≤2000`** |
 
-**备站 conns 覆盖恢复命令**（幂等，需在集群内或经 `deploy/lib/ack_remote.sh sg <body>`）：
+**备站 conns 覆盖恢复命令**（幂等，需在集群内或经 `deploy/lib/ack_remote.sh sg <body>`；**已于 2026-10-13 17:1x 执行**）：
 ```bash
 kubectl -n new-api patch deploy new-api-ph-standby --type=json -p='[
   {"op":"add","path":"/spec/template/spec/containers/0/env/-","value":{"name":"SQL_MAX_OPEN_CONNS","value":"10"}},
   {"op":"add","path":"/spec/template/spec/containers/0/env/-","value":{"name":"SQL_MAX_IDLE_CONNS","value":"5"}}]'
 ```
+⚠ **`add …/env/-` 是顺序敏感操作**：真源 `standby-deployment.yaml:118-127` 恰好把两个 conns 排在 `NODE_TYPE`/`GOMAXPROCS` **之后**，故恢复后与真源逐序一致、`apply` 无 diff；若真源顺序不同，功能等价但 apply 会因**数组原子比较**产生 diff ⇒ **改 env 前先对齐真源顺序**。
 
 ### 复核命令
 
@@ -978,3 +999,21 @@ kubectl -n new-api exec deploy/new-api-stable -- sh -c 'env | grep -E "^(SQL_|LO
 aliyun rds DescribeDBInstancePerformance --Key ConnectionUsage --DBInstanceId <id> --region ap-southeast-6 --StartTime <ISO> --EndTime <ISO>
 aliyun actiontrail LookupEvents --LookupAttribute.1.Key EventName --LookupAttribute.1.Value ModifyParameter --StartTime <ISO> --EndTime <ISO>
 ```
+
+## ★ 任务 56 挂起裁定 —— 上游 IP 白名单（2026-10-13 · 按需再做）
+
+**裁定**：Day 3 · 任务 56「上游供应商 IP 白名单提交与生效确认」**挂起 · 按需再做**（项目负责人 2026-10-13）。不进执行队列、不设固定窗口、**不阻塞任何里程碑**。
+
+**移出范围**：G0 欠项「上游 8 EIP 白名单提交」· Day 3 泳道 A 出口门禁 · Day 3 排期块 · M3 判据。
+
+**理由**：① 本卡是**外部等待项**（对方审批 1-3 天），我方无主动权，放 4 天窗口里只能空等；② 当前**未向上游发真实渠道流量**（正式发布 = Day 4 任务 34），未加白**不产生线上故障** —— 白名单只在**上游侧**生效，我方探活 `000/超时` 与白名单无关（先排 SNAT/EIP）；③ 上游侧真正需白名单的只有**企业专属渠道 / Azure OpenAI（`ipRules`）/ 自建私有化上游**，头部厂商普遍不做入向白名单 ⇒ 覆盖面比卡标题暗示的窄。
+
+**重启触发（满足任一）**：① Day 4 正式发布前确定使用的渠道中存在需 IP 白名单者 ⇒ **必须先确认生效再进流量**；② 任一渠道稳定 403 / 间歇失败且已排除 SNAT/EIP 侧；③ 上游主动要求提交或回执。
+
+**8 个 EIP 台账**：`deploy/eip_ledger.md`（mnl `8.212.146.47` / `8.220.142.77` / `8.220.184.250` / `8.212.176.29`；sg `47.84.184.246` / `47.84.29.162` / `47.84.83.76` / `47.84.126.214`；全部 `InUse`）。
+
+> ⚠ **★ 该表不可作为人工注记载体（2026-10-13 实测踩到）**：`deploy/tasks/task6/nat_eip.sh:228-252` 用 `{ ... } > "$LEDGER"` **整表重建** —— 每次运行都会重写**生成时间**、**待办段**（恢复模板原文）、mnl 4 行（`InUse` 为**硬编码**、非回读值），并把 sg 4 行先写成「未建」占位；随后 `deploy/tasks/task12/nat_eip_sg.sh:241-265` 用 awk 把 sg 4 行替换为真实值。⇒ **任何人工勾选/注记会在下一次 task6 运行时被冲掉**（本轮 18:15:53 亲历：台账注记被覆盖、生成时间被刷新）。
+> ⇒ 结论修正：**「已交供应商?」列全空 `☐` ≠ 未提交**，不能用它判定提交是否发生过（该列由模板固定输出）。任务 56 的挂起注记已写进 **task6 脚本模板本身**（唯一持久点，已加待办行标注 + 一行「本表由脚本整表重建」警示）。
+> ⇒ 另一处口径：`deploy/jakarta_dev_ledger.md` 声明「只记录**实测回读值**」，而本表 mnl 行的 `InUse` 是**硬编码** ⇒ 与「实测回读」声明不符，已知瑕疵（不影响当前结论：实测状态确为 `InUse`）。
+
+**落点**：指南 6 处（§0.4 任务表行 150 · §0.3 Day3 排期块 · Day3 泳道位移声明 · 任务 56 卡标题+前置 · 泳道 A 出口清单 · §0.6 G0 欠项段）+ 任务 52 卡前置解耦（不再以「任务 56 完成」为前置）；xlsx「落地计划」行 59 `AC`=⏸挂起、`Y`=裁定说明；`deploy/eip_ledger.md` 待办项标注。

@@ -603,3 +603,92 @@ D6  只剩 new-api-dev ready=1/1 ⇒ ns 内已无未就绪负载
 
 **仍待办（负责人侧决定）**：该负载镜像仍指向 `newapi-prod/*`。技术上能拉（本次已证），但与"dev/prod 彻底隔离"的命名口径相冲，
 且 §13.1 已证与 `newapi-dev/newapi-master:20261012-a8e646954` 同 digest ⇒ 换成 dev 命名空间零损失。改动只需一次 `set image`，等指令。
+### 13.9 该负载镜像已从 `newapi-prod/*` 换到 `newapi-dev/*`（负责人 2026-10-13 裁定「可以换」）
+
+**改前先拿证据**（`aliyun cr ListRepoTag --region ap-southeast-6 --RepoId crr-d0l6yu3mrddv4tbw`）：
+`newapi-dev/newapi-master` 下 `20261013-d481f5ba2` / `yxw-test` / `20261012-a8e646954` / `20261009-a8e646954`
+四个 tag 全部 `Status=NORMAL`，`ImageSize=78071398`，**digest 一律 `829a4277fe…fff0`**
+⇒ 与 §13.1 的 `newapi-prod/newapi-master:20261009-a8e646954` 同一份内容，换命名空间是**等价替换**，不是降级或换版本。
+选定 `20261012-a8e646954`（与 `new-api-dev` 清单所用 tag 逐字相同，便于同构比对）。
+
+**产物**：新增 `bodies/set_image.sh` + `dev_deploy.sh --set-image <deploy> <image>`。
+闸门是**白名单**而非黑名单（只放行 `…ap-southeast-6.cr.aliyuncs.com/newapi-dev/newapi-master:<yyyymmdd>-<sha>`），
+离线自测三类误配全部在任何 `kubectl` 之前被拒（rc=2）：
+
+| 被拒的镜像 | 为什么必须挡 |
+|---|---|
+| `newapi-prod/newapi-master:20261009-a8e646954` | 本次要消除的口径（dev 引用生产命名空间） |
+| `newapi-dev/newapi-master:yxw-test` | 非发布 tag，避免把临时标签固化进负载 |
+| `…-vpc.ap-southeast-6…/newapi-dev/…:20261012-a8e646954` | §13.4 坑 15：跨区 `-vpc` 不可路由，注定 `i/o timeout` |
+
+**实际写入（唯一一处）**：`deployment.apps/fanyan-new-api-master image updated`。SA 未受影响（回读仍 `new-api-app`）。
+
+**回读与实测**：
+
+```
+after: image=…/newapi-dev/newapi-master:20261012-a8e646954     after: sa=new-api-app
+deployment "fanyan-new-api-master" successfully rolled out      rollout_rc=0
+ready=1/1  updated=1
+  fanyan-…-79cf8fbd8b-lgkvw  sa=new-api-app  ready=true  restarts=0
+  imageID=…/newapi-dev/newapi-master@sha256:829a4277fe4791dc341ce759f9a4d5d2008d949f28109b547327872fd510fff0
+  Normal Pulled "…newapi-dev/newapi-master:20261012-a8e646954" in 59.804s (including waiting). 78074406 bytes
+  Normal Created / Normal Started ⇒ 容器真的起来了，不是只拉下来
+```
+
+`imageID` 的 digest 与 §13.1 / §13.8 三处读数一致 ⇒ 等价替换得到独立印证。
+
+**证据边界的更新（对 13.8-① 的修订，不要把话说满）**：本次 `59.804s` 含滚动排队等待
+（事件里同时出现 `1 old replicas are pending termination`），且该 digest 的层此前已被 `new-api-dev` 拉进节点缓存
+⇒ **仍然没有**做过"节点冷缓存下 78 MB 跨区公网全量下载"的耗时/成功率验证。这条挂为未证，
+真要验得换一个节点上没有的 tag（会产生跨区下行流量，需批准）。
+
+**当前 `newapi-dev` ns 终态**：`new-api-dev` 1/1（本卡产物，镜像/SA/清单均未动）；
+`fanyan-new-api-master` 1/1，`sa=new-api-app`，镜像 `newapi-dev/newapi-master:20261012-a8e646954`。
+两个负载现在共用同一条免密链路、同一个 dev 命名空间，`newapi-prod/*` 在 dev ns 内已无引用。
+### 13.10 「节点冷缓存跨区全量下载」这条未证项的处置：现有注册表内容下**结构上不可验**（负责人 2026-10-13「可以的」授权跨区下行后实测）
+
+**产物**：新增只读 body `bodies/node_image_cache.sh` + `dev_deploy.sh --node-image-cache`（已进 `--render-check`）。
+
+**EE 侧先把"有没有第二个 digest 可拉"问清楚**（`aliyun cr ListRepoTag`，region ap-southeast-6，实例 `cri-avfqy9xkqi5bj8ee`）：
+
+| 仓库 | tag 情况 | digest |
+|---|---|---|
+| `newapi-dev/newapi-master` | `20261013-d481f5ba2` / `yxw-test` / `20261012-a8e646954` / `20261009-a8e646954` | **全部 `829a4277fe…fff0`** |
+| `newapi-test/newapi-master` | `20261012-a8e646954` | 同上 |
+| `newapi-prod/newapi-master` | `20261009-a8e646954` 等 | 同上 |
+| `newapi-dev/newapi-slave`、`newapi-prod/newapi-pg-bouncer`、`newapi-pre/newapi-master`、`newapi-test/newapi-slave` | **空仓库**（`TotalCount=0`） | — |
+
+⇒ 整个实例只流转**一个** digest。containerd 的 content store 按 digest 存层，换 tag / 换命名空间照样命中缓存
+⇒ 拿现有任何 tag 做"冷拉"都只会测到缓存命中（这正是 §13.8-① 里 574ms 与 §13.9 里 59.8s 的真实成因）。
+**这条不是我没做，是当前内容下做不出来。**
+
+**节点侧实测（只读，未删镜像、未拉载荷、未改对象）**：
+
+```
+C1/C3  节点上唯一的 ACR 镜像 = newapi-dev/newapi-master:20261012-a8e646954，ID 1de3df3c01235，digest 829a4277fe…fff0
+       两个在跑的 Pod（new-api-dev 与 fanyan）imageID 与之一字不差 ⇒ 缓存命中的判定成立
+C4     curl -sSI https://acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com/v2/
+       HTTP/2 401
+       www-authenticate: Bearer realm="https://dockerauth-ap-southeast-6.aliyuncs.com/auth",
+                         service="registry.aliyuncs.com:ap-southeast-6:international:cri-avfqy9xkqi5bj8ee"
+```
+
+**C4 是本轮最有价值的一条**：不带任何凭据，从雅加达 dev 节点（源地址 `10.2.25.174`）到马尼拉 EE **公网入口**的
+TCP + TLS + HTTP/2 + registry v2 应用层**全部打通**，401 是未授权的预期响应，`service` 串里的
+`ap-southeast-6:international:cri-avfqy9xkqi5bj8ee` 还独立印证了打到的是**这一个实例**（不是别处的公共端点）。
+配合 §13.8/§13.9 两次 `insufficient_scope` 消失与 `Pulled → Created → Started`，
+链路可达性 + 授权正确性两项已经是双口径互证；**唯一还挂着的**就是"78 MB 层的冷下行耗时/成功率"。
+
+**顺手修了一个坏读数**：C2 原先 `grep '"id":"sha256:<64>"'` 恒为 0（crictl 的 JSON 带空格缩进，模式没命中），
+改成按默认表格第 3 列取 IMAGE ID 再去重，并在本地用合成样本验证过去重语义。旧的 `0` 不作为任何结论的证据。
+
+**要真正闭合这条，只有三条路（都超出「可以的」那句授权范围，故未擅自动手）**：
+
+| 路径 | 代价 | 判断 |
+|---|---|---|
+| ① 推一个新 digest（改一行代码重新构建出一个从未上过该节点的图片） | 要过 CI/ACR 构建，可能产生构建与存储费用；属"产生费用的操作" ⇒ 需明确核准 | 最干净，但要花钱且为此专门发版不值 |
+| ② 在节点上 `crictl rmi` 掉现有缓存再做冷拉 | **破坏性**：两个在跑的负载一旦 Pod 重建/节点重启就得跨区重拉，把"缓存兜底"这层被动安全主动拆掉 | 不建议在 dev 上为了一个数字这么干 |
+| ③ 等下一次真实版本 bump | 零额外动作、零费用：新 digest 天然就是冷拉，`Pulled in Xs` 事件会自动给出数字 | **推荐**。把这条挂成"下一次发版顺带采集" |
+
+**当前 ns 终态不变**：`new-api-dev` 1/1、`fanyan-new-api-master` 1/1，两者同 SA（`new-api-app`）同 dev 命名空间，
+`newapi-prod/*` 在 dev ns 内仍无引用。本轮**未对集群做任何写入**。
