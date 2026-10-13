@@ -75,14 +75,31 @@ targets:
              未阻塞绑定结果）⇒ 路② 验收把这条列为预期内瞬态，不能当故障回滚。
           ⑤ 回滚干净：删探针 Ingress+Secret 后 15s 监听回到 1 张证，www.likha.hk 端到端 200 + Verification OK，
              mnl 未受影响；孤儿上传证已 DeleteUserCertificate --region cn-hangzhou --CertId 27793254 并复验。
-      probe_open: |
-        ⚠ 路② 最后一证未闭合：同域名下 Secret 证与 AlbConfig 钉死证的 SNI 选优顺序。探针用的是异域名
-        （tls-probe.likha.hk），实测 SNI=www.likha.hk 仍回钉死证 ⇒ 无法证明"到期当晚会自动切 Secret 里的新证"。
-        闭合必须在 sg 用真实 *.likha.hk 证装 Secret 挂到 www 的 443 Ingress 回读，代价＝生产私钥进集群 etcd
-        （2026-10-05 裁定不用 KMS ⇒ Secret 是唯一载体）⇒ 需负责人单独放行。
+      probe_sni_priority: |
+        2026-10-13 同域名选优探针（sg 备站，两张一次性自签通配证，未搬动生产私钥；执行器
+        deploy/logs/t_p28_w1_apply.sh / t_p28_observe.sh / t_p28_w3_apply_short.sh / t_p28_observe2.sh）：
+        设计要点 = 让 Secret 证与钉死证对同一 SNI 的**命名匹配完全等价**（自签 SAN 逐字 = *.likha.hk,likha.hk），
+        backend 用 308 Redirect 作"模型已应用"门禁（首采样即 308，排除上轮"规则没生效"的污染）。
+          甲 长有效期自签（notAfter=2036-10-10 → CAS 上传证 27815723-cn-hangzhou）：监听 2 张、
+             Secret 证 IsDefault=false 而钉死 606823 仍 IsDefault=true，SNI 采样 6/6 回 Secret 证。
+          乙 短有效期自签（notAfter=2026-10-15，仅 2 天 ≪ 钉死证剩余 202 天 → 27816034-cn-hangzhou）：
+             SNI 采样 8/8 仍回 Secret 证 ⇒ **排除"剩余有效期更长者优先"这一解释**。
+          ⇒ 结论：**选优规则 = 来源优先（Ingress spec.tls 的 Secret 覆盖 AlbConfig 钉死证）**；
+             IsDefault=true 只决定兜底归属，不决定同域名出证归属。
+          ⚠ 覆盖是**监听级**、与 tls.hosts 写了哪些域无关：本轮 tls.hosts 只放探针独占域，
+             www.likha.hk / sg.likha.hk 的出证照样被换成 Secret 证 ⇒ **一张坏 Secret 会立即盖掉两地 443
+             的正常出证**。定时刷 Secret 的执行器必须"校验通过才写"（SAN 覆盖 + -modulus 配对 +
+             notAfter 未过期 + 链 leaf 在前），任一项不过拒绝写入并告警，禁止"先写再修"。
+          复原：两轮各删 Ingress+Secret 后监听回到 1 张证、www/sg 握手 serial 回钉死生产证
+             09CEC25739B87C4B17FEE2588AEE4F60、Verification OK、likha.hk=308 / sg.likha.hk=200、
+             443 仍是原 4 条 RuleId；孤儿上传证已按 SerialNo 白名单 DeleteUserCertificate 并复验 TotalCount=0；
+             mnl 主站对照 6/6 未受影响（见 t_p28_mnl_control.sh / t_p28_mnl_jitter.sh）。
+          ⚠ 撤回上一版 probe_open 的推论：那张探针自签证的 SAN 是精确 host、本不覆盖 www，
+             "www 回钉死证"对两个假设都成立 ⇒ 当时不构成优先级证据。
 
   - target: oss
     status: done                # ✅ 2026-10-13 img.likha.hk 绑定完成并端到端验证
+    doc: deploy/docs/OSS静态资源域名img.likha.hk_配置与证书续期_2026-10-13.md   # 配置全过程 + 续期复验口径
     sites:
       - name: image-static
         region: ap-southeast-6
@@ -124,11 +141,16 @@ targets:
 # 不补这一步，443 会在旧证到期当晚挂（两地各只绑 1 张证，无多证书兜底）。
 # ★ 目标态（负责人 2026-10-12 裁定采纳路②）：证书来源迁到 Ingress spec.tls + Secret，由集群内定时任务
 #   从 CAS 拉新证写 Secret（Secret 变更自动触发 ALB Ingress Controller 调谐）⇒ 下面 R2/R3 整体替换为
-#   「刷 Secret」，人工动作归零。落地前置 = probe_open 那条同域名 SNI 验证（需放行私钥进 etcd）+
-#   定时任务的 CAS 读凭据（按惯例由负责人自配）。
+#   「刷 Secret」，人工动作归零。
+#   ✅ 机制前提三条全部实测成立（2026-10-13）：不重建监听（probe_secret_route ①）/ 与钉死证共存（②）/
+#      同域名 Secret 优先（probe_sni_priority，且已排除"有效期优先"解释）。
+#   ⇒ 落地时 **AlbConfig 的 certificates 字段保留**（不撤，避开 Replace 语义的监听重建风险），
+#      Secret 一旦写入即对该监听所有域名接管出证。
+#   剩余前置只剩实施项：真证进两地 Secret（负责人 2026-10-13 放行"私钥进 etcd"）+ 定时任务的 CAS 读凭据
+#   （按惯例由负责人自配）+ 写前校验门禁（坏 Secret 会立即盖掉正常出证，见 probe_sni_priority ⚠ 条）。
 renewal:
   due_by: "2027-03-29"
-  target_state: 路②（Ingress spec.tls + Secret + 集群内定时刷 Secret）— 未落地，R2 仍是当前有效兜底
+  target_state: 路②（Ingress spec.tls + Secret + 集群内定时刷 Secret）— 机制已证、实施未落地，R2 仍是当前有效兜底
   steps:
     - id: R1
       name: 确认新证书已签发
@@ -169,8 +191,9 @@ renewal:
         = 0 命中），证书完全来自 AlbConfig ⇒ 现在手工建 new-api-tls 是一条无消费者的假动作。
         路② 落地时本步骤替换为：新证由定时任务写入 Secret（kubectl create secret tls … --from-file，
         私钥不出现在命令行明文），AlbConfig 的 certificates 字段**保留**（实测可与 Secret 共存且仍为默认，
-        见 probe_secret_route ②），到期当晚的选证依据是「同域名 Secret 优先 / 不选已过期的证书」——
-        ⚠ 这条在同域名场景仍属未证（见 probe_open），验证通过前不得宣称已免人工。
+        见 probe_secret_route ②），到期当晚的选证依据是**同域名 Secret 优先**——
+        ✅ 已实测（见 probe_sni_priority：长短有效期两轮自签均 100% 胜过钉死证，"有效期优先"解释已被排除）。
+        ⚠ 同一结论的反面就是本步骤的风险面：坏 Secret 会立即接管该监听所有域名的出证 ⇒ 写入前必须过校验门禁。
   also_note: 若同时决定接 WAF（F15 复评），WAF 域名证书须一并换绑；本文件 waf 条目当前 not-in-this-round。
   oss_note: |
     OSS（bucket=img-likha / domain=img.likha.hk）换证是**独立通道**（put-cname，不读 AlbConfig），
