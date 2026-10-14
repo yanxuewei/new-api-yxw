@@ -692,3 +692,77 @@ TCP + TLS + HTTP/2 + registry v2 应用层**全部打通**，401 是未授权的
 
 **当前 ns 终态不变**：`new-api-dev` 1/1、`fanyan-new-api-master` 1/1，两者同 SA（`new-api-app`）同 dev 命名空间，
 `newapi-prod/*` 在 dev ns 内仍无引用。本轮**未对集群做任何写入**。
+## 14. 新负载 `new-api-dev-slave` 拉不到镜像 —— 「凭据晚于 Pod 创建」时序坑（2026-10-14）
+
+### 14.0 现象
+
+控制台手建的 `deployment/new-api-dev-slave`（ns `newapi-dev`，建于 **17:46:30 HKT**）0/1，
+Pod `new-api-dev-slave-548745dc66-dx7js` 报：
+
+```
+failed to resolve reference "acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com/newapi-dev/newapi-master:20261012-a8e646954":
+  ... pull access denied, repository does not exist or may require authorization:
+  server message: insufficient_scope: authorization failed
+```
+
+同 ns、**同镜像同 tag** 的 `new-api-dev`（SA=`new-api-app`）22 分钟前刚拉成功 ⇒ 先排除"tag 不存在 / 网络不通"。
+
+### 14.1 根因（两层，均为实测）
+
+| 层 | 事实 | 证据 |
+|---|---|---|
+| ① 该负载没指定 SA ⇒ 落到 `default` | 模板 `serviceAccountName` **缺键**（`<no value>`），Pod 解析为 `default`；而 helper **安装时**的 `serviceAccount` 只有 `new-api-app`（台账 §12.5 V8 / §13.2 D4）⇒ `default` 上无凭据 ⇒ 匿名拉私有库 | 旧 Pod `sa=default  pullSecrets=[]`；对照 Pod `sa=new-api-app  pullSecrets=[acr-credential-secret-aggregation]` |
+| ② helper 配置被改，但**凭据挂载晚于 Pod 创建** | 负责人 **17:14:53** 重提 helper 配置（ActionTrail `InstallClusterAddons` / `CS` / `yanxuewei`），`serviceAccount` 变为 **`new-api-app,default`**（并带入控制台占位符 `notifyEmail: xxx@aliyun.com`）。该改动确实让 `default` SA 拿到了 `acr-credential-secret-aggregation` —— **但该 Pod 建于 17:46:30，其 `spec.imagePullSecrets` 已由 ServiceAccount 准入控制器在创建那一刻固化为空数组，而 Pod spec 不可变** ⇒ 这个 Pod 永远读不到凭据 | ① 同 SA、同镜像，**只重建 Pod 即通**（14.3）；② helper 的 Secret 最近一次刷新 `09:54:06Z` > Pod 创建 `09:46:30Z` |
+
+⇒ 一句话：**「SA 上有没有凭据」不是判据，「凭据挂上时 Pod 建没建」才是。** 这是台账 §13 坑 16 的反向版本
+（§13 是"Secret 存在 ≠ Pod 拿得到"，本节是"SA 后补了凭据 ≠ 老 Pod 能拿到"）。
+
+### 14.2 helper 线上配置回读（`cs GET /clusters/<cid>/addon_instances/managed-aliyun-acr-credential-helper`）
+
+```
+AcrInstanceInfo=[{cri-avfqy9xkqi5bj8ee, ap-southeast-6}]  enableRRSA=false  expiringThreshold=15m
+serviceAccount="new-api-app,default"          ← 安装时为 "new-api-app"
+watchNamespace="newapi-dev"   state=active  version=v24.01.29.1-5318af4-aliyun
+notifyEmail="xxx@aliyun.com"                  ← 控制台表单占位符，非真实邮箱
+```
+
+> 注：`GET /clusters/{id}/addon_instances` **不返回 config**；要带组件名走 REST 子路径才有。`DescribeAddonInstance` 等
+> 三个具名 API 在 CLI 3.5.1 里**元数据缺失**（报 `invalid flag --ClusterId`）。
+
+### 14.3 修复与回读（唯一写入 = 一次 rollout restart）
+
+```
+X0  before: pod …-548745dc66-dx7js  sa=default  pullSecrets=[]        ready=/1
+    闸门  : default.imagePullSecrets=[acr-credential-secret-aggregation]（非空才动手）
+X1  deployment.apps/new-api-dev-slave restarted
+X2  after : pod …-c8c976556-7bnrf    sa=default  pullSecrets=[acr-credential-secret-aggregation]   ← 决定性
+X3  rollout_rc=0   deployment "new-api-dev-slave" successfully rolled out
+X4  ready=1/1  updated=1
+    pod …-c8c976556-7bnrf  phase=Running  ready=true  restarts=0
+    imageID=…/newapi-dev/newapi-master@sha256:829a4277fe4791dc341ce759f9a4d5d2008d949f28109b547327872fd510fff0
+    事件：Pulled "…" already present on machine and can be accessed by the pod
+```
+
+**证据边界（与 §13.9 同）**：本次 `already present on machine` ⇒ 仍是**节点缓存命中**，没有做"冷缓存 78 MB 跨区全量下载"的耗时/成功率验证；该未证项仍按 §13.10 挂"下一次发版顺带采集"。
+
+### 14.4 本卡产物
+
+- 新增 `deploy/jakarta_dev/bodies/fix_pull_restart.sh`：**只重建 Pod**，不动任何 spec。
+  闸门：`TARGET` 必填、不得为 `new-api-dev`、且解析出的**实际生效 SA** 必须有免密 Secret（否则提示改走 `--fix-pull-sa`）；
+  现存 Pod 已带凭据则**幂等退出**。默认 `APPLY=0`（只出计划），`APPLY=1` 才真做。
+- `deploy/jakarta_dev/dev_deploy.sh`：新增 `--fix-pull-restart <deploy>` 分发，并纳入 `--render-check`。
+- 取证脚本：`deploy/logs/t_jkt_slave_diag{,2}.sh`、`t_jkt_slave_spec.sh`、`t_jkt_trail{,2}.sh`。
+- 用法：`bash deploy/jakarta_dev/dev_deploy.sh --fix-pull-restart <deploy>`（计划）
+  / `APPLY=1 bash deploy/jakarta_dev/dev_deploy.sh --fix-pull-restart <deploy>`（落地）
+
+### 14.5 遗留（待负责人裁定，均未动手）
+
+1. **`SQL_DSN` 取值与该负载的角色不符**：`NODE_TYPE=slave` 但 `SQL_DSN ← secretKeyRef/new-api-secrets[SQL_DSN_MIGRATE]`。
+   生产 slave（`stable-deployment.yaml`）用的是 **`SQL_DSN`**（DML 账号 `newapi`），migrate 账号只给 master。
+   ⇒ 这台 slave 拿着 DDL 权限跑，与 §12.2/§12.4 的最小化口径冲突。改法一行：把 secretKeyRef 的 `key` 换成 `SQL_DSN`。
+2. **helper 把 `default` 圈进作用域的影响面**：好处是控制台手建负载不再必然拉不到镜像；代价是 `newapi-dev` 内
+   **任何**用 `default` SA 的 Pod（含一次性调试 Pod）都拿到 **EE 实例级**凭据 —— §13.6 已证该 token 覆盖
+   `cri-avfqy9xkqi5bj8ee` **全部命名空间（含 `newapi-prod`）**，且 §12.8-4 的公网 ACL 仍未收口。保留 or 回收由负责人定。
+3. `deployment/new-api-dev-slave` 模板标签是 `app=new-api-dev-slave`，**没有任何 Service 选中它**（ns 内只有
+   `service/new-api-dev`，selector 为 `app=new-api, track=dev`）⇒ 它当前不对外提供入口；若本意是要承接流量，需要补 Service / Ingress。
+

@@ -18,6 +18,10 @@
 #   --smoke       三库冒烟 + 权限链自证（读得到 / 写得进 / 建表必须被拒）
 #   --status      只读快照
 #   --delete      只删本卡产物（集群与 RDS 一律不动）
+#   --diagnose-pull          只读：手建负载拉不到镜像的三要素诊断
+#   --fix-pull-sa   <deploy> 免密方案 A：把负载的 SA 换成 new-api-app
+#   --fix-pull-restart <deploy> 时序坑修复：SA 上已有凭据、但 Pod 建早了 ⇒ 只重建 Pod（APPLY=1 才真做）
+#   --set-image     <deploy> <image>  换镜像（白名单闸门）
 #
 # 顺序（首跑）：--precheck → --apply-base → --secret → --grants → --apply-app → --verify → --smoke
 #
@@ -193,10 +197,10 @@ render_check() {
   secret_payload 1                       # 含 DSN_OPS_* 与 grants.sql，供 grants 的组装检查
   local DOCS SEC; DOCS=$(pack_dir "$WORK/docs"); SEC=$(pack_dir "$WORK/sec")
   local b full
-  for b in apply_base.sh apply_secret.sh apply_grants.sh apply_app.sh verify.sh smoke.sh status.sh delete.sh db_owner_fix.sh db_owner_probe.sh logs.sh isolation.sh isolation_rbac.sh diagnose_pull.sh fix_pull_sa.sh set_image.sh node_image_cache.sh; do
+  for b in apply_base.sh apply_secret.sh apply_grants.sh apply_app.sh verify.sh smoke.sh status.sh delete.sh db_owner_fix.sh db_owner_probe.sh logs.sh isolation.sh isolation_rbac.sh diagnose_pull.sh fix_pull_sa.sh fix_pull_restart.sh set_image.sh node_image_cache.sh; do
     case "$b" in
       apply_base.sh|apply_app.sh) full="$WORK/rc_$b"; { header "DOCS_B64=$DOCS"; cat "$BODIES/$b"; } > "$full" ;;
-      diagnose_pull.sh|fix_pull_sa.sh|set_image.sh|node_image_cache.sh) full="$WORK/rc_$b"; { header; cat "$BODIES/$b"; } > "$full" ;;
+      diagnose_pull.sh|fix_pull_sa.sh|fix_pull_restart.sh|set_image.sh|node_image_cache.sh) full="$WORK/rc_$b"; { header; cat "$BODIES/$b"; } > "$full" ;;
       db_owner_fix.sh|db_owner_probe.sh) full="$WORK/rc_$b"; { header "SEC_B64=$SEC"; cat "$BODIES/$b"; } > "$full" ;;
       *)                           full="$WORK/rc_$b"; { header "SEC_B64=$SEC";  cat "$BODIES/$b"; } > "$full" ;;
     esac
@@ -241,6 +245,17 @@ fix_pull_sa() {
   [ -n "${TGT:-}" ] || die "--fix-pull-sa 必须显式给第二参目标负载名（刻意不设默认，避免误伤）"
   run_body fix_pull_sa.sh fixpull "TARGET=$TGT"
 }
+# 时序坑：SA 上已有凭据、但 Pod 创建早于凭据挂载 ⇒ spec 固化不可变，只能重建 Pod。
+# 默认 APPLY=0（只出计划）；真做要 `APPLY=1 bash dev_deploy.sh --fix-pull-restart <deploy>`。
+fix_pull_restart() {
+  [ -n "${TGT:-}" ] || die "--fix-pull-restart 必须显式给第二参目标负载名（刻意不设默认，避免误伤）"
+  if [ -n "${APPLY:-}" ]; then
+    run_body fix_pull_restart.sh fixpullrestart "TARGET=$TGT" "APPLY=$APPLY"
+  else
+    notice "（未设 APPLY ⇒ 远端默认 APPLY=0，只出计划）"
+    run_body fix_pull_restart.sh fixpullrestart "TARGET=$TGT"
+  fi
+}
 node_cache() { run_body node_image_cache.sh nodecache; }
 set_image() {
   [ -n "${TGT:-}" ] || die "--set-image 需要 <deploy> <image> 两个参数"
@@ -271,11 +286,12 @@ case "$A" in
   --logs)       logs ;;
   --diagnose-pull) diag_pull ;;
   --fix-pull-sa) fix_pull_sa ;;
+  --fix-pull-restart) fix_pull_restart ;;
   --set-image)  set_image ;;
   --node-image-cache) node_cache ;;
   --isolation)  isolation ;;
   --smoke)      smoke ;;
   --status)     status ;;
   --delete)     del_all ;;
-  *) die "未知子命令：$A（--precheck/--render-check/--apply-base/--secret/--grants/--db-owner-probe/--db-owner-fix/--apply-app/--verify/--logs/--diagnose-pull/--fix-pull-sa <deploy>/--set-image <deploy> <image>/--smoke/--isolation/--status/--delete）" ;;
+  *) die "未知子命令：$A（--precheck/--render-check/--apply-base/--secret/--grants/--db-owner-probe/--db-owner-fix/--apply-app/--verify/--logs/--diagnose-pull/--fix-pull-sa <deploy>/--fix-pull-restart <deploy>/--set-image <deploy> <image>/--smoke/--isolation/--status/--delete）" ;;
 esac

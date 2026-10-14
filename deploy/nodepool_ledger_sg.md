@@ -23,7 +23,7 @@
 | 删除保护 | `true` |
 | 密钥对 | `newapi-sg`（导入 fanyan 的 `id_ed25519.pub`） |
 | **节点池** | `np-ab...` = `npab9d46aefe3a4649b074543f36f32599` / `np-sg-ph-standby` |
-| **ESS 伸缩组** | `asg-t4ngzbg7m9u84y59dkxl`（min **2** / max **12** / `MultiAZPolicy=BALANCE` / `AzBalance=true`） |
+| **ESS 伸缩组** | `asg-t4ngzbg7m9u84y59dkxl`（**min 1** / **max 10** / `MultiAZPolicy=BALANCE` / `AzBalance=true`）— ⚠ 2026-10-14 12:59 由 min2/max12 调整（负责人控制台操作，ActionTrail `04:59:20Z` 实证）；**存量 2 台节点未变** |
 | 节点（2 台） | `i-t4nb4aj0ssltm7jjaawuv`（`ecs.g9ae.2xlarge` / 1a / `10.1.19.103`）<br>`i-t4nha3jicbebtvf3tr7v`（`ecs.g8ine.2xlarge` / 1b / `10.1.38.113`） |
 | 节点安全组 | `sg-t4n0qnhy8mxq9g733r67`（`sg-sg-app`，**未**自建托管组） |
 | 系统盘 / 数据盘 | `cloud_essd` 100G PL1 / `cloud_essd` 300G PL1（挂 `/var/lib/containerd`） |

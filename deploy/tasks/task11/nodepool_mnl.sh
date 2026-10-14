@@ -15,7 +15,10 @@
 #     `InvalidDesiredSizeOrCount.NotNull`）。此时节点数完全由 ESS 决定，而实测 ACK
 #     会**先备 6 台再削到 min=4**，削的时候把跨区分布削成了 3/1（违反「6a/6b 各 ≥2」）。
 #     因此：① 先建**手动模式**节点池（desired_size=4）→ ESS 按 BALANCE 均匀给 2/2；
-#           ② 再用 ModifyClusterNodePool 打开自动伸缩 min=4/max=8（容量不变，仅放开上限）。
+#           ② 再用 ModifyClusterNodePool 打开自动伸缩 min=2/max=8（容量不变，仅放开上限）。
+#      ⚠ 2026-10-14 13:00 线上 min 已由 4 下调为 2（负责人控制台操作，ActionTrail 实证
+#        `05:00:02Z`），故下方 MIN_NODES 默认值同步为 2；改动只影响**未来扩容下限**，
+#        存量 4 台节点不受影响。
 #
 #   ⚠️ 三处必须显式指定，否则静默跑偏（与任务 10 漏 resource_group_id 同构）：
 #      1. nodepool_info.resource_group_id —— 节点池弹出的 ECS 归属资源组
@@ -55,7 +58,7 @@ KEY_PAIR="${KEY_PAIR:-newapi-mnl}"                            # 实测已存在
 INSTANCE_TYPES="${INSTANCE_TYPES:-ecs.g9i.2xlarge,ecs.g8ine.2xlarge,ecs.g9ae.2xlarge}"
 IMAGE_TYPE="${IMAGE_TYPE:-AliyunLinux3ContainerOptimized}"
 DESIRED="${DESIRED:-4}"          # 固定节点数（手动模式）
-MIN_NODES="${MIN_NODES:-4}"      # auto_scaling.min_instances
+MIN_NODES="${MIN_NODES:-2}"      # auto_scaling.min_instances（⚠ 2026-10-14 13:00 线上由 4 下调为 2，此处同步，防重跑 --enable-autoscaling 覆盖线上）
 MAX_NODES="${MAX_NODES:-8}"      # auto_scaling.max_instances
 SITE_TAG="${SITE_TAG:-ph-mnl}"
 MANAGED="${MANAGED:-0}"          # 1=开启节点池托管（需 ack-node-problem-detector addon）
