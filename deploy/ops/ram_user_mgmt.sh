@@ -17,6 +17,15 @@
 set -uo pipefail
 
 REGION="${RAM_REGION:-ap-southeast-1}"
+# 账号站点决定 RAM 用户的控制台登录地址：国际站 alibabacloud.com（默认）/ 中国站 aliyun.com
+SITE="${RAM_SITE:-}"
+if [ -z "$SITE" ]; then
+  case "$REGION" in cn-*) SITE=cn ;; *) SITE=intl ;; esac
+fi
+case "$SITE" in
+  cn) LOGIN_URL="https://signin.aliyun.com/login.htm" ;;
+  *)  SITE=intl; LOGIN_URL="https://signin.alibabacloud.com/login.htm" ;;
+esac
 ALIYUN="${ALIYUN_BIN:-aliyun}"
 PY="${PY_BIN:-/usr/bin/python3}"
 ASSUME_YES=0
@@ -255,9 +264,9 @@ for k in ks: print('    %s  %s  %s' % (k.get('AccessKeyId'), k.get('Status'), k.
 
 # ── 新增 ──────────────────────────────────────────────────────────────
 add_user() {
-  local name="" disp="" want_ak=0 want_console=0 grp_csv="" email=""
+  local name="" disp="" want_ak=0 want_console=0 grp_csv="" email="" password=""
   name="${1:-}"; shift || true
-  [ -n "$name" ] || die "用法: deploy/ops/ram_user_mgmt.sh add-user <登录名称> [显示名称] [--ak] [--console] [--group G1,G2] [--email 邮箱]"
+  [ -n "$name" ] || die "用法: deploy/ops/ram_user_mgmt.sh add-user <登录名称> [显示名称] [--ak] [--console] [--group G1,G2] [--email 邮箱] [--password 初始密码]"
   if [ $# -gt 0 ] && [ "${1#--}" = "$1" ]; then disp="$1"; shift; fi
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -265,6 +274,7 @@ add_user() {
       --console) want_console=1 ;;
       --group) shift; grp_csv="${1:-}" ;;
       --email) shift; email="${1:-}" ;;
+      --password) shift; password="${1:-}" ;;
       *) fail "未知参数：$1"; return 1 ;;
     esac
     shift
@@ -272,6 +282,21 @@ add_user() {
   [ -n "$disp" ] || disp="$name"
   [ "$want_ak" = 1 ] && [ "$want_console" = 1 ] && \
     info "提示：同时开控制台+AK 会产生「人被 MFA 保护、AK 绕过 MFA」的缺口，建议拆成两个用户"
+  [ -n "$password" ] && [ "$want_console" = 0 ] && \
+    info "提示：未加 --console，--password 不会生效"
+
+  # 自定义初始密码：按阿里云密码策略先本地挡一道（8-32 位，四类字符至少占三类）
+  if [ -n "$password" ]; then
+    local cls=0
+    case "$password" in *[A-Z]*)           cls=$((cls+1));; esac
+    case "$password" in *[a-z]*)           cls=$((cls+1));; esac
+    case "$password" in *[0-9]*)           cls=$((cls+1));; esac
+    case "$password" in *[!A-Za-z0-9]*)    cls=$((cls+1));; esac
+    if [ "${#password}" -lt 8 ] || [ "${#password}" -gt 32 ]; then
+      fail "自定义密码需 8-32 位（当前 ${#password} 位）"; return 1
+    fi
+    [ "$cls" -ge 3 ] || { fail "自定义密码需含大写/小写/数字/特殊字符中的至少三类"; return 1; }
+  fi
 
   # --group 支持逗号分隔多个组：dev_group,ops-prod_group（顺带容错空格与空项）
   local groups=() g
@@ -284,7 +309,7 @@ add_user() {
 
   head1 "新增用户：$name"
   say "  显示名称：$disp    控制台：$([ $want_console = 1 ] && echo 是 || echo 否)    AK：$([ $want_ak = 1 ] && echo 是 || echo 否)"
-  say "  加入组：${grp_csv:-（无）}    安全邮箱：${email:-（无）}"
+  say "  加入组：${grp_csv:-（无）}    安全邮箱：${email:-（无）}    初始密码：$([ -n "$password" ] && echo 自定义 || echo 随机生成)"
   confirm "即将创建用户" || return 1
 
   local out
@@ -305,18 +330,27 @@ add_user() {
   fi
 
   if [ "$want_console" = 1 ]; then
-    local pw; pw=$(gen_pw)
+    local pw="$password"
+    [ -n "$pw" ] || pw=$(gen_pw)
     out=$(ram CreateLoginProfile --UserName "$name" --Password "$pw" \
           --PasswordResetRequired true --MFABindRequired true)
     if is_ok "$out"; then
       ok "已开启控制台登录（强制首次改密 + 强制绑 MFA）"
+      # 控制台登录名是 UPN：<user>@<账号别名>.onaliyun.com
+      # （GetUser/ListUsers 不返回该字段，只能按账号别名拼；取不到别名时退回裸用户名）
+      local upn="$name" alias
+      alias=$(ram GetAccountAlias | jq_get "AccountAlias")
+      [ -n "$alias" ] && upn="$name@$alias.onaliyun.com"
+      # 只用首尾分割线，不打竖边框（值长短不一，竖线反而难对齐）
       say ""
-      say "  ┌────────────────────────────────────────────────────┐"
-      printf '  │ 登录名称 : %-38s│\n' "$name"
-      printf '  │ 初始密码 : %-38s│\n' "$pw"
-      say "  │ 登录地址 : https://signin.aliyun.com/login.htm     │"
-      say "  └────────────────────────────────────────────────────┘"
+      say "  ───────────────────────────────────────────────────────"
+      say "  登录名称 : $upn"
+      say "  初始密码 : $pw"
+      say "  登录地址 : $LOGIN_URL"
+      [ -n "$email" ] && say "  安全邮箱 : $email"
+      say "  ───────────────────────────────────────────────────────"
       say "  ⚠ 请通过安全渠道交给本人；首次登录会强制改密与绑定 MFA"
+      [ "$SITE" = intl ] && info "登录地址按国际站显示；中国站（aliyun.com）账号请改用 RAM_SITE=cn"
     else
       fail "控制台登录创建失败：$(err_msg "$out")"
     fi
@@ -327,10 +361,10 @@ add_user() {
     if is_ok "$out"; then
       ok "已创建 AccessKey"
       say ""
-      say "  ┌────────────────────────────────────────────────────┐"
-      printf '  │ AccessKeyId     : %-33s│\n' "$(printf '%s' "$out" | jq_get "AccessKey.AccessKeyId")"
-      printf '  │ AccessKeySecret : %-33s│\n' "$(printf '%s' "$out" | jq_get "AccessKey.AccessKeySecret")"
-      say "  └────────────────────────────────────────────────────┘"
+      say "  ───────────────────────────────────────────────────────"
+      say "  AccessKeyId     : $(printf '%s' "$out" | jq_get "AccessKey.AccessKeyId")"
+      say "  AccessKeySecret : $(printf '%s' "$out" | jq_get "AccessKey.AccessKeySecret")"
+      say "  ───────────────────────────────────────────────────────"
       say "  ⚠ Secret 仅此一次显示，请立即保存；不要提交到 git"
     else
       fail "AK 创建失败：$(err_msg "$out")"
@@ -503,18 +537,17 @@ del_user() {
   local out; out=$(ram GetUser --UserName "$u")
   is_ok "$out" || { skip "用户不存在：$u"; return 0; }
 
-  # 前置检查 1：用户组
+  # 前置检查 1：用户组（删除前自动全部移出，避免悬空引用）
   local gs
   gs=$(ram ListGroupsForUser --UserName "$u" | "$PY" -c "
 import sys,json
 d=json.load(sys.stdin)
 print(' '.join(x['GroupName'] for x in ((d.get('Groups') or {}).get('Group') or [])))" 2>/dev/null)
   if [ -n "$gs" ]; then
-    fail "该用户仍属于：$gs"
-    say "  请先逐个移出：bash $0 leave <group> $u"
-    return 1
+    info "仍属于 ${gs// /, }，删除前将自动移出"
+  else
+    ok "不属于任何用户组"
   fi
-  ok "不属于任何用户组"
 
   # 前置检查 2：AK
   local aks
@@ -536,7 +569,15 @@ print(' '.join(k['AccessKeyId'] for k in ((d.get('AccessKeys') or {}).get('Acces
 
   say ""
   printf '  \033[31m⚠ 删除不可恢复：登录密码、AK、MFA 全部失效，依赖它的服务会中断。\033[0m\n'
+  [ -n "$gs" ] && say "  将先移出用户组：${gs// /, }"
   confirm "确认删除 $u" || return 1
+
+  local g
+  for g in $gs; do
+    out=$(ram RemoveUserFromGroup --GroupName "$g" --UserName "$u")
+    if is_ok "$out"; then ok "已移出用户组 $g"
+    else fail "移出用户组 $g 失败：$(err_msg "$out")"; return 1; fi
+  done
 
   if [ "$haslp" = 1 ]; then
     out=$(ram DeleteLoginProfile --UserName "$u")
@@ -595,10 +636,12 @@ ram_user_mgmt.sh —— 阿里云 RAM 用户/组/策略 增删改查
   who <user>                     查单个用户全貌（组/策略/AK/MFA/登录）
 
 新增
-  add-user <名称> [显示名] [--ak] [--console] [--group G1,G2] [--email 邮箱]
+  add-user <名称> [显示名] [--ak] [--console] [--group G1,G2] [--email 邮箱] [--password 初始密码]
                                  建用户；--ak 建 AK；--console 开控制台登录并打印初始密码
                                  --group 可用逗号分隔一次性加入多个组
                                  --email 设置安全邮箱（仅中国站 aliyun.com 支持；用户已存在时补设）
+                                 --password 自定义初始密码；不给则随机生成
+                                 （要求 8-32 位，且大写/小写/数字/特殊字符至少占三类，需与 --console 同用）
                                  例：add-user yxw yxw --console --group dev_group,ops-prod_group --email yxw@5108890064395960.onaliyun.com
   add-group <组名> [备注]        建用户组
   attach <组> <策略> [Custom|System]   给组绑策略
@@ -614,7 +657,7 @@ ram_user_mgmt.sh —— 阿里云 RAM 用户/组/策略 增删改查
   detach <组> <策略> [Custom|System]    解绑组策略
 
 删除
-  del-user <用户>                删用户（先检查组与 AK，需 yes 确认）
+  del-user <用户>                删用户（自动移出所有用户组；仍要求先清空 AK；需 yes 确认）
   del-group <组>                 删用户组（先检查成员与策略）
 
 全局
@@ -623,12 +666,15 @@ ram_user_mgmt.sh —— 阿里云 RAM 用户/组/策略 增删改查
 
 环境
   RAM_REGION   默认 ap-southeast-1     ALIYUN_BIN  默认 aliyun
+  RAM_SITE     控制台登录地址站点：intl = 国际站（signin.alibabacloud.com，默认）
+                                   cn   = 中国站（signin.aliyun.com）
+               不设置时按 RAM_REGION 推断：cn-* 视为中国站，其余为国际站
   需先配置 AK/SK：aliyun configure --profile default --mode AK
 
 铁律（本脚本刻意遵守）
   1. 策略只挂用户组，不挂用户 —— 因此**没有** attach-user 命令
   2. 人用控制台 + MFA，程序用 AK，两者分开建用户
-  3. 删除前必须清空组归属与 AK
+  3. 删用户会自动移出所有用户组（不留悬空引用），但 AK 必须先手动清空/禁用
 EOF
 }
 
