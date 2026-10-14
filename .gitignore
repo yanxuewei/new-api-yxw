@@ -27,6 +27,7 @@ tiktoken_cache
 .claude
 .cursor
 
+
 electron/node_modules
 electron/dist
 /data/
@@ -49,3 +50,5 @@ go.work.sum
 .obsidian/themes
 
 .obsidian/workspace.json
+
+**/__pycache__

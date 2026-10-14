@@ -1017,3 +1017,230 @@ aliyun actiontrail LookupEvents --LookupAttribute.1.Key EventName --LookupAttrib
 > ⇒ 另一处口径：`deploy/jakarta_dev_ledger.md` 声明「只记录**实测回读值**」，而本表 mnl 行的 `InUse` 是**硬编码** ⇒ 与「实测回读」声明不符，已知瑕疵（不影响当前结论：实测状态确为 `InUse`）。
 
 **落点**：指南 6 处（§0.4 任务表行 150 · §0.3 Day3 排期块 · Day3 泳道位移声明 · 任务 56 卡标题+前置 · 泳道 A 出口清单 · §0.6 G0 欠项段）+ 任务 52 卡前置解耦（不再以「任务 56 完成」为前置）；xlsx「落地计划」行 59 `AC`=⏸挂起、`Y`=裁定说明；`deploy/eip_ledger.md` 待办项标注。
+
+## ★ §7.10 成本结构 —— 线上实测口径（2026-10-14 全面重算）
+
+**触发**：fanyan 要求按线上实际使用量 + 阿里云国际站官方价，精确更新 `impl_deploy.md §7.10`。
+
+**真源**：`deploy/ops/gen_cost_table.py`（**已重写为实测口径**；`--apply` 回写 `impl_deploy.md` + `impl_tech.md` 的 §7.10，自动备份到 `.workbuddy/backup/cost_<ts>_*.md`）。⇒ **改成本先改脚本，勿手改 md**（旧「规划口径」模型可从 git 取回）。
+
+**取证三板斧**：
+1. `aliyun ecs|rds DescribePrice`（实例类，含磁盘参数；⚠ ECS 必须给 `--SystemDisk.Category cloud_essd`，否则 `InvalidSystemDiskCategory`；⚠ `rds DescribePrice` **无 `--Category`**，用 `--InstanceUsedType/--PayType/--TimeType/--UsedTime`；⚠ `r-kvstore DescribePrice` 传 `--NodeType` 报 `InvalidParameter`）
+2. `aliyun bssopenapi DescribeInstanceBill --BillingCycle YYYY-MM --Granularity MONTHLY --MaxResults 300 --region ap-southeast-1` ⇒ **按实例 + `ServicePeriod` 反推日率，最准**
+3. `aliyun bssopenapi QueryBillOverview --BillingCycle YYYY-MM`（按产品汇总）
+⚠ `DescribeSplitItemBill` 本账号**返 0 行**（不可用）。
+
+**结论表（USD/月，730 h/月；日率项 ×30.4167）**：
+
+| 站 | 小计 | 主要构成 |
+|---|---|---|
+| 马尼拉 ap-southeast-6 | **3,205.48** | ECS 4×323.04 + 盘 4×55.45 · CK **1,082.44（最大单项）** · RDS 168.26 · ACR 157 · Tair 64.63 · ACK 65.70 · CLB 13.05 · ALB 13.29 · NAT 26.77 · EIP 6×3.65 · ops 48.25 · SLS 11.41 · KMS 10.52 · GTM 6.72 · CMS 1.55 · OSS 0.03 |
+| 新加坡 ap-southeast-1 | **1,095.71** | ECS g8ine 392.97 + g9ae 363.04 + 盘 2×55.45 · Tair 88.02 · ACK 65.70 · CLB 13.05 · ALB 13.29 · NAT 26.80 · EIP 6×3.65 |
+| 雅加达 dev ap-southeast-5 | **327.30** | ECS g9ae.large+g9i.large 173.05 · RDS dev 110.11 · NAT 26.71 · CLB 13.05 · EIP 4.38 |
+| **生产两站** | **4,301.19** | 日烧钱 ≈ **152.17 USD/天** |
+| **含 jkt dev** | **4,628.49** | — |
+
+**实测单价表**：
+
+| 资源 | 单价 | 来源 |
+|---|---|---|
+| ECS `g9ae.2xlarge`+100G（mnl） | **$0.44252/h** → $323.04/台·月 | DescribePrice |
+| ECS `g9ae.2xlarge` / `g8ine.2xlarge`+100G（sg） | **$0.49732 / $0.53832 /h** | DescribePrice |
+| ECS `g9ae.large` / `g9i.large`（jkt） | $0.124328 / $0.112728 /h | DescribePrice |
+| ESSD PL1 300G 数据盘 | **$0.07596/h** → $55.45/月（两地同价） | DescribePrice |
+| `ecs.c9i.large`+40G（包月） | $48.25/月 | DescribePrice |
+| RDS `pg.n4.2c.2m` 2C8G HA + 100G ESSD PL1 | **$168.26/月** | DescribePrice = 09 月实付 |
+| Tair 企业版主备（mnl） | $64.63/月 | 09 月实付 |
+| Tair 集群版（sg） | $88.02/月 | 10 月实付 |
+| ACR 企业版基础版 | **$157.00/月** | 09 月实付（旧记 $113 作废） |
+| ACK Pro 控制面 | $0.09/集群·h（$2.16/天） | 账单反推 |
+| ALB 标准版（实例+LCU） | $0.437/天 | 账单反推 |
+| NAT 增强型（实例+CU） | $0.880 ~ 0.881/天 | 账单反推 |
+| EIP 保有费 | $0.120/天·IP（≈$0.005/h） | 账单反推 |
+| ACK 内网 CLB | $0.429/天 | 账单反推 |
+| ClickHouse 企业版 | **$35.587/天** | 账单反推 |
+| KMS 3.0 / GTM 3.0 | $0.346 / $0.221 /天 | 账单反推 |
+
+**与 09-27 规划口径差异（9,865.36 → 4,301.19，↓56.4%）**：① **WAF 未开通 −2,800**；② **CK 2 站包月 → 1 站按量 −2,374**；③ **RDS 参照值虚高 17× −2,777**；④ 流量类（NAT CU / EIP 出口 / DCDN）+ 拨测 −约 700；⑤ GTM 旗舰版订阅 → 3.0 按量 −133。**升幅**：ECS 包月 → 按量 +363、新增 ops 节点/内网 CLB/KMS +98。
+**未开通**（账单 + API 双证）：WAF 3.0（`waf-openapi DescribeInstance` 空）、DCDN（`DcdnServiceNotFound`）、付费 DNS（`DescribeDnsProductInstances` 0）、ARMS 应用监控。
+
+**账单实付**：2026-09 全账期 **588.72**（09-24 起，含搭建期临时实例约 $48）· 2026-10（10-01~10-14）**2,131.31**（`QueryBillOverview` 口径 2,137.82）。**一次性**：DV 通配符 `*.likha.hk` **$207**（至 2027-04-28）· 域名注册 $18。
+
+**⚠ 三个必须跟进的点**：
+1. **余额 380.33 USD**（10-12 为 699）⇒ 2 天 ≈$319、**≈160/天**，**仅够约 2.4 天** ⇒ 立即充值 / 设预算告警（清单 #39）。
+2. **$997 证书订单悬案**：`cas_intl-sg-9lu4zmk9e00m`（`ItemName=新购`）在实例账单中存在，但 `cas ListCertificates` **无对应证书** ⇒ 疑未支付/已取消/已退款，**须控制台核实**，勿计入预算。
+3. **流量口径缺口**：EIP 行**只含保有费**；2026-10 账单「云数据传输 CDT」与 EIP 流量项均 ≈$0 ⇒ **当前无真实业务出口流量**（未对上游发量）。**上量后必须重算**：$0.081/GB（EIP）+ $0.043/CU（NAT）⇒ **每 1 TB/月 +$127.02**。
+
+**清点副产物（与既有记忆的修正）**：① **sg 有 Tair** `r-gs5ltv3m4i3655besh`（修正「Tair SG 0 实例」）；② **第 3 个 ACK 集群 `ack-newapi-jkt-dev`（ap-southeast-5）**，2 节点，**账单未见计费**（疑首集群免费额度，待确认）＝原「staging/perf」；③ **sg 两节点规格不一致**（`g8ine.2xlarge`+`g9ae.2xlarge`，多规格池 `np-sg-ph-standby`）；④ **每集群自动 1 个内网 CLB**；⑤ CK 实为企业版/按量/单 AZ/2 server 节点/OSS；⑥ RDS 实为 2C8G/100G（非常 16C64G）；⑦ 拨测仅 1 任务、**间隔 5 min**、PC 组（实测 $1.55/月 vs 规划 $145.15）。
+
+## ★ §7.10 成本结构「更新 2」—— 四项指示落地（2026-10-14 11:0x）
+
+**背景**：fanyan 就 §7.10 下 4 条指示 ⇒ 全部落进真源 `deploy/ops/gen_cost_table.py` 后 `--apply`。
+
+| # | 指示 | 落地 |
+|---|---|---|
+| ① | 准备充值中 | 余额行保留 380.33 实测值 + 追加「**已安排充值（受理中）**」⇒ 「仅够 2.4 天」告警**解除**；告警阈值建议改「余额 < 1,000 USD / 日耗 > 250 USD」 |
+| ② | 已退 OV 换 DV | **997 悬案闭合**：账单实证 OV 订单 `cas_intl-sg-9lu4zmk9e00m` = 新购 +997.00 / **退款 −997.00**（净 0）；DV `cas_intl-sg-4rf4zyk0u00s` = 207.00 + 5.07 = **212.07** ⇒ 证书一次性**净支出 212.07**，较 OV 省 **784.93** |
+| ③ | 按上量后 100 MB/天估算流量 | 7.10.1 新增「出口流量（上量后估算 100 MB/天）」行 = **$0.37/月**；7.10.8 新增**流量单价表 + 流量成本标度表**；7.10.2 注备站 $0 |
+| ④ | 7.10.1/7.10.2/7.10.3 按 USD/月 降序 | `table()` 加 `sorted(rows, key=lambda x: -x[5])`（0 值/免费行自然落末） |
+
+**★ 流量类官方单价（阿里云国际站官网公开定价页，2026-10-14 查证）**：
+
+| 项 | 单价 | 备注 |
+|---|---|---|
+| EIP **出方向**流量（BGP 多线） | **$0.081/GB** | **新加坡 / 菲律宾马尼拉同价**；雅加达 $0.090、东京 $0.087、吉隆坡 $0.077；中国内地 $0.123、香港 $0.153；BGP 精品线路马尼拉 $0.452 |
+| EIP 保有费（公网 IP 配置费） | **$0.006/h·IP = $0.144/天** | 官方页；**本表仍用账单实数 $0.120/天·IP**（官方注「以购买页为准」）。⚠ 绑 ECS（账号配额 ≤2000）免保有费；绑 NAT/SLB 照收 |
+| NAT 增强型 **CU** | **$0.043/CU**（跨 AZ）· **$0.034**（单 AZ，0~100 万 CU） | **1 CU = 处理流量 1 GB**（入 + 出**均计**）；**2025-09-26 起 CU 只按处理流量**，此前取 `max(新建连接/1万, 并发/2万, 流量/1GB)` |
+| NAT 实例费 | 跨 AZ 0.3 CNY/h · 单 AZ 0.15 CNY/h | 与 CU 分开计，两者合计即账单观测的 $0.88/天 |
+| ⇒ **生产合计** | **$0.124/GB** | EIP $0.081 + NAT CU $0.043 |
+
+**流量成本标度表**（mnl/sg 口径；折月 30.4167 天，1 GB = 1,024 MB）：
+
+| 出口流量 | 折月 | 成本/月 |
+|---|---|---|
+| **100 MB/天（本次口径）** | 2.97 GB | **$0.37** |
+| 1 GB/天 | 30.42 GB | $3.77 |
+| 10 GB/天 | 304.17 GB | $37.71 |
+| 100 GB/天 | 3.04 TB | $377.14 |
+| 1 TB/月 | 1,024 GB | $127.02 |
+
+⇒ 日均 ≤10 GB ⇒ ≤$38/月，**不改变成本结构**（仍由 CK + ECS 主导）；破 $100/月需日均 >27 GB（届时考虑 NAT 资源包，按量→包约省 20–30%）。
+
+**新总数**：mnl **3,205.85** · sg **1,095.71** · **生产两站 4,301.55** · 含 jkt dev **4,628.85** USD/月（日烧 ≈**152.18 USD/天**）。
+
+**校验**：段落边界 7.9→7.10→八 完好；三表降序实测通过；两文档 §7.10 **同源（各 14,665 B、逐字节相同）**。备份 `.workbuddy/backup/cost_20261014_105915_*.md`。
+
+
+---
+
+## ★ ECS 数据盘 300G → 100G 降配论证（2026-10-14 · 只读取证，未执行）
+
+**问题**：把 ECS 数据盘由 300G 降到 100G 能省多少？
+
+### 一、单价（`aliyun ecs DescribePrice`，2026-10-14 实测，ESSD PL1）
+
+| 容量 | USD/h | USD/台·月（×730h） |
+| --- | --- | --- |
+| 300G | 0.07596 | **55.45** |
+| **100G** | **0.02532** | **18.48** |
+| 200G | 0.05064 | 36.97 |
+| 50G | 0.01266 | 9.24 |
+
+⇒ **线性计价 $0.0002532/GiB·h，两地（apse-6 / apse-1）同价**；100G = 300G 的 **1/3**。
+⚠ **取价坑**：`--ResourceType disk` 必须同时给 `--RegionId` + `--ZoneId`，否则 trace 全 None；返回结构是 `PriceInfo.Price.TradePrice`（**不是** `PriceInfo.TradePrice`，后者是 instance 类型的旧路径）；带 `.1.` 的写法 `--DataDisk.1.Size` 可用，但 `--SystemDisk.1.Category` **非法**（系统盘无索引，须 `--SystemDisk.Category`）。
+
+### 二、降配空间（线上实测 imagefs 占用，kubelet summary API）
+
+取数方式（**只读、零副作用**）：`kubectl get --raw /api/v1/nodes/<node>/proxy/stats/summary`（经 `ack_remote.sh` 下发）。
+
+| 站 | 节点 | 实例 | AZ | imageFs 容量 | imageFs 已用 | 使用率 |
+| --- | --- | --- | --- | --- | --- | --- |
+| mnl | .22.194 | g9ae.2xlarge | 6a | 289.5 GiB | 4.6 GiB | 1.6% |
+| mnl | .22.195 | g9ae.2xlarge | 6a | 289.5 GiB | 3.5 GiB | 1.2% |
+| mnl | .43.200 | g9ae.2xlarge | 6b | 289.5 GiB | 4.1 GiB | 1.4% |
+| mnl | .43.201 | g9ae.2xlarge | 6b | 289.5 GiB | 4.0 GiB | 1.4% |
+| sg | .19.103 | g9ae.2xlarge | 1a | 289.5 GiB | 4.8 GiB | 1.7% |
+| sg | .38.113 | g8ine.2xlarge | 1b | 289.5 GiB | 4.4 GiB | 1.5% |
+
+⇒ **两地 6 台全部仅用 3.5–4.8 GiB（1.2–1.7%）**。降到 100G（≈96.6 GiB）后：使用率 ≈5%，扣 kubelet image GC 阈值 85%（≈82 GiB）仍有 **17 倍余量**。
+（对照：`rootfs` 用 5.0–7.9 GiB；数据盘同时承载 containerd data root 与 `/var/lib/kubelet`。）
+
+### 三、节省额
+
+| 口径 | 原 | 降后 | 省 |
+| --- | --- | --- | --- |
+| mnl ×4 | 221.80 | 73.93 | **147.87/月** |
+| sg ×2 | 110.90 | 36.97 | **73.93/月** |
+| **两地合计** | **332.70** | **110.90** | **221.80/月**（年化 **2,661.6**，占生产两站 **5.16%**） |
+
+### 四、执行约束（重要）
+
+1. **云盘不支持原地缩容**（阿里云只支持扩容）⇒ 不能改盘，只能**替换节点**。
+2. ACK 节点池 `scaling_group.data_disks[].size` 修改**只对新建节点生效** ⇒ 必须**逐台轮转**：改节点池配置 → `cordon` → `drain` → 删除节点 → 节点池自动补一台 100G 盘新节点 → 验证 → 下一台。
+3. ⚠ **须确认新节点仍把数据盘挂给 containerd**：现网 `scaling_group.disk_init = []`（空），说明依赖 **ACK 默认挂载**（实测生效：imageFs 容量 289.5 GiB 证明数据盘已是 containerd data root）。任务 11 报告曾记录「数据盘不给 containerd → 系统盘写满 → `disk-pressure` 驱逐雪崩」⇒ **改前须灰度 1 台验证 `imageFs.capacity` 仍 ≈96.6 GiB**，否则立即回滚节点池配置。
+4. 拓扑：mnl 4 台跨 2 AZ（6a×2 / 6b×2）、sg 2 台跨 2 AZ（1a×1 / 1b×1）⇒ sg **每 AZ 仅 1 台**，轮转时该 AZ 短暂无节点；须按 PDB + 跨 AZ 分布逐台进行，勿一次 drain 同 AZ 两台。
+5. 节点池为**多规格池**（`g9i/g8ine/g9ae`），修改 `data_disks.size` 不影响实例规格选择逻辑。
+
+### 五、其他档位备选（若担心余量）
+
+| 目标容量 | 每台月费 | 6 台合计 | 相对 300G 省 |
+| --- | --- | --- | --- |
+| 100G | 18.48 | 110.90 | **221.80/月** |
+| 200G | 36.97 | 221.80 | 110.90/月 |
+| 50G | 9.24 | 55.45 | 277.35/月（不推荐：余量降至 ~8 倍且 GC 更频） |
+
+⇒ **100G 是最优档**：既省 2/3，又留 17 倍余量。
+
+**取证脚本**：`deploy/logs/t_disk_price3.sh`（取价）· `t_disk_nodepool.sh`（节点池配置）· `t_disk_stats.sh`（imagefs 占用，经 `ack_remote.sh <site>`）。
+**落点**：`gen_cost_table.py` 新增常量 `DISK100_H` + 7.10.8 降本表**首行**；已 `--apply` 回写两份文档（§7.10 同源 15,040 B）。
+**状态**：仅论证与登记，**未执行任何生产变更**。
+
+
+---
+
+## ★ ACK 数据盘挂载机制与 disk_init 显式化评估（2026-10-14 · 只读，未变更）
+
+### 一、现状：挂盘是 ACK 内置行为，不是我们的配置
+
+**问题起点**：节点池返回里 `data_disks[0].disk_name = null`、`scaling_group` 无 `disk_init` 字段（**API 从不返回该字段**，此前记作「`disk_init=[]`」不准确），`kubernetes_config.user_data` 是**nofile 调优脚本**（任务 11 Step 3，Linux 句柄数），与挂盘无关。那么数据盘是谁挂的？
+
+**答案（实测证据）**：`/var/log/ack-deploy.log` 中 `[step=diskinit]`（代码 `auto_disk.go`）：
+
+```
+[step=diskinit] running command: udevadm info --query=symlink --name=/dev/nvme1n1
+[step=diskinit] running command: sed -i '\|/dev/disk/by-uuid/<uuid>    /var/lib/container     ext4    defaults        0 0|d' /etc/fstab
+[step=diskinit] running command: mount /dev/nvme1n1 /var/lib/container/
+[step=diskinit] running command: mount -a
+```
+
+**落盘结果**（`/etc/fstab`，节点实测）：
+
+| 行 | 内容 |
+| --- | --- |
+| 1 | `UUID=b5301f19-…  /var/lib/container  ext4  defaults  0 0`（数据盘本体，nvme1n1 = 300G ESSD） |
+| 2 | `/var/lib/container/kubelet    /var/lib/kubelet    none bind,slave,shared` |
+| 3 | `/var/lib/container/containerd /var/lib/containerd none bind` |
+| 4 | `/var/lib/container/log        /var/log/pods       none bind` |
+
+**⇒ 结论**：ACK 的 `diskinit` 步骤每次节点初始化都会**自动探测未使用数据盘 → ext4 格式化 → 挂 `/var/lib/container` → bind 三目录 → 写 fstab（sed 先删同项，幂等）**。6 台节点（mnl 4 + sg 2）全部如此，`ack-deploy-trace.log` 里 `fdisk:… / fdiskDone:…` 为固定步骤。
+**⚠ 重要修正**：数据盘**同时承载 `/var/log/pods`（容器本地日志）**，不只是 containerd ⇒ 容量评估应看**整盘 used**（实测 **7.9 GiB / 290 GiB = 2.7%**），而非仅 imageFs 的 4.4–4.8 GiB。降 100G 后使用率 ≈ 8.2%（仍 ≈12 倍余量）。
+
+### 二、若要显式化：`disk_init` 的精确契约（OpenAPI meta，2026-10-14）
+
+`ModifyClusterNodePool` / `CreateClusterNodePool` 的 `scaling_group` **含 44 个字段，其中确有 `disk_init`**（type=array，非必填）。
+
+`components.schemas.DiskInit`：
+
+| 字段 | 类型 | 必填 | 说明（原文） |
+| --- | --- | --- | --- |
+| `disk_name` | string | **是** | 唯一标识该节点池中的一块盘。当 `local_disk=false` 时，**必须与 `scaling_group.data_disks` 中的某一个 `disk_name` 匹配** |
+| `mkfs_type` | string | — | 自动格式化文件系统的类型。**留空表示不格式化** |
+| `mount_target` | string | — | 挂载目录，**留空则不挂载** |
+| `mount_for_runtime` | boolean | — | **容器运行时数据存储到该盘** |
+| `local_disk` | boolean | — | 本地盘配置（与本场景无关） |
+
+⚠ `data_disks[].disk_name` 现状为 **`null`** ⇒ **要配 `disk_init` 必须同时给数据盘命名**（如 `data-1`），否则 disk_name 无法匹配。
+⚠ `mount_target` 留空是否等于"不挂载"、与 `mount_for_runtime=true` 如何组合，**官方未文档化**（meta 与帮助页均无说明）。
+
+### 三、修改的生效范围（官方原文）
+
+> 节点池编辑过程中，**不会影响节点池内已有节点和业务的运行**。节点池配置更新后，后续节点池中新增的节点都将默认使用该配置。
+> **重要**：节点池配置更新后，除特殊说明场景外（例如同步更新存量节点的 ECS 标签、同步更新存量节点的污点及节点标签），**不会修改节点池已有节点的配置，仅作用于新增节点**。
+
+⇒ **改 `disk_init`/`data_disks` 不会重建存量 6 台节点**（要滚动 kubelet 的是另一个接口 `ModifyNodePoolNodeConfig`，本场景不使用）。
+
+### 四、评估结论：**不必补（收益为负）** ⇒ 2026-10-14 裁定「保持现状」
+
+| 维度 | 判断 |
+| --- | --- |
+| 现状是否缺陷 | **否**。ACK 内置 `diskinit` 是产品基线行为，6 台节点已按同一套逻辑正常挂载 |
+| 补的收益 | 仅"把隐式默认显式化"，防的是 ACK 改变默认行为的理论风险 —— 而 `ack-deploy` 的 diskinit 是 ACK 核心引导路径，变更会先影响全量客户 |
+| 补的成本/风险 | ① `disk_init` 一旦存在，ACK 走**显式路径**（覆盖默认）；② `disk_name` 必填 ⇒ 必须同时改 `data_disks`；③ `mount_target`/`mount_for_runtime` 组合语义**无文档**，写错 ⇒ 新节点 containerd 落 100G 系统盘 ⇒ **disk-pressure 驱逐雪崩**（即任务 11 坑 3）；④ `scaling_group` 传参是增量还是全量覆盖**未文档化**（最坏情况清空其他字段，影响下次扩容，但不影响存量节点） |
+
+**⇒ 结论（2026-10-14 负责人裁定 · 方案 A「保持现状」）**：**不补 `disk_init`，线上零变更**；本机制已写死进 **IaC 真源 `deploy/tasks/task11/nodepool_mnl.sh` 文件头**（+ dry-run / 建池两处分支注释；task24 薄封装指向同一处，防口径漂移），成本表 7.10.8 同步标注「挂盘由 ACK 内置 `[step=diskinit]` 完成，**无需改 `disk_init`**」⇒ 后续维护者不会误判为「漏配」而补它。若将来确要显式化，**必须与"新建 1 台节点灰度验证 `fstab` 四行 + `df`"绑定**，不可只改不验。
+
+**灰度验证成本参考**：mnl ASG 现 `min_instances=4 / max_instances=8`，实际 4 台 ⇒ 可临时 scale-out 1 台（~$0.44/h × 数小时 ≈ $1 内），验 `fstab` 四行与 `df` 后缩回；或在 dev 集群（jakarta `ack-newapi-jkt-dev`）先建临时节点池验证语法。
+
+**取证脚本**：`deploy/logs/t_diskinit_pool.sh`（节点池全字段）· `t_diskinit_ud.sh`（解 user_data）· `t_diskinit_meta2.sh`（OpenAPI meta）· `t_diskinit_node.sh` + `t_diskinit_trace.sh`（节点侧 fstab/ack-deploy 溯源，经 `ack_remote.sh <site>`）。
+**落点（方案 A）**：真源注释 `deploy/tasks/task11/nodepool_mnl.sh`（头 + 2 处分支）· `deploy/tasks/task24/nodepool_sg.sh`（指回头部）· 成本表 `deploy/ops/gen_cost_table.py` 7.10.8 首行 · 本节结论。
+**状态**：**2026-10-14 已裁定 = 方案 A「保持现状」，线上零变更**（仅文档 + IaC 注释；`bash -n` PASS、`--dry-run` 渲染一致）。

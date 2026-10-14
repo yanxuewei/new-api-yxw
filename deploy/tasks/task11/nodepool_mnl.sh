@@ -26,6 +26,19 @@
 #   ⚠️ data_disks[].encrypted 是**字符串**不是布尔（传 bool 报 Unmarshal type error）
 #   ⚠️ CreateClusterNodePool 的 CLI 具名参数调用必须带 `--region`，否则报
 #      `InvalidAction.NotFound`（"Specified api is not found"）—— 极易误判为 API 不可用
+#
+#   ★ 数据盘归属：**刻意不写 scaling_group.disk_init**（保持空 = 走 ACK 默认，勿再"补"）
+#     挂载由 ACK 引导步骤 [step=diskinit]（auto_disk.go）完成：探测未用盘 → ext4 →
+#     挂 /var/lib/container/ → bind 出 /var/lib/kubelet、/var/lib/containerd、/var/log/pods
+#     → 写 /etc/fstab（sed 先删同项，幂等）。6 台节点（mnl4+sg2）一致，属产品基线行为。
+#     2026-10-14 裁定「保持现状」：显式化收益仅为"把隐式默认写出来"，而风险不对称 ——
+#       · disk_name 必填 ⇒ 必须同时改 data_disks，且两者须一一匹配；
+#       · mount_target / mount_for_runtime 组合语义**官方无文档**；
+#       · 一旦显式给出，ACK 即改走该路径，写错 ⇒ 新节点 containerd 落 100G 系统盘
+#         ⇒ disk-pressure 驱逐雪崩（= 任务 11 坑 3）。
+#     ⚠ 若将来确要显式化：**必须与"新建 1 台节点灰度验证 fstab 四行 + df"绑定**，不可只改不验。
+#     ⚠ 改 data_disks[].size 只作用于**新增节点**，存量节点不变（官方原文）。
+#     详见 .workbuddy/memory/REFERENCE.md §「ACK 数据盘挂载机制与 disk_init 显式化评估」。
 # =============================================================================
 set -uo pipefail
 
@@ -183,6 +196,7 @@ if [[ "$MODE" == "autoscaling" ]]; then
 fi
 
 # ============================ dry-run ========================================
+# ⚠ 数据盘 size=300 由 ACK diskinit 自动挂给 containerd；此处刻意不写 disk_init（2026-10-14 裁定，见文件头）
 if [[ "$MODE" == "dry-run" ]]; then
   step "1. 渲染建池 body（含 base64 user_data）"
   [[ -f "$USERDATA_SRC" ]] || { fail "缺 user_data 源文件：$USERDATA_SRC"; exit 1; }
@@ -208,6 +222,7 @@ if [[ "$MODE" == "dry-run" ]]; then
 fi
 
 # ---- 1. 建池（手动模式：固定 desired 台，保证跨区均匀） ----------------------
+# ⚠ 数据盘 size=300 由 ACK diskinit 自动挂给 containerd；此处刻意不写 disk_init（2026-10-14 裁定，见文件头）
 if [[ -z "$NPID" ]]; then
   step "1. 渲染建池 body（手动模式，desired_size=$DESIRED）"
   [[ -f "$USERDATA_SRC" ]] || { fail "缺 user_data 源文件：$USERDATA_SRC"; exit 1; }
