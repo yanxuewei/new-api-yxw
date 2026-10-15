@@ -766,3 +766,266 @@ X4  ready=1/1  updated=1
 3. `deployment/new-api-dev-slave` 模板标签是 `app=new-api-dev-slave`，**没有任何 Service 选中它**（ns 内只有
    `service/new-api-dev`，selector 为 `app=new-api, track=dev`）⇒ 它当前不对外提供入口；若本意是要承接流量，需要补 Service / Ingress。
 
+
+## 15. 四项裁定落地：DSN 收权 + dev.likha.hk 对外入口（2026-10-15，**已执行**）
+
+负责人四项裁定：① DSN 过宽「需要改」② helper 保留 `default` 作用域（ACR EE 太贵，其它站点均经
+外网从主站 EE 拉镜像）③ slave 要对外承接流量，买**一个** ALB ④ 加 `dev.likha.hk` 域名。
+
+### 15.1 DSN 收权（已执行）
+
+`deploy/jakarta_dev/bodies/fix_dsn.sh`：strategic-merge patch（env 按 name 合并，避免索引脆弱），
+`SQL_DSN` 的 secretKeyRef.key **`SQL_DSN_MIGRATE` → `SQL_DSN`**。触发滚动重建，新 Pod
+`7fd87f877d-n74bw` 1/1 Running（readiness `/api/status` 通过 = DB 连接正常），旧 Pod 终止。
+已接线：`dev_deploy.sh --fix-dsn`（默认 APPLY=0 只出计划）。
+
+### 15.2 ALB + Service + Ingress（已执行）
+
+前置：jkt 集群**没有** `alb-ingress-controller`（重建时未随 addons 装，`ack_jkt_dev_create.json`
+只装了 terway-eniip）→ 补装（task `T-6ad044c9871942010300010c`，state=active）。
+
+| 构件 | 值 |
+|---|---|
+| ALB | **`alb-4okmogghe7hbv5fwm6`**（alb-newapi-jkt-dev，Internet，Active；DNS 名 `alb-4okmogghe7hbv5fwm6.ap-southeast-5.alb.aliyuncsslbintl.com`，公网 IP `147.139.241.96`(5a) / `8.215.59.192`(5b)） |
+| zoneMappings | `vsw-jkt-dev-pub-5a`(vsw-k1at4vt7fg8v4umkh9lg3) + `vsw-jkt-dev-pub-5b`(vsw-k1aqa1ose29nuq92hcvyt) |
+| 监听器 | 80 HTTP（idle 60/req 600）+ 443 HTTPS（`tls_cipher_policy_1_2_strict_with_1_3`，证书 **`606823-ap-southeast-1`** 跨地域复用，IsDefault） |
+| IngressClass | `alb` → parameters AlbConfig `jkt-alb`（集群此前没有） |
+| Service | `newapi-dev/new-api-dev-slave`（ClusterIP→3000，selector `app=new-api-dev-slave`，照抄生产 ClusterIP/ENI 型口径） |
+| Ingress 80 | host dev.likha.hk → Redirect **301** → https（actions.redirect + use-annotation，order=1） |
+| Ingress 443 | host dev.likha.hk `/` → svc:80（order=50） |
+
+IaC 真源 **`deploy/jakarta_dev/dev_ingress.yaml`**（五构件一文件）；接线 `dev_deploy.sh --apply-ingress`
+（载荷 INGRESS_B64，默认只 render 校验）。管理红线同生产：只经 AlbConfig/Ingress 管理，**AlbConfig 带
+finalizer ⇒ `kubectl delete albconfig jkt-alb` 会级联删云上 ALB**。
+
+### 15.3 DNS（已执行）
+
+`dev.likha.hk` CNAME → ALB DNS 名，TTL 600，RecordId **`2110572139455158272`**。
+`deploy/manifests/dns-likha-hk.sh` 已扩展 `TYPE=CNAME`（`RR=dev` 即管理 dev 记录）。
+至此 likha.hk 记录 **9 → 10 条**。
+
+### 15.4 验收（全部通过）
+
+| 项 | 期望 | 实测 |
+|---|---|---|
+| 权威解析 | CNAME → jkt ALB DNS 名 | ns7/ns8 一致 ✅ |
+| 递归解析 | A = ALB 双 AZ IP | 147.139.241.96 / 8.215.59.192 ✅ |
+| https 443 | 200 | 3/3 200（双 IP 轮询，~1.1–1.4s）✅ |
+| 证书 | `*.likha.hk` DV | `CN=*.likha.hk` / Aliyun RSA TLS DV G1 / verify ok ✅ |
+| http 80 | 301 → https | `301 → https://dev.likha.hk/api/status` ✅ |
+| 内容 | new-api | `/api/status` 返回正常 JSON ✅ |
+
+### 15.5 新踩坑与遗留
+
+- ★ **`aliyun cs POST /clusters/<id>/components/install` 必须 `--header "Content-Type=application/json"`**，
+  否则报 `FAILED_TO_READ_REQUEST`（body 已正确给 JSON 也照样失败）——本仓首个 cs REST POST，与既有
+  GET 用法不同。CLI 具名 `--addons` 在 3.5.1 不存在。
+- **ALB 按量计费新账**：实例费 + LCU，dev 流量极小 ⇒ 预计每月个位数 USD；**§7.10 成本表尚未纳入**，
+  下次跑 `gen_cost_table.py` 时需加一行（jkt ALB）。
+- §13.10 的「跨区公网拉镜像冷缓存耗时」仍未验（本次 DSN 重建命中节点缓存）。
+- helper 保留 `default` 作用域 = §14.5-2 的**既有裁定**（负责人 2026-10-15 确认），公网 ACL 收口仍挂账。
+## 14. 任务 14：ns 内出现第二个负载 `new-api-dev-slave` —— 免密潜伏坑回归（2026-10-13）
+
+**起因**：§13 结束后负责人把 `fanyan-new-api-master` 删了，但 ns 里多出一个**不是本卡产物**的
+`new-api-dev-slave`（Deployment + 同名 Service，配额从 1/20 变 **2/20**）。
+§12.5 的 V1–V11 是"单负载"时采的 ⇒ 必须回归，否则台账里的隔离证据与现状脱节。
+
+**产物**：新增只读 body `bodies/ns_regression.sh` + `dev_deploy.sh --ns-regression`（进 `--render-check`，命令体 6.8 KB）。
+途中修了自己写死的一处缺陷：body 里把负载名硬编码成 `new-api-dev / fanyan-…`，负载一删一多就查空 ⇒
+N1/N2 全部改成**自动发现**（这本身是条通用教训：探测脚本不许写死被探测对象的名字）。
+
+### 14.1 Service × Pod × Endpoints：没有串后端
+
+```
+svc/new-api-dev        sel={"app":"new-api","track":"dev"}      172.23.5.57:80   → 10.2.90.156 → pod/new-api-dev-594fdf5795-wxt49
+svc/new-api-dev-slave  sel={"app":"new-api-dev-slave"}          172.23.7.101:80  → 10.2.36.215 → pod/new-api-dev-slave-7fd87f877d-n74bw
+```
+两个 selector 无交集，Endpoints 各自只有一个后端且归属正确 ⇒ §13 那类"手建负载误挂进 dev Service"的情况没有发生。
+
+### 14.2 DSN 落点（V10 同口径，进程内实测，只打印 host/port/db）
+
+| Pod | `SQL_DSN` | `LOG_SQL_DSN` | `NODE_TYPE` |
+|---|---|---|---|
+| `new-api-dev-…-wxt49` | host=`pgm-d9j9p421lzx4gw73…ap-southeast-5` db=`newapi` | 同实例 db=`newapi_logs` | **master** |
+| `new-api-dev-slave-…-n74bw` | host=`pgm-d9j9p421lzx4gw73…ap-southeast-5` db=`newapi` | 同实例 db=`newapi_logs` | **slave** |
+
+⇒ 两 Pod 全部只指向 dev 实例，无生产实例/生产网段；master/slave 角色分离正确。
+键来源也符合生产形态：master `SQL_DSN ← Secret/SQL_DSN_MIGRATE`（迁移角色），
+slave `SQL_DSN ← Secret/SQL_DSN`（应用角色）⇒ **slave 拿不到迁移角色的凭据**，这是对的。
+
+### 14.3 本轮核心发现：`new-api-dev-slave` 正在重演 §13 的免密坑，只是还没爆
+
+```
+[new-api-dev]        sa=new-api-app   image=…/newapi-dev/newapi-master:20261012-a8e646954
+[new-api-dev-slave]  sa=（=default）  image=…/newapi-dev/newapi-master:20261012-a8e646954   ← 同一个镜像、不同 SA
+```
+它现在能跑，**不是因为配置对，而是因为节点 content store 里已经有 `829a4277fe…fff0` 这一层**（§13.10 C1/C3 实测：
+ns 里唯一的 ACR 镜像就是它）。一旦遇到 ①新 digest（下次发版）②扩容出的新节点 ③节点重装/缓存清理，
+它就会精确复现 §13.2 那条 `pull access denied … insufficient_scope: authorization failed`，
+而且因为发生在"要用的那一刻"，排查成本比现在高得多。这就是 §13.4 坑 16 的活体样本：
+**Secret 在 ns 里 ≠ Pod 拿得到，免密只认 Pod 的 SA**。
+
+修法与 §13.8 完全一致（`serviceAccountName: new-api-app`，helper 作用域不用动），一条 `--fix-pull-sa new-api-dev-slave` 即可，
+属集群写入 ⇒ **未擅自执行，等负责人裁定**。
+
+### 14.4 顺带两处与既定命名/隔离口径不一致（只记录，不改别人的对象）
+
+- slave 的标签是 `site=jkt` + `track=stable`，master 是 `site=jkt-dev` + `track=dev`。
+  负责人 2026-10-11 定的命名规则是「雅加达跟马尼拉保持一致，只在站点名后加 `-dev` 后缀」⇒ dev ns 里出现 `site=jkt`
+  与生产同标，会污染以后按 `site` 做的成本/隔离归集；`track=stable` 在 dev 里也没有对应语义。
+- slave 落在 `ap-southeast-5b`，master 在 `5c` ⇒ AZ 分散，这条是好事，记录备查。
+
+### 14.5 其余回归项（无破口）
+
+```
+N3 两个负载都有 requests(200m/512Mi) 与 limits(1/1Gi)、readinessProbe=/api/status ⇒ 不是控制台裸建的那种空配置
+N4 配额 pods 2/20，requests.cpu 400m/2，limits.cpu 2/3；kubectl top：两 Pod 各 1m CPU / 25-26Mi 内存
+N5 V7 ns 内 Role+RoleBinding=0、引用 new-api-app 的 ClusterRoleBinding=0
+   V8 免密 Secret 仍在 ns（helper 作用域未变，仍只点名 new-api-app）
+   V9 逐 Secret 逐键扫生产串台 ⇒ 无 [XX] 行（新负载没把生产端点/网段带进 dev Secret）
+```
+N2 的日志判定行为空是因为两 Pod 已连续运行 2d16h，启动那几行早被日志轮转推出 tail 窗口；
+库落点以 14.2 的**进程内 env 实测**为准（比日志更强）。
+
+**本卡动作边界**：全程只读（`get` / `logs` / `exec ls·find·printenv`），未 apply/patch/delete 任何对象。
+## 15. 任务 15：`default` SA 进免密组件的复核 + slave 负载标签对齐（2026-10-13）
+
+### 15.1 负责人自行处置 §14.3：先双口径核实"真的落地了"，再动别的
+
+台账纪律不认"我改了"，只认回读。两个独立口径：
+
+**云侧（组件配置本体，`aliyun cs GET /clusters/<cid>/addon_instances/managed-aliyun-acr-credential-helper`）**
+
+```
+state=active  version=v24.01.29.1-5318af4-aliyun
+config={"AcrInstanceInfo":[{"instanceId":"cri-avfqy9xkqi5bj8ee","regionId":"ap-southeast-6"}],
+        "enableRRSA":false,"expiringThreshold":"15m",
+        "serviceAccount":"new-api-app,default",   ← 本轮新增
+        "watchNamespace":"newapi-dev"}
+```
+
+**集群内（真正决定 Pod 拿不拿得到凭据的那一层，`--diagnose-pull` D4）**
+
+```
+default      pullSecrets=acr-credential-secret-aggregation   ← 改前为空
+new-api-app  pullSecrets=acr-credential-secret-aggregation
+```
+
+⇒ §14.3 那个"靠节点缓存兜底的潜伏坑"已经**从根上关掉**（比我建议的方案 A 更省事：不动负载，扩组件作用域）。
+`watchNamespace` 仍只有 `newapi-dev`，没有外溢到生产 ns。
+D2 全 ns 无 `ImagePullBackOff`/`ErrImagePull` 原文。
+
+### 15.2 标签对齐：`new-api-dev-slave` 的 `site=jkt`/`track=stable` → `jkt-dev`/`dev`
+
+**动手前的命门探测**（只读）：Deployment 的 `spec.selector.matchLabels` 是**不可变字段**，
+若它含 `site`/`track`，改 Pod 模板标签会让控制器选不到旧 Pod ⇒ 造孤儿。实测：
+
+```
+new-api-dev          selector={"app":"new-api","track":"dev"}          ← 含 track，所以这个负载绝不能这么改
+new-api-dev-slave    selector={"app":"new-api-dev-slave"}              ← 不含 site/track ⇒ 安全
+```
+body 里把这条做成硬闸门（`grep -qE '"(site|track)"' <<<"$SEL"` 命中即 exit 1），不是口头保证。
+
+**连带风险也想清楚了两条**：改完 `track=dev` 会不会误进 `new-api-dev` Service 的后端？
+不会 —— 那个 selector 还要求 `app=new-api`，而 slave 是 `app=new-api-dev-slave`。改后 Endpoints 归属实测证实。
+
+**实际写入**：`deployment.apps/new-api-dev-slave patched`，只有 `site`/`track` 两个键、两层（顶层 `metadata.labels` + `spec.template.metadata.labels`）。
+`app`/`env`/`project` 一概没碰（顶层原本只有 `app`，是否补齐 `env`/`project` 不在这次范围内，留给负责人）。
+
+```
+after 顶层labels={"app":"new-api-dev-slave","site":"jkt-dev","track":"dev"}
+after 模板labels={"app":"new-api-dev-slave","env":"dev","project":"new-api","site":"jkt-dev","track":"dev"}
+after selector={"app":"new-api-dev-slave"}（保持不变，已证）
+deployment "new-api-dev-slave" successfully rolled out     rollout_rc=0
+后端归属：svc/new-api-dev → 10.2.90.156 → pod/new-api-dev-594fdf5795-wxt49
+后端归属：svc/new-api-dev-slave → 10.2.25.179 → pod/new-api-dev-slave-5898984fc6-8ppvr   ← 只收本负载，无串台
+ready=1/1；default SA 仍挂 acr-credential-secret-aggregation
+```
+L4 里同时列到旧 Pod `7fd87f877d-n74bw`（`site=jkt`/`track=stable`）是 Terminating 残留，非并存；
+新 Pod 落在 `ap-southeast-5a`（旧在 5b）⇒ AZ 由调度器重新分配，dev 单副本无稳定性问题。
+
+**这次改动的真实代价**（事先已告知）：模板标签变更触发一次滚动重建，slave 重启了一次。
+
+**产物**：新增 `bodies/align_labels.sh` + `dev_deploy.sh --align-labels <deploy>`（进 `--render-check`，命令体 3.9 KB）。
+途中遇到一次 `DescribeClusterUserKubeconfig` 超时（CS API 抖动，同一调用几分钟前后均成功），第二次即通过 ——
+失败发生在**取凭据阶段**，命令未投递、集群未被写入，属安全失败。
+
+## 16. slave 顶层标签补齐（2026-10-15，SCOPE=meta ⇒ 零重建）
+
+### 16.1 这一节只解决一件事：上一轮遗留的形状差
+
+§15 把 slave 的**模板**标签对齐了，但顶层 `metadata.labels` 仍缺 `env` / `project`：
+
+| 负载 | 顶层 labels（改动前） | 模板 labels（改动前） |
+|---|---|---|
+| new-api-dev（master，参照） | app, env, project, site, track | app, env, project, site, track |
+| new-api-dev-slave | app, site, track **（缺 2 键）** | app, env, project, site, track |
+
+顶层标签是**给负载对象本身**贴的（控制台筛选、成本归集按 Deployment 维度聚合时吃它），
+模板标签是给 Pod 贴的（Service selector 吃它）。两者是不同的东西 —— 上一轮只修了后者。
+
+### 16.2 工具改造：一份 body 覆盖所有键与层，不再一键一 body
+
+`bodies/align_labels.sh` 重写为参数化（`KV=` 逗号分隔键值对、`SCOPE=meta|template|both`），
+门禁按"结构性前置条件"设计，而不是事后正则：
+
+- 键白名单只放 `site|track|env|project`；**`app` 一律拒改**（Service selector 与成本归集都依赖它的值）。
+- 值正则 `^[a-z0-9-]+$`。
+- `SCOPE != meta` 时，先读 `spec.selector.matchLabels`，**待改键若出现在 selector 里直接拒绝**
+  （selector 是不可变字段，改模板标签会让新 Pod 落不进 selector ⇒ 孤儿 Pod）。
+  `SCOPE=meta` 跳过该门：顶层元数据根本不进 selector 判定。
+- `TARGET` 必须显式传，刻意不给默认负载名。
+
+执行侧 `dev_deploy.sh --align-labels <deploy> <KV> <scope>`，四参缺一即 `die`；
+非 meta 层会先打一句"会滚动重建一次"的提醒。
+
+### 16.3 落地与回读（生效判据只认回读）
+
+```
+bash dev_deploy.sh --align-labels new-api-dev-slave "env=dev,project=new-api" meta
+```
+
+```
+before 顶层labels={"app":"new-api-dev-slave","site":"jkt-dev","track":"dev"}
+after  顶层labels={"app":"new-api-dev-slave","env":"dev","project":"new-api","site":"jkt-dev","track":"dev"}
+after  selector={"app":"new-api-dev-slave"}（未变）
+参照 new-api-dev 顶层：仅目标有的键=（空）| 仅参照有的键=（空）
+```
+
+**键集差集双向为空** ⇒ 与 master 同形。注意"同形"指键集合相同；
+`app` 的**值**仍然不同（`new-api` vs `new-api-dev-slave`），这是刻意的 ——
+两个负载必须靠 `app` 值区分，否则 Service 后端会串。
+
+### 16.4 反向验证：没有重建才是这次正确的标志
+
+改动 meta 层若引发 Pod 重建，说明我对 K8s 语义的理解有误，所以 L4 用身份指纹反证：
+
+```
+BEFORE/AFTER = 每 Pod 的「名字|pod-template-hash|容器重启数」拼接排序
+结果：[ok] 完全一致 ⇒ 未发生重建
+现状：1/1 ready
+      new-api-dev-slave-5898984fc6-8ppvr  1/1  Running  重启 0  已运行 13m
+```
+
+`13m` 这个 AGE 本身就是证据：Pod 早于本次改动创建，没有被替换。
+后端归属同时复测了一次隔离面：
+
+```
+svc/new-api-dev        → 10.2.90.156 → pod/new-api-dev-594fdf5795-wxt49
+svc/new-api-dev-slave  → 10.2.25.179 → pod/new-api-dev-slave-5898984fc6-8ppvr
+```
+
+两个 Service 各自只指自己那组 Pod，没有交叉 —— 与 §14 的结论一致，本次改动没碰这条线。
+
+### 16.5 一处判据文案修正（自我纠偏）
+
+原 body 无论 SCOPE 为何都先打印"SCOPE 含模板层 ⇒ 会滚动重建一次"，
+meta 模式下这句是**错的**（会把读者带向错误的风险预期）。已改为按 SCOPE 三分支各自表述。
+教训：判据文案要跟着分支走，不能写在分支外面当公共结论。
+
+### 16.6 写入面与未做事项
+
+- 本次唯一写入：`new-api-dev-slave` 顶层 `metadata.labels` 增加 `env=dev`、`project=new-api`。
+- 未做（都需要负责人点头，见 §12.8）：dev RDS 续费/转按量/释放、节点池 2↔1、DB owner 改 aurora、
+  马尼拉 ACR EE 公网 ACL 收紧。
+- §13.10 的冷缓存跨区下载仍未验证，等下一次真实版本发布时顺带采集。

@@ -21,6 +21,8 @@
 #   --diagnose-pull          只读：手建负载拉不到镜像的三要素诊断
 #   --fix-pull-sa   <deploy> 免密方案 A：把负载的 SA 换成 new-api-app
 #   --fix-pull-restart <deploy> 时序坑修复：SA 上已有凭据、但 Pod 建早了 ⇒ 只重建 Pod（APPLY=1 才真做）
+#   --fix-dsn                slave DSN 收权：SQL_DSN 的 secretKeyRef.key MIGRATE→DML（APPLY=1 才真做）
+#   --apply-ingress          dev.likha.hk 入口：apply dev_ingress.yaml（AlbConfig/IngressClass/SVC/Ingress；APPLY=1 才真做）
 #   --set-image     <deploy> <image>  换镜像（白名单闸门）
 #
 # 顺序（首跑）：--precheck → --apply-base → --secret → --grants → --apply-app → --verify → --smoke
@@ -197,10 +199,11 @@ render_check() {
   secret_payload 1                       # 含 DSN_OPS_* 与 grants.sql，供 grants 的组装检查
   local DOCS SEC; DOCS=$(pack_dir "$WORK/docs"); SEC=$(pack_dir "$WORK/sec")
   local b full
-  for b in apply_base.sh apply_secret.sh apply_grants.sh apply_app.sh verify.sh smoke.sh status.sh delete.sh db_owner_fix.sh db_owner_probe.sh logs.sh isolation.sh isolation_rbac.sh diagnose_pull.sh fix_pull_sa.sh fix_pull_restart.sh set_image.sh node_image_cache.sh; do
+  for b in apply_base.sh apply_secret.sh apply_grants.sh apply_app.sh verify.sh smoke.sh status.sh delete.sh db_owner_fix.sh db_owner_probe.sh logs.sh isolation.sh isolation_rbac.sh diagnose_pull.sh fix_pull_sa.sh fix_pull_restart.sh fix_dsn.sh set_image.sh node_image_cache.sh ns_regression.sh align_labels.sh; do
     case "$b" in
       apply_base.sh|apply_app.sh) full="$WORK/rc_$b"; { header "DOCS_B64=$DOCS"; cat "$BODIES/$b"; } > "$full" ;;
-      diagnose_pull.sh|fix_pull_sa.sh|fix_pull_restart.sh|set_image.sh|node_image_cache.sh) full="$WORK/rc_$b"; { header; cat "$BODIES/$b"; } > "$full" ;;
+      diagnose_pull.sh|fix_pull_sa.sh|fix_pull_restart.sh|set_image.sh|node_image_cache.sh|ns_regression.sh) full="$WORK/rc_$b"; { header; cat "$BODIES/$b"; } > "$full" ;;
+      align_labels.sh) full="$WORK/rc_$b"; { header "TARGET=example" "KV=env=dev,project=new-api" "SCOPE=meta"; cat "$BODIES/$b"; } > "$full" ;;
       db_owner_fix.sh|db_owner_probe.sh) full="$WORK/rc_$b"; { header "SEC_B64=$SEC"; cat "$BODIES/$b"; } > "$full" ;;
       *)                           full="$WORK/rc_$b"; { header "SEC_B64=$SEC";  cat "$BODIES/$b"; } > "$full" ;;
     esac
@@ -257,6 +260,36 @@ fix_pull_restart() {
   fi
 }
 node_cache() { run_body node_image_cache.sh nodecache; }
+ns_regression() { run_body ns_regression.sh nsreg; }
+align_labels() {
+  [ -n "${TGT:-}" ] || die "--align-labels 必须显式给第二参目标负载名"
+  [ -n "${KV:-}" ] || die "--align-labels 必须给第三参 KV（形如 env=dev,project=new-api；刻意不给默认）"
+  case "$SCOPE" in both|meta|template) : ;; *) die "--align-labels 第四参 SCOPE 只能是 both/meta/template（当前='$SCOPE'）" ;; esac
+  if [ "$SCOPE" != meta ]; then
+    notice "提醒：SCOPE=$SCOPE 含 Pod 模板层 ⇒ 会滚动重建一次；只补顶层元数据请用 meta"
+  fi
+  run_body align_labels.sh alignlabel "TARGET=$TGT" "KV=$KV" "SCOPE=$SCOPE"
+}
+# slave DSN 收权（SQL_DSN_MIGRATE → SQL_DSN）：默认只出计划，APPLY=1 才真做
+fix_dsn() {
+  if [ -n "${APPLY:-}" ]; then
+    run_body fix_dsn.sh fixdsn "APPLY=$APPLY"
+  else
+    notice "（未设 APPLY ⇒ 远端默认 APPLY=0，只出计划）"
+    run_body fix_dsn.sh fixdsn
+  fi
+}
+# dev.likha.hk 入口构件：AlbConfig + IngressClass + Service + 双 Ingress（幂等 apply）
+apply_ingress() {
+  local b64
+  b64=$(base64 -w0 < "$HERE/dev_ingress.yaml") || die "缺 $HERE/dev_ingress.yaml"
+  if [ -n "${APPLY:-}" ]; then
+    run_body apply_ingress.sh applyingress "INGRESS_B64=$b64" "APPLY=$APPLY"
+  else
+    notice "（未设 APPLY ⇒ 远端默认 APPLY=0，只 render 校验）"
+    run_body apply_ingress.sh applyingress "INGRESS_B64=$b64"
+  fi
+}
 set_image() {
   [ -n "${TGT:-}" ] || die "--set-image 需要 <deploy> <image> 两个参数"
   [ -n "${NEWIMG:-}" ] || die "--set-image 需要 <deploy> <image> 两个参数（刻意不给默认镜像，避免误换）"
@@ -273,6 +306,8 @@ del_all() { run_body delete.sh delete; }
 A="${1:---precheck}"
 TGT="${2:-}"
 NEWIMG="${3:-}"
+KV="${3:-}"
+SCOPE="${4:-both}"
 case "$A" in
   --precheck)    precheck ;;
   --render-check) render_check ;;
@@ -287,11 +322,15 @@ case "$A" in
   --diagnose-pull) diag_pull ;;
   --fix-pull-sa) fix_pull_sa ;;
   --fix-pull-restart) fix_pull_restart ;;
+  --fix-dsn) fix_dsn ;;
+  --apply-ingress) apply_ingress ;;
   --set-image)  set_image ;;
   --node-image-cache) node_cache ;;
+  --ns-regression) ns_regression ;;
+  --align-labels) align_labels ;;
   --isolation)  isolation ;;
   --smoke)      smoke ;;
   --status)     status ;;
   --delete)     del_all ;;
-  *) die "未知子命令：$A（--precheck/--render-check/--apply-base/--secret/--grants/--db-owner-probe/--db-owner-fix/--apply-app/--verify/--logs/--diagnose-pull/--fix-pull-sa <deploy>/--fix-pull-restart <deploy>/--set-image <deploy> <image>/--smoke/--isolation/--status/--delete）" ;;
+  *) die "未知子命令：$A（--precheck/--render-check/--apply-base/--secret/--grants/--db-owner-probe/--db-owner-fix/--apply-app/--verify/--logs/--diagnose-pull/--fix-pull-sa <deploy>/--fix-pull-restart <deploy>/--fix-dsn/--apply-ingress/--set-image <deploy> <image>/--node-image-cache/--ns-regression/--align-labels <deploy> <KV> <meta|template|both>/--isolation/--smoke/--status/--delete）" ;;
 esac

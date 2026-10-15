@@ -1,0 +1,142 @@
+# 雅加达 dev · ALB + Ingress（dev.likha.hk 对外入口）
+# 集群：cb0abf5bc06034f7bbdb991752f6f3e62（ap-southeast-5，ack-newapi-jkt-dev）
+# 创建：2026-10-15 · 用户裁定：dev 站点对外承接流量，ALB 只买这一个（公网按量）
+#
+# 构件（与 mnl/sg 生产同构，字段照抄 deploy/manifests/albconfig-mnl.yaml / ingressclass-sg.yaml）：
+#   ① AlbConfig `jkt-alb` → ALB `alb-newapi-jkt-dev`（Internet / 公网交换机对 pub-5a+5b）
+#      443 挂 DV 通配符证书 606823-ap-southeast-1（★ 跨地域复用有 mnl/sg 先例，*.likha.hk 覆盖 dev）
+#      ⚠ 不配 accessLogConfig（dev 无 SLS 项目；如以后要配，logStore 必须 `alb_` 前缀）
+#   ② IngressClass `alb` → parameters 指向 jkt-alb（集群级，jkt 集群此前没有）
+#   ③ Service `new-api-dev-slave`（ClusterIP，照抄生产口径；jkt=terway-eniip ⇒ ENI 型后端）
+#      selector app=new-api-dev-slave（控制台手建 Deployment 的唯一模板标签）
+#   ④ Ingress 80：HTTP→HTTPS **301**（与生产「80 一律 301」同口径）
+#   ⑤ Ingress 443：dev.likha.hk → svc:80
+#
+# 管理红线（同生产）：
+#   - 只经 AlbConfig/Ingress 声明式管理，禁止在 ALB 控制台改 listener；
+#   - AlbConfig 带 finalizer `ingress.k8s.alibaba/resources`，`kubectl delete albconfig jkt-alb`
+#     会**级联删除云上 ALB**。可改，不可随手删。
+#   - listeners 不写 httpDefaultActions/defaultActions（实测被 Controller 覆盖，纯噪声）。
+---
+apiVersion: alibabacloud.com/v1
+kind: AlbConfig
+metadata:
+  name: jkt-alb
+  labels:
+    project: new-api
+    site: jkt-dev
+    env: dev
+spec:
+  config:
+    name: alb-newapi-jkt-dev
+    addressType: Internet
+    zoneMappings:
+      - vSwitchId: vsw-k1at4vt7fg8v4umkh9lg3   # vsw-jkt-dev-pub-5a / ap-southeast-5a
+      - vSwitchId: vsw-k1aqa1ose29nuq92hcvyt   # vsw-jkt-dev-pub-5b / ap-southeast-5b
+    tags:
+      - { key: project, value: new-api }
+      - { key: site, value: jkt-dev }
+      - { key: env, value: dev }
+  listeners:
+    - port: 80
+      protocol: HTTP
+      idleTimeout: 60
+      requestTimeout: 600
+    - port: 443
+      protocol: HTTPS
+      idleTimeout: 60
+      requestTimeout: 600
+      caEnabled: false
+      securityPolicyId: tls_cipher_policy_1_2_strict_with_1_3
+      certificates:
+        - CertificateId: 606823-ap-southeast-1   # ⚠ 字段名 CertificateId，值是 CertIdentifier
+          IsDefault: true
+---
+apiVersion: networking.k8s.io/v1
+kind: IngressClass
+metadata:
+  name: alb
+  labels:
+    project: new-api
+    site: jkt-dev
+    env: dev
+spec:
+  controller: ingress.k8s.alibabacloud/alb
+  parameters:
+    apiGroup: alibabacloud.com
+    kind: AlbConfig
+    name: jkt-alb
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: new-api-dev-slave
+  namespace: newapi-dev
+  labels:
+    app: new-api-dev-slave
+    project: new-api
+    site: jkt-dev
+    env: dev
+spec:
+  type: ClusterIP
+  selector: {app: new-api-dev-slave}
+  ports:
+    - {name: http, port: 80, targetPort: 3000}
+---
+# 80 监听：HTTP → HTTPS 301（动作写法照抄 ingress-mnl-https-canonical.yaml，状态码 301）
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: new-api-dev-slave-http-redirect
+  namespace: newapi-dev
+  labels:
+    app: new-api-dev-slave
+    project: new-api
+    site: jkt-dev
+    env: dev
+    purpose: http-to-https-redirect
+  annotations:
+    alb.ingress.kubernetes.io/actions.redirect: '[{"type":"Redirect","RedirectConfig":{"host":"dev.likha.hk","path":"${path}","port":"443","protocol":"HTTPS","query":"${query}","httpCode":"301"}}]'
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80}]'
+    alb.ingress.kubernetes.io/order: "1"
+spec:
+  ingressClassName: alb
+  rules:
+    - host: dev.likha.hk
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: redirect          # 伪服务名，必须与注解 actions.<name> 逐字同名
+                port:
+                  name: use-annotation
+---
+# 443 监听：dev.likha.hk → new-api-dev-slave:80
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: new-api-dev-slave
+  namespace: newapi-dev
+  labels:
+    app: new-api-dev-slave
+    project: new-api
+    site: jkt-dev
+    env: dev
+  annotations:
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/order: "50"
+spec:
+  ingressClassName: alb
+  rules:
+    - host: dev.likha.hk
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: new-api-dev-slave
+                port:
+                  number: 80

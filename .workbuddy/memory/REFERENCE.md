@@ -1344,3 +1344,37 @@ aliyun actiontrail LookupEvents --LookupAttribute.1.Key EventName --LookupAttrib
 - 现状口径（10-14）：jkt dev helper 的 `serviceAccount` = **`new-api-app,default`**（安装时为 `new-api-app`，17:14:53 由负责人
   经控制台重提，附带占位符 `notifyEmail: xxx@aliyun.com`）⇒ `default` SA 也带上了 EE 免密凭据，**控制台手建负载不再必然拉不到**；
   代价是 `newapi-dev` 内任何用 default SA 的 Pod 都持有 **EE 实例级**凭据（覆盖含 `newapi-prod` 的全部命名空间）。全文见 `deploy/jakarta_dev_ledger.md` §14。
+
+## jkt dev 对外入口 dev.likha.hk（2026-10-15 落地 · 全文见 jakarta_dev_ledger.md §15）
+
+四项裁定：① slave DSN 收权（`SQL_DSN_MIGRATE`→`SQL_DSN`，strategic merge patch 按 env name 合并，新 Pod `7fd87f877d-n74bw`）② helper 保留 default 作用域（ACR EE 贵）③ 只买 1 个 ALB ④ 加 dev.likha.hk。
+
+**链路**：DNS `dev` CNAME（RecordId `2110572139455158272`，TTL 600）→ ALB **`alb-4okmogghe7hbv5fwm6`**（alb-newapi-jkt-dev，Internet，公网 `147.139.241.96`(5a)/`8.215.59.192`(5b)）→ Ingress 443 → `newapi-dev/new-api-dev-slave`（ClusterIP→3000）；80→301（actions.redirect，order=1）；443 证书 **`606823-ap-southeast-1` 跨地域复用**（mnl/sg/jkt 三实证）。
+
+**IaC/工具**：`deploy/jakarta_dev/dev_ingress.yaml`（AlbConfig `jkt-alb`+IngressClass `alb`+Service+双 Ingress，五构件一文件；zoneMappings=vsw-jkt-dev-pub-5a/5b）· `dev_deploy.sh --apply-ingress`（载荷 INGRESS_B64）/ `--fix-dsn`（均默认 APPLY=0）。`dns-likha-hk.sh` 扩展 `TYPE=CNAME`。
+
+**新坑**：
+- 装 `alb-ingress-controller`：jkt 建集群时未随装 → `POST /clusters/<id>/components/install` **必须 `--header "Content-Type=application/json"`**，缺头报 `FAILED_TO_READ_REQUEST`（body 正确也失败）；CLI 3.5.1 无 `--addons` 具名参数。轮询 GET `/clusters/<id>/addon_instances` 过滤 name。
+- AlbConfig 带 finalizer `ingress.k8s.alibaba/resources` ⇒ `kubectl delete albconfig jkt-alb` **级联删云上 ALB**（与 mnl-alb 同红线）。
+- ALB zoneMappings 用了 VPC 现成 `vsw-jkt-dev-pub-5a/5b`（10.2.0.0/24、10.2.1.0/24）——建 VPC 时预留的 pub 段，未新购交换机。
+
+**验收**：权威 ns7/ns8 CNAME 应答 ✅ · https 3/3 200（双 IP 轮询 1.1–1.4s）✅ · `CN=*.likha.hk` verify ok ✅ · 80→301 ✅ · `/api/status` 正常 ✅。
+
+**挂账**：§7.10 成本表未含 jkt ALB（按量，预计个位数 USD/月；下次 gen_cost_table.py 加行）；跨区公网拉镜像冷缓存耗时仍未验（§13.10）。
+
+## ★★ 日志库去 ClickHouse → 专用 RDS MySQL（2026-10-15 实施 · task58）
+
+**选型依据（GORM 源码实锤）**：`DeleteOldLogBatch`（`model/log.go:705`）`.Limit(limit).Delete()` —— mysql driver v1.5.7 `DeleteClauses` 含 LIMIT（`mysql.go:64`）⇒ 批删生效；**postgres driver v1.5.9 无 LIMIT（`postgres.go:77`）⇒ PG 上被静默忽略 = 一次全删大事务** ⇒ PG 路线（含「并入现役 PG」）全排除。CK $1,082.44/月 → MySQL `mysql.x2.medium.2c` $133.06/月（跨 AZ HA），**净省 $949.38/月**。
+
+**落地物**：实例 **`rm-5ts0ez22t67il9oz3`**（newapi-logs-mysql，包月至 2026-11-15，vpc-5tst1tgeessxn1azwasg2，主 6b/备 6a，100G cloud_essd）；内网串 `rm-5ts0ez22t67il9oz3.mysql.ap-southeast-6.rds.aliyuncs.com:3306`（10.0.64.1）；公网串 **`newapi-logs-public.mysql.ap-southeast-6.rds.aliyuncs.com:3306`**（43.123.80.14，**已开 SSL** CAType=aliyun）；白名单 mnl_vpc + sg_standby_eip（照抄现役 PG）；库/号 `newapi_logs`（ReadWrite）；口令 `/root/.deploy_secrets/RDS_PW_newapi_logs`；DSN `MYSQL_LOG_DSN_{MNL,SG}`；**CK 回滚留档 `CK_LOG_DSN_{MNL,SG}`**。
+
+**接线（14:3x–14:5x 完成）**：`Secret new-api-secrets` 单键 `LOG_SQL_DSN` merge patch + 滚动重启——mnl 三部署（stable/master/canary）→ 内网串无 TLS；sg（new-api-ph-standby）→ 公网串 `?tls=skip-verify`。两站应用日志实证 `using PostgreSQL as database` + `using MySQL as database`、0 DB 错误；应用 AutoMigrate 自动建 `logs`+`audit_logs`。`LOG_SQL_CLICKHOUSE_TTL_DAYS=90` 保留（回滚需要）。**CK 实例未释放**（回滚窗口 3–7 天，释放后跑 gen_cost_table.py）。
+
+**新坑**：
+- ⚠ **`ModifyDBInstanceSSL` 连接串上限 64 字符**：原名 65 字符报 `ConnectionStringLengthExceeded` ⇒ 用 `ModifyDBInstanceConnectionString` 改前缀为 `newapi-logs-public`（57 字符）后再开 SSL。
+- ⚠ **RDS MySQL 云端证书不在公共信任链**：`VERIFY_IDENTITY` 报 `CA certificate is required`；go-sql-driver DSN 不支持自定义 CA（需上游 `RegisterTLSConfig`，违反铁律①）⇒ sg 采用 **`tls=skip-verify`（知情偏离：传输加密保留、身份校验关闭）**。强校验须上游改造。
+- 首次实建 `CreateDBInstance` **超时但实际成功** ⇒ 重试前必须 `DescribeDBInstances` 防重复下单。
+- RDS 实例刚 Running 时 `CreateAccount` 瞬时 `IncorrectDBInstanceState`（重试即过）；`DescribeDatabases/DescribeAccounts` 响应结构是 `Databases.Database`/`Accounts`（无 `Items.*` 包裹，JMESPath 别照抄）。
+- CK DSN 格式不匹配 MySQL 正则 ⇒ switch body 的 python 解析改为**解析失败即原样 patch**（回滚任意格式 DSN 通用）。
+
+**脚本**：`deploy/tasks/task58_log_mysql/`（provision.sh · switch.sh（含 probe 模式）· verify_body.sh · README.md 含回滚一条链路）。

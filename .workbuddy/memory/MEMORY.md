@@ -1,59 +1,36 @@
 # new-api 菲律宾部署 · 项目长期约定（索引版）
 
-> **权威**：① `deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md` ② `deploy/菲律宾部署方案-v2.3-修订版.xlsx`；冲突**以 ① 为准**。**详版口径/全部坑 → `REFERENCE.md`**；流水 → `YYYY-MM-DD.md`。**新细节写 REFERENCE，勿堆本文。**
+> **权威**：① `deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md` ② `deploy/菲律宾部署方案-v2.3-修订版.xlsx`（冲突以 ① 为准）。**详版口径/全部坑 → `REFERENCE.md`**；成本细节 → `impl_deploy.md` §7.10（真源 `deploy/ops/gen_cost_table.py`）；流水 → `YYYY-MM-DD.md`。**新细节写 REFERENCE，勿堆本文。**
 
-## 执行环境（09-28 起 · 最高优先级）
-**命令默认在 WSL Ubuntu 跑**（`wsl -d Ubuntu -u root -- bash -c "..."`；带引号/多行/长中文载荷**先 Write 成文件再 `bash /mnt/e/.../x.sh`**）。宿主 `E:\git_code\new-api-yxw` = `/mnt/e/git_code/new-api-yxw`。
-- ⚠️ `/mnt/e` 是 **CRLF** ⇒ 读入残 `\r` ⇒ 比对**必然假失败** ⇒ 一律 `tr -d '\r'`。
-- ⚠️ `bash -c` 不读 `/etc/profile.d/`；`go env -w` per-user；`$?` 被吞成 0 ⇒ 用 `&& echo A || echo B`；**内联 `$VAR` 不可靠 ⇒ 全写绝对路径**。
-- ✅ Go 1.25.1（= `go.mod`）+ `GOPROXY=goproxy.cn`；`web/` 用 bun（WSL 内无 node/bun/kubectl/helm）；**编译/装依赖别放 `/mnt/e`**。
-- ⚠️ **本机不适合构建本仓镜像**（WSL2 上行并发 >20 丢 SYN ⇒ `bun install` 永挂）⇒ 发版走 **CI / macOS**（macOS 侧 `aliyun` 无 `--region` 用 profile 地域；集群操作用 `deploy/lib/ack_remote.sh`）。
+## 执行环境（最高优先级）
+- **命令默认 WSL Ubuntu**：`wsl -d Ubuntu -u root -- bash -c "..."`；多行/带引号/长中文 → 先 Write 成文件再 `bash /mnt/e/.../x.sh`；宿主 `E:\git_code\new-api-yxw` = `/mnt/e/git_code/new-api-yxw`。
+- ⚠ CRLF：`/mnt/e` 文本残 `\r` 比对假失败 ⇒ `tr -d '\r'`；`$?` 被吞 ⇒ `&& echo A || echo B`；**`bash -c` 内联 `$VAR`/循环变量不可靠 ⇒ 全写绝对路径或落脚本**；变量后紧跟中文标点被吞 ⇒ `${VAR}`。
+- Go 1.25.1 + GOPROXY=goproxy.cn；`web/` 用 bun（WSL 无 node）；**本机不适合构建镜像**（WSL2 上行丢 SYN，`bun install` 永挂）⇒ 发版走 CI / macOS。
 
-## 上游二次开发纪律（10-09 下达）
-`new-api-yxw` = `QuantumNous/new-api` 二次开发分支（origin `git@github.com:yanxuewei/new-api-yxw.git`，`main`，**单人直推、无 PR 流程**）。
-**五铁律**：① 能扩展不改源码 ② `UPSTREAM_CHANGES.md` 记清单、sync 前对照 ③ 自研代码放 `ours_likha/{code,ops,doc}` 隔离 ④ 禁无意义格式化上游文件 ⑤ merge 冲突后跑全量测试、CI 不许 skip job。（落地物/唯一上游改动见 REFERENCE）
+## 上游二次开发五铁律（10-09）
+能扩展不改源码 · `UPSTREAM_CHANGES.md` 记清单 · 自研放 `ours_likha/{code,ops,doc}` · 禁无意义格式化上游 · merge 后全量测试（CI 不许 skip）。origin `git@github.com:yanxuewei/new-api-yxw.git`，单人直推无 PR。
 
-## 高频铁律
-- 变量后紧跟中文/全角标点被 bash 3.2 吞 → 一律 `${VAR}`。**PATH 自愈**：脚本头加 `case ":${PATH}:"` 兜底。
-- **脚本日志勿与 API 输出混流**：日志走 `exec 3>&2`、数据落文件（污染 JSON → jq 假失败）。`tee` ≈0.6 s/次 → 逐行日志不用 tee。
-- **★ 写操作先干跑**：`--cli-dry-run` / ALB `--DryRun true` → `DryRunOperation` 即全过（⚠ 托管 ALB 例外）。
-- **★ K8s `Pod.spec.imagePullSecrets` 创建即固化、不可变** ⇒ 「SA 上现在有凭据」≠「这个 Pod 拉得动」；查拉取失败必须看 **Pod 的实际字段**，处置优先**重建 Pod**（详见 REFERENCE「凭据晚于 Pod 创建」节）。`-o jsonpath` **不认 `{{}}`**（那是 go-template）。
-- **CLI 3.5.1**：配额只有 `--ProductCode`、`--MaxResults`（上限 **100**）、`--QuotaCategory CommonQuota`；vCPU 在 `ecs-spec`；地域**必须用维度** `--Dimensions.1.Key regionId`；**`Agree` 只在 `ListQuotaApplications` 返回** ⇒ 巡检一律 `jq -e`；**CLI 说参数名非法就先信它**。
-- **探针法**：踩**服务端**校验点看错误落哪层；**禁用 CLI 已声明 enum/range 的参数当"必失败点"**；跑完复核资源数未变。权限探测**严禁子串匹配**、**不能用不存在的资源 ID**（存在性先于鉴权）→ 用幂等写。**资源前缀不代表地域**。
-- **VPC 端点两端皆偶发抖动** → 写操作**重试 ≥3 次**并校验合法 JSON，否则**静默漏建**。
-- 一键复核 `deploy/verify_deploy_0_6.sh`。**`WARN` ≠ 通过**。⚠️ **`UID` 是 bash 只读变量**（root 下=0）→ 换名。
+## 高频铁律（全文见 REFERENCE）
+- 写操作先干跑：`--cli-dry-run` / ALB `--DryRun true`（托管 ALB 例外）；cs REST POST 必须 `--header "Content-Type=application/json"`。
+- K8s `imagePullSecrets` 创建即固化不可变 ⇒ 排查看 Pod 实际字段、处置优先重建 Pod；`-o jsonpath` 不认 `{{}}`。
+- CLI 3.5.1：配额 `--ProductCode / --MaxResults(≤100) / --QuotaCategory CommonQuota`；地域必须维度 `--Dimensions.1.Key regionId`；**CLI 说参数名非法就先信它**；巡检一律 `jq -e`；RDS 报价 `--PayType Prepaid --TimeType Month --Quantity 1`（无 `--Period`，按量 Postpaid 不带 TimeType）。
+- 探针法：踩服务端校验点看错误落哪层；权限探测用幂等写（禁子串匹配/不存在 ID）；写操作重试 ≥3 次防 VPC 抖动静默漏建。
+- 脚本日志与 API 输出分流（`exec 3>&2`，数据落文件）；一键复核 `deploy/verify_deploy_0_6.sh`，`WARN` ≠ 通过；`UID` 是 bash 只读变量。
 
-## RAM 权限与 K8s RBAC（10-10 · 全文见 REFERENCE）
-**★ 两套互不相通**：**RAM 策略**管「能否调 OpenAPI」；**K8s RBAC**管「K8s 里能否 list/get/update」（`APISERVER.403 … cannot list resource`）。
-- `newapi-ops-operator` = v3（挂 3 组；Deny `kvstore:DeleteInstance`）；IaC `deploy/ops/{ram_policy_newapi-ops-operator.v3.json,ram_ops_operator_extend.sh}`（⚠ 上限 5 版）。**动作前缀必须逐个核准**（凭记忆写会**静默失效**）：`kvstore`=Tair · `hdm`=DAS · **`yundun-cert`=证书（无 `cas:`/`ssl:`）** · `clickhouse` · `quotas` · `resourcemanager` · `tag`。
-- **ACK RBAC 两坑**：`cs GrantPermissions` **全量覆盖**（读现状→保留全部集群→只改角色）；**响应把预置角色名放 `role_type`**。IaC `deploy/ops/ack_rbac_grant.sh`（防降权护栏）。
-- **集群（3）**：mnl `cd57e40ce9a634c1698c2f5c5e09bd93c`(apse-6) · sg `ca75829e3492d491d9d434de087913798`(apse-1) · `cb0abf5bc06034f7bbdb991752f6f3e62`(apse-6)。
+## 资源与集群（细节见 REFERENCE / impl_deploy.md §7.10）
+- 集群(3)：mnl `cd57e40ce9a634c1698c2f5c5e09bd93c`(apse-6) · sg `ca75829e3492d491d9d434de087913798`(apse-1) · jkt dev `cb0abf5bc06034f7bbdb991752f6f3e62`(apse-5)。
+- 实例：RDS `pgm-5tstdhko64x2c01w`（PG 17.0 2C8G/100G HA 包月，到期 2026-10-28 已自动续费）· Tair mnl `r-5tsf1fe16543e274` · Tair sg `r-gs5ltv3m4i3655besh` · CK `cc-5tsv2o51s1360b0pr`（企业版按量 $35.587/天）· jkt dev ALB `alb-4okmogghe7hbv5fwm6`（`dev.likha.hk`，10-15 落地，IaC `deploy/jakarta_dev/dev_ingress.yaml`）。
+- 权限两套互不相通（RAM 管调 OpenAPI / K8s RBAC 管集群内）；`newapi-ops-operator`=v3；`cs GrantPermissions` 全量覆盖须读现状保全部集群；`bssopenapi` 一律 `--region ap-southeast-1`。
+- 域名：GTM 3.0 已接管 `www.likha.hk`（10-13 任务 21）；DV 通配符 `606823-ap-southeast-1`（2027-03 前续签）；`_dnsauth` TXT 保留；加域名一条命令 `deploy/ops/add-domain.sh`。
+- 节点池（10-14 起）：mnl `np-mnl-app` min2/max8 · sg `np-sg-ph-standby` min1/max10；**自动缩容结构性不会发生**（goatscaler `skip_nodes_with_system_pods:true`，每台节点都命中）⇒ 真缩用 `deploy/tasks/task42/shrink_nodepool.sh`。
 
-## 付费方式（09-28/29 · 10-06 裁定 · 详表见 REFERENCE）
-RDS PG = 包年包月 **1 年** · Tair = 12 月 · **ECS 节点池 = 按量**（`PostPaid`）· **ACK 管理费不支持包月** → 资源包 · **CK 企业版只能按量** → 计算资源包（因子 **1.45**）。
-- ⚠️ **月付上限 <12**（`Period=Month`+`UsedTime=12` 报 `Order.PeriodInvalid`）。配额按量 `q_ecs_enterprise_postpay_c`（mnl 64 / sg 96）；**10-12 实测已用 mnl 32（4 节点）/ sg 16（2 节点）⇒ mnl 仅余 4 节点额度**（HPA 硬顶）；包月/按量**不共享库存**（prepay 实为 **1024/5120**）。
+## 成本与账务（真源 `gen_cost_table.py --apply`，勿手改 md）
+- 生产两站 **4,301.55 USD/月**（含 jkt 4,628.85），日烧 ≈$152；**CK $1,082.44/月 = 最大单项**；流量 $0.124/GB 当前≈0；证书一次性 $212.07（OV $997 已退款）；数据盘 300G→100G 省 $221.80/月（未执行，云盘不支持原地缩容）。
 
-## 域名与 ALB（likha.hk · 全文见 REFERENCE §4/§5/§10）
-- **DNS**：NS `ns7/ns8.alidns.com`（**非** `ns*.aliyuncs.com`）；**免费版 TTL 下限 600s**；`aliyun alidns` 无需 `--region`。记录 **9 条**：`@` 双 A → mnl ALB、**`www` 已由 GTM 应答**（云解析残留 2 条 A 保留作回退兜底）、`sg` 双 A → SG ALB、`img` CNAME → OSS、**`_dnsauth`/`_dnsauth.img` TXT 须保留**（证书 DCV 续签复用）；`ops`/`static` 未建。⚠ **SOA 序列号不随记录增删递增**。脚本 `deploy/manifests/dns-likha-hk.sh`。★ **负缓存坑**：记录改后权威/递归秒级生效，但**本地路由器**可能因旧 NXDOMAIN 负缓存回空 → `curl` 回 **000**。
-- **★ GTM 3.0（10-13 任务 21 落地）**：`www.likha.hk` 已由 GTM 3.0 接管（**直接接管业务域名，不是 CNAME 挂接**）⇒ 权威直答 `CNAME alb-1riqckb1h8ezm0y7s9.ap-southeast-6.alb.aliyuncsslbintl.com`、**TTL 60**（「TTL 60 不可达」只对云解析普通记录成立）。ID：`cfg-2109945017409681408` · `gtm-post-2109945017262880768` · `pool-mnl`=`pool-2109945348675815424`（domain 型）· 地址 `addr-2109945408285264896` · 模板 `mtp-2109945303977115648`（https/443/60s/5s/3 次/**失败率 100%**/HK+SG+Tokyo）。**按量付费、无需预购实例**（`ChargeType=postpay`）⇒ 卡片「控制台购买」与「步骤 3 CNAME」**均作废**。成本 ≈**21 USD/月**（探测 1.5 USD/万次 = 大头；**间隔×地址数是乘数**：15s≈78、备池入池 +19.4）。⚠ **禁用不禁费**。IaC `deploy/tasks/task21/gtm_setup.sh plan|apply|verify|enable|disable|teardown`。
-- **★ 443 + canonical（10-12）**：canonical = `www.likha.hk`；80 一律 **301**、443 一律 **308**（`new-api[-sg]-https-canonical`）；sg `ph-standby-ip` 补 **443 兜底 + order=50**。**承载 API 的域名收敛一律 308**（`curl -L -d ''` → `404 redirects=1` 为证）。⚠ **SG 次序**：先补 443 兜底再上 canonical。⚠ 伪造 Host 经兜底仍 200（任务 47）。
-- **★ ALB 硬结论（7 条，详见 REFERENCE）**：① 证书字段 **`certificates[].CertificateId`** ② 托管 ALB = **`ServiceManagedResource`**（OpenAPI/DryRun 被拒、控制台灰态）③ 跨地域证书可用 ④ 跳转注解 **`RedirectConfig`+`httpCode`**（写错**静默忽略仍回 200**）⑤ **未匹配 Host ⇒ 占位组 ⇒ 502** ⑥ **裸 IP 的 HTTPS 无解**（裁定 A 仅限 HTTP）⑦ **域名转发只能改 Ingress**（压过兜底须 `order`<50）。
-- ⚠ **规则/组 ID 会漂移** ⇒ **判路由一律实时查 API**。★ **规则非 1:1**（N = host×path×端口数）⇒ 控制台「路由」页按 Ingress 聚合、ALB 页平铺**无归属**。★ **服务器组派生粒度 = Ingress**（同 Ingress 复用、跨 Ingress 各派生 ⇒ 同 Service **同名不同 ID**，非残留）⇒ 按 `ServerGroupId` 引用、归属看 `ingress_name` 标签；**托管组删不掉**，删了即 **502**。★ **`order` 是 Ingress 级**；**`order` ≠ `Priority`**。
-- **★ 工具 `deploy/ops/add-domain.sh`**（`plan|apply|verify|ls|delete`）＝加域名一条命令（预检 8 + 云端对账 3 + 回写真源；order forward=40/redirect=1，80→301 / 443→**308**）。⚠ **云助手 Output ~24 KB 上限且「掐中间」** ⇒ **回传 < 2 KB**、回读用 go-template 紧凑 TSV（**不要 `-o json`**；具名 get 的 `{{range .items}}` **静默输出空**）。
+## 日志库去 CK（2026-10-15 已实施 → task58）
+- 代码事实：`LOG_SQL_DSN` 支持 PG/MySQL/CK（`model/main.go:140-184`）；`LOG_SQL_CLICKHOUSE_TTL_DAYS=90` 仅 CK 生效；清理走 system_task → `DeleteOldLogBatch`（`model/log.go:705`）。
+- **★ GORM 硬差异（决定性）**：mysql driver v1.5.7 `DeleteClauses` 含 LIMIT ⇒ 批删生效；**postgres driver v1.5.9（`postgres.go:77`）不含 ⇒ PG 上 `Limit()` 被静默忽略 = 一次全删大事务**（长锁/膨胀），PG 日志库清理需运维侧兜底。
+- **已实施 B 方案**：专用 MySQL `rm-5ts0ez22t67il9oz3`（x2.medium.2c 跨 AZ HA，$133.06/月，净省 $949.38）；mnl 内网 / sg 公网 `newapi-logs-public`（SSL 已开）+ `tls=skip-verify`（知情偏离，云端证书不在公共信任链）；两站切换完成 0 错误；**CK `cc-5tsv2o51s1360b0pr` 保留回滚 3–7 天**。细节/回滚 → `deploy/tasks/task58_log_mysql/README.md` + REFERENCE。
 
-## 当前状态（截至 2026-10-13）
-- **24/56 卡闭合**（Day1 13 + Day2 A 窗 8 + 10-12 的 19/25 + **10-13 任务 21**）。**⏸ 挂起 1 项**：**任务 56（上游 IP 白名单提交与生效确认）—— 10-13 裁定「按需再做」**，从 G0 欠项 / Day3 泳道 A 出口门禁 / M3 判据全部移出；**不阻塞任何里程碑**（上游侧白名单只影响"需白名单的渠道"＝企业专属/Azure OpenAI/自建上游，未加白不影响我方探活与现有链路）。**重启触发**：① Day4 正式发布（任务 34）前确定使用的渠道中存在需白名单者 ② 任一渠道稳定 403/间歇失败且已排除 SNAT/EIP 侧 ③ 上游主动要求。**未动**：任务 3 · 29（SG Tair）· Day3/Day4；**Day2 B 窗部分推进**（21 ✅）。任务 26 = 完成（SLS/ARMS/Grafana；⚠ `/api/status` 的 `"version":""`）。**任务 1、2 已收口**（G0 门禁 11 项全过）。
-- **★ G5 证书 = 已闭环（10-12 · Plan C）**：**DV 通配符**（US$207）⇒ `CertIdentifier=606823-ap-southeast-1` / `issued` / SAN `*.likha.hk,likha.hk`。⚠ **→ 2027-04-28 且 `AutoReissue=disable` ⇒ 2027-03 前须续签**。脚本 `deploy/ops/cas_dv_cert.sh`。
-- **既有实例**：RDS `pgm-5tstdhko64x2c01w`（PG 17.0，**2C8G**/100G ESSD PL1/HA/包月，主 6b/备 6a，到期 2026-10-28，**✅ 已设自动续费**，10-13 核实）· Tair mnl `r-5tsf1fe16543e274`（企业版主备 1G/2DB/6proxy，仅 6a）· **Tair sg `r-gs5ltv3m4i3655besh`**（Tair RDB 集群 `tair.rdb.with.proxy.1g`×2 shard/ESSD PL1 5G/双 AZ/包月，10-09 建、到期 11-09 —— **修正旧记「Tair SG 0 实例」**）· CK `cc-5tsv2o51s1360b0pr`（**企业版/按量/单 AZ 6a/2 server 节点/OSS 存储/Serverless 4–32CU**）· **第 3 个 ACK 集群 `ack-newapi-jkt-dev`（ap-southeast-5 雅加达，`cb0abf5b…`，2 节点 `g9ae.large`+`g9i.large`；⚠ 账单未见计费）**。⚠ RDS 2C8G vs 任务 4 卡 16C64G 待对齐。**F11：`max_connections=800`** ⇒ 服务端预算封顶 **640**。★ **ACK 会为每集群自动建 1 个内网 CLB**（`ManagedK8SSlbIntranet-<cid>`）。★ **sg 两节点规格不一致**（`g8ine.2xlarge` + `g9ae.2xlarge`，多规格池）。
-- **账务（10-14 更新 2）**：余额 380.33 USD（10-12 为 699.00 ⇒ 2 天消耗 ≈319、**≈160 USD/天**）⇒ **✅ 已安排充值（受理中 10-14）**，「仅够 2.4 天」告警**解除**；仍建议配 **余额+到期双告警**（阈值：< 1,000 USD / 日耗 > 250）。✅ **证书 $997 悬案已闭合**：**OV 通配符（$997）已退款**（账单实证 `cas_intl-sg-9lu4zmk9e00m` = 新购 +997 / 退款 −997，**净额 0**），**改用 DV**（`cas_intl-sg-4rf4zyk0u00s` = 207 + 5.07 = **$212.07**）⇒ 证书一次性净支出 **212.07 USD**，较 OV 省 **784.93**。未支付订单 `518158947970481`（RDS 16C64G）与实建不符，**须确认已取消**。⚠ `bssopenapi` **无 apse-6 端点** ⇒ 一律 `--region ap-southeast-1`；**`--Region`（大写）= API 参数、`--region`（小写）= CLI 地域**，写错会静默用 profile 地域报 `unknown endpoint`。★ **成本真源 = `deploy/ops/gen_cost_table.py`**（`--apply` 回写 `impl_deploy.md` + `impl_tech.md` §7.10 并自动备份）⇒ **改成本先改脚本，勿手改 md**。**实测口径**：生产两站 **4,301.55 USD/月**（mnl 3,205.85 + sg 1,095.71），含 jkt dev **4,628.85**；vs 09-27 规划 9,865.36 **↓56.4%**（WAF/DCDN/付费DNS/ARMS应用监控**未开通**、CK 改 1 站按量、RDS 参照值虚高 17×、拨测实测 $1.55 vs 规划 $145.15）。★ **流量口径（10-14 定）**：当前无真实出口流量（CDT≈0）；按「**上量后 100 MB/天**」估算 **+$0.37/月**，单价 **EIP $0.081/GB（出）+ NAT CU $0.043/CU（1 CU = 1 GB，入出均计）= $0.124/GB** ⇒ 日均 ≤10 GB 时 ≤$38/月、**不改变成本结构**。★ **7.10.1/7.10.2/7.10.3 三表按 USD/月 降序排列**。★ **数据盘（10-14 论证，未执行）**：ESSD PL1 **线性 $0.0002532/GiB·h、两地同价**（300G=$55.45/台月；100G=**$18.48**）；**整盘 used 7.9 GiB / 290 GiB = 2.7%**（该盘 bind 承载 kubelet+containerd+**`/var/log/pods`**）⇒ 降 100G 省 **221.80 USD/月**（mnl 147.87+sg 73.93，占 5.16%，年化 2,661.6）；⚠ **云盘不支持原地缩容** ⇒ 改节点池 `data_disks.size` + 逐台轮转替换节点。★ **数据盘挂载 = ACK 内置 `[step=diskinit]`**（`auto_disk.go`：ext4 → 挂 `/var/lib/container` → bind kubelet/containerd/log → 写 fstab），**不是 user_data**（那是 nofile 调优）、**也不是 `disk_init` 字段**（API 从不返回该字段，「`disk_init=[]`」记法作废）⇒ **10-14 裁定「保持现状」= 不补 `disk_init`（方案 A · 线上零变更）**，机制已写死进 `deploy/tasks/task11/nodepool_mnl.sh` 文件头 + 两处建池分支注释（防后人误判「漏配」再补；task24 薄封装指回同一处）。显式化即从"ACK 默认"切到"按我给"，覆盖风险高：`disk_name` 必填须同改 `data_disks`；`mount_target`↔`mount_for_runtime` 组合语义官方无文档，写错 ⇒ 新节点 containerd 落 100G 系统盘 ⇒ disk-pressure 雪崩）。取证：`bssopenapi DescribeInstanceBill`（**按实例 + ServicePeriod 反推日率最准**）/`QueryBillOverview`；⚠ `DescribeSplitItemBill` 本账号返 0 行。
-- **★ 节点池伸缩边界（10-14 变更 · 成本表「更新 3」）**：mnl `np-mnl-app` **min 2** / max 8（13:00 由 min4 下调）· sg `np-sg-ph-standby` **min 1** / max 10（12:59 由 2/12 调整）—— 负责人控制台 `ModifyClusterNodePool`，**ActionTrail 实证**；**存量实例/磁盘未变**（`CreationTime` 全 2026-09-29 ⇒ **无实际缩容**），故常态成本表数字不变。新增 7.10.4 **目标态行**（mnl2+sg1 ⇒ 生产两站 **3,096.15 USD/月**，省 **1,205.41**，−28.02%）+ 7.10.8 两条降本行（mnl −756.98 / sg −418.49~448.42）。⚠ **改下限 ≠ 立即缩容**：真因（10-14 实测，**纠正"ACK 按利用率判定"旧记法**）= autoscaler 为 **`ack-goatscaler`**（控制面托管，**集群内无 Pod**，勿再据 `kubectl | grep autoscal` 空判"没有 autoscaler"），其 `kube-system/autoscaler-meta` 里 **`skip_nodes_with_system_pods:true`** ⇒ 载 kube-system 非 DaemonSet Pod 的节点永不缩容，而两地**每台节点都命中** ⇒ **自动缩容结构性不会发生**；`ScaleClusterNodePool` **只能扩容**。真缩只能显式 `RemoveNodePoolNodes`（工具 `deploy/tasks/task42/shrink_nodepool.sh`）。容量账：mnl 2 台 = **97%**（HPA max13 不可能达成）· sg 1 台 = **101.5% 装不下**（须先 `new-api-ph-standby` 2→1）⇒ **详见 REFERENCE「节点缩容机制」节**；mnl 跨 AZ 将变 1/1、sg 变单 AZ 单节点。IaC 已同步（task11 MIN 4→2 · task24 MIN 2→1 / MAX 12→10）防重跑覆盖。⚠ ActionTrail `MaxResults` 上限 **50**、`--region` 决定事件地域（apse-6 独立、端点偶发抖动）。
-- **五项裁定（09-30）**：KMS 不买 · CK 资源包不买 · 备站→CK 走 **CreateEndpoint 公网** · ALB 已买 · ~~GTM 挂起~~ ⇒ **2026-10-13 解除**（任务 21 完成，GTM 3.0 已接管 `www.likha.hk`）。
-- **集群侧已落地**：`new-api` ns/SA/Quota/CM（实名 **`new-api-config`**）两地 · RRSA ×2 · Secret `new-api-secrets`（mnl **6** 键 / sg **4** 键）· `LOG_SQL_CLICKHOUSE_TTL_DAYS=90` · SG `SQL_DSN`=`sslmode=verify-full`+Secret `rds-ca-apse6`（**备站 Deployment 必挂**）。
-- **凭据**：`/root/.deploy_secrets/`（600）= RDS 三账号口令 + CK 两 DSN + SESSION_SECRET×2；Tair 口令在 `deploy/.env`；`newapi_ops` 在 `/home/fanyan/.newapi_rds_ops_password`。待补 `PAYMENT_PRIVATE_KEY`、SG 三键。
-- **G0 门禁（10-12 三次更新后 · 11 项全过）**：✅ G1–G7 G9 G10 **G11** G12。**G11 产出**：`deploy/docs/G11连接数预算表_线上核实_2026-10-12.md` ⇒ **I-1 `1600≤2000` ✅ · I-2 `≤220≤640` ✅ · I-3 5432 旁路 ✅**。**复核闭合 2**：**G6** 模板（14 件全入库+已推 origin；单人 fork 直推 ⇒ PR 要件不适用）· **G7** 产品开通。**移出门禁 2**：**G8**（T+14）· **G13**（Day 3）。**裁定闭合 1**：**G9**。另欠上游 8 EIP 白名单。
-- **⚠ 门禁外风险登记（10-12 发现 → 10-13 裁定）**：① **`pool_mode` 实况 `session`**（文档记 `transaction`；**ActionTrail 实证 09-30 09:33 `root` 云写、未登记**）⇒ **I-4「并发服务能力」不成立**（接管态 `1300:50` = 26:1 排队）⇒ **10-13 裁定「先不切」= 知情接受的持续偏离**，复核触发 = 真实压测前 / 任务 44 演练前 / HPA 打满时；② **HPA CPU 目标 `70%` vs F14 `65%`**（两侧）⇒ **10-13 已回改 65 并复核**（备站 HPA 此前**无 IaC 真源**，已在 `standby-deployment.yaml` 补 HPA 块）；③ **备站 conns 覆盖 `10/5` 被删**（10-13 10:56）⇒ 判定 **不建议删、建议恢复**（否则 worst-case I-1 `3400>2000`；备站与主站**共用同一 PgBouncer**，池 server 侧仍被 `default_pool_size=50` 封顶 ⇒ 抬 client 槽位**不增吞吐**）⇒ **10-13 17:1x 已按裁定恢复**（`kubectl patch --type=json` add 两个 env；generation 6→7，RS `5f8484cffb` 2/2，两 Pod 分属 1a/1b，HPA `2–16 @65%`，自探 reachable）⇒ **I-1 回 `1600≤2000`，风险闭合**。⚠ 真源 `standby-deployment.yaml:118-127` 的 env **顺序**与 patch 追加一致 ⇒ `kubectl apply` 无 diff。
-- **★ PgBouncer 语义（10-12 定论）**：`default_pool_size` **在任何 `pool_mode` 下都是每池 `(user,db)` 的 server 连接上限**（session/transaction 相同，差别只在 client **何时归还** server）⇒ 任务 41 原「session 下 50 不再是上限」**已更正**；session 真实后果是 **client 排队**（`query_wait_timeout=120s` 到点报错）。⚠ **"可热改" ≠ "没改过"**：查运行值只看 `DescribeParameters.RunningParameters` + `actiontrail LookupEvents`（**驼峰字段** `eventName`/`serviceName`）追溯。⚠「Pod 内真实生效 env」只能靠 `kubectl exec … env`（**Deployment env 覆盖 ConfigMap**）。⚠ **CM 实名 `new-api-config`**（卡内 `newapi-config` 是笔误）。
-- **账号侧「开通/购买」类阻塞**：`aliyun cms` 无 Open 接口、`bssopenapi` 新版**已移除 `CreateOrder`** ⇒ **开通类只能控制台**。
-
-## 已打通但易忘的通道（详见 REFERENCE）
-`ack_remote.sh <mnl|sg> <body.sh>` · `aliyun_rpc.py`（绕 CLI 嵌套参数）· `aliyun arms GrafanaWorkspaceHttpApiProxy` · `aliyun workorder`（须 `--region ap-southeast-1`）。
+## 已打通通道（详见 REFERENCE）
+`ack_remote.sh <mnl|sg> <body.sh>` · `deploy/lib/aliyun_rpc.py`（绕 CLI 嵌套参数）· `aliyun workorder --region ap-southeast-1` · 凭据 `/root/.deploy_secrets/`（600）。

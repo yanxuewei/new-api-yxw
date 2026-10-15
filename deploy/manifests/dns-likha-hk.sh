@@ -9,6 +9,10 @@
 # 备注：两条同 RR 的 A 记录 = DNS 轮询，天然双 AZ；TTL 600（免费版下限）。
 #       备选方案 CNAME → ALB 官方 DNS 名（IP 变化自动跟随，但无法做 A 级健康检查分流）。
 #
+# 2026-10-15 扩展：TYPE=CNAME 支持雅加达 dev 站点 ——
+#   RR=dev TYPE=CNAME CNAME_VALUE=alb-4okmogghe7hbv5fwm6.ap-southeast-5.alb.aliyuncsslbintl.com
+#   （ALB alb-newapi-jkt-dev，经 ACK AlbConfig `jkt-alb` 创建；RecordId=2110572139455158272 已落）
+#
 # 用法：bash dns-likha-hk.sh {status|add|del|verify}
 # 依赖：aliyun CLI（PATH 自愈）、dig
 # =============================================================================
@@ -17,6 +21,8 @@ set -uo pipefail
 DOMAIN=likha.hk
 RR="${RR:-www}"
 IPS=(${IPS:-8.212.161.49 8.212.183.7})
+TYPE="${TYPE:-A}"                       # A（默认，双 IP 轮询）或 CNAME（dev → jkt ALB）
+CNAME_VALUE="${CNAME_VALUE:-alb-4okmogghe7hbv5fwm6.ap-southeast-5.alb.aliyuncsslbintl.com}"
 TTL="${TTL:-600}"
 LINE="${LINE:-default}"
 
@@ -57,23 +63,33 @@ case "$cmd" in
     ;;
 
   add)
-    say "== 添加 $RR → ${IPS[*]} (TTL $TTL, Line $LINE) =="
-    for ip in "${IPS[@]}"; do
-      if list_existing | awk -v v="$ip" '$3==v {found=1} END {exit !found}'; then
-        say "  SKIP $ip (已存在)"
-        continue
+    say "== 添加 $RR (Type $TYPE, TTL $TTL, Line $LINE) =="
+    if [ "$TYPE" = "CNAME" ]; then
+      if list_existing | awk -v v="$CNAME_VALUE" '$3==v {found=1} END {exit !found}'; then
+        say "  SKIP $CNAME_VALUE (已存在)"
+      else
+        resp="$(_aliyun AddDomainRecord --DomainName "$DOMAIN" --RR "$RR" --Type CNAME --Value "$CNAME_VALUE" \
+                --TTL "$TTL" --Line "$LINE" --method POST 2>&1)"
+        say "  ADD  $CNAME_VALUE -> $resp"
       fi
-      resp="$(_aliyun AddDomainRecord --DomainName "$DOMAIN" --RR "$RR" --Type A --Value "$ip" \
-              --TTL "$TTL" --Line "$LINE" --method POST 2>&1)"
-      say "  ADD  $ip -> $resp"
-    done
+    else
+      for ip in "${IPS[@]}"; do
+        if list_existing | awk -v v="$ip" '$3==v {found=1} END {exit !found}'; then
+          say "  SKIP $ip (已存在)"
+          continue
+        fi
+        resp="$(_aliyun AddDomainRecord --DomainName "$DOMAIN" --RR "$RR" --Type A --Value "$ip" \
+                --TTL "$TTL" --Line "$LINE" --method POST 2>&1)"
+        say "  ADD  $ip -> $resp"
+      done
+    fi
     say "  --- 回读 ---"
     list_existing | sed 's/^/  /'
     ;;
 
   del)
-    say "== 删除 $RR 的全部 A 记录 =="
-    ids="$(list_existing | awk -F'\t' '$2=="A" {print $1}')"
+    say "== 删除 $RR 的 $TYPE 记录 =="
+    ids="$(list_existing | awk -F'\t' -v t="$TYPE" '$2==t {print $1}')"
     if [ -z "$ids" ]; then say "  (无可删)"; else
       for id in $ids; do
         _aliyun DeleteDomainRecord --RecordId "$id" --method POST 2>&1 | sed "s/^/  del $id -> /"
