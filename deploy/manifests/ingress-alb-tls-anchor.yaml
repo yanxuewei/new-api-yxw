@@ -1,0 +1,87 @@
+# 路② TLS 锚定件 · 两地共用（马尼拉主站 + 新加坡备站）443
+# 集群：cd57e40ce9a634c1698c2f5c5e09bd93c（ap-southeast-6，ALB `alb-1riqckb1h8ezm0y7s9`，443 监听 `lsn-hjl2cz2g9oqvee4eix`）
+#       ca75829e3492d491d9d434de087913798（ap-southeast-1，ALB `alb-amdwm60xmznh7s1nae`，443 监听 `lsn-iqn5i233mvv7eu4u6w`）
+# 创建：2026-10-15（用户指令：「做到无需人工，可以使用路② 方案」→「使用甲」→「执行」）
+#
+# 目的：给两地 443 监听挂上 **来自 Secret 的证书来源**，让实际下发证书不再依赖人工改 AlbConfig。
+#   本件自身**不参与真实路由**，只是承载 `spec.tls` 的载体（因此称"锚定件"）。
+#
+# ★ 为什么用「锚定专件」而不是把 spec.tls 挂到业务 Ingress：
+#   ① 续签执行器永远只改 Secret，不碰既有 manifests ⇒ 无需与业务 Ingress 的 owner/注释/规则台账纠缠；
+#   ② 回滚面 = 删一个对象（实测删本件后监听回到 1 张证）；
+#   ③ 挂到业务件上则每次调谐会顺带重排那件业务 Ingress 的规则，与 80/443 侧的 order 台账耦合。
+#
+# ★★★ 四条硬约束（违反任一条 = 静默失效 或 打挂 443）★★★
+#   ① **Secret 必须存在且内容正确**。本件引用 `Secret/new-api-tls`；Secret 缺失时控制器对该监听
+#      不出 Secret 证（回落钉死证），但 Secret **存在而内容坏**（证书与密钥不配对 / 链序错 / 已过期）
+#      时它照样接管 ⇒ 见约束②。
+#   ② 覆盖是**监听级**，与 `tls.hosts` 写了哪些域**无关**（2026-10-13 探针坐实）⇒
+#      本件只声明 `tls-anchor.internal.likha.hk`（**故意无 DNS 记录**、不可能被真实访问命中），
+#      但两地 443 上 www.likha.hk / sg.likha.hk / likha.hk 的出证**全部**由这份 Secret 决定。
+#      ⇒ 任何写 Secret 的自动化**必须"校验通过才写"**（SAN 覆盖 + `-modulus` 配对 + notAfter 未过期
+#        + 链 leaf 在前），任一项不过就拒绝写入并告警。**禁止"先写再修"。**
+#   ③ `albconfig` 的 `listeners[].certificates[].CertificateId`（钉死证 606823-ap-southeast-1）**保留不撤**
+#      —— 实测二者可共存（钉死证仍 `IsDefault=True`，Secret 证 `IsDefault=False`），
+#      撤销它反而触碰 Replace 语义的监听重建风险。撤 = 错。
+#   ④ `order: "99"` 落在业务段之后、404 兜底之前（现网台账：redirect/canonical=1、canary=45/46、
+#      兜底=50、**本件=99**、catchall-404=100）⇒ 小数字 = 高优先级，本件压不过任何真实业务规则；
+#      它的规则只在 Host=`tls-anchor.internal.likha.hk` 时命中，而该域**无 DNS 记录**，
+#      真实客户端不可能命中。`service.name` 必须与注解后缀 `actions.<name>` 逐字同名（此处 = `redirect`）、
+#      `port.name` 必须是 `use-annotation` —— 与本项目其余 redirect 件同口径，二者必须成对。
+#
+# ★★ 路② 落地后的新断言（务必读）：
+#   **到期当晚只改 AlbConfig 不再足以恢复 443。** 因为同域名下 Secret 来源压住 AlbConfig 钉死证
+#   （2026-10-13 已排除"剩余有效期更长者优先"这一解释）⇒ 续签的实际产物必须是**刷新的 Secret**，
+#   AlbConfig 换绑退化为"保持声明一致"的次要动作。刷 Secret 的执行器目前**尚不存在**，
+#   这是路② 剩下的唯一缺口（见 `deploy/cert/targets.yaml` 的 renewal.gap_20261015）。
+#
+# ★ 未证项（不要当成已知）：
+#   「Secret 里的证**已过期**时是否仍优先」没有做过探针 —— 现有证据只到"有效期更短但未过期仍胜出"。
+#
+# 应用：kubectl -n new-api apply -f ingress-alb-tls-anchor.yaml      # 两地各一次（同名同内容）
+#       新加坡走 deploy/lib/ack_remote.sh sg；马尼拉经跳板机 kubectl
+# 前置：Secret/new-api-tls 已存在（见下方"Secret 生成"）—— 顺序不可颠倒
+# 回退：kubectl -n new-api delete ingress new-api-tls-anchor          # 实测 ~15s 监听回到 1 张证、出证回落钉死证
+# 验收：aliyun alb ListListenerCertificates --region <region> --ListenerId <lsn>
+#        期望 cert_count=2：{Secret 证}-cn-hangzhou IsDefault=False + 606823-ap-southeast-1 IsDefault=True
+#       三入口握手 serial 不变（现网基线 09CEC25739B87C4B17FEE2588AEE4F60，chain=3）
+#
+# Secret 生成（**严禁把私钥写进命令行明文**，只走文件参数；脚本禁开 `set -x`）：
+#   kubectl -n new-api create secret tls new-api-tls \
+#     --cert=/root/.deploy_secrets/TLS_WILDCARD_CRT --key=/root/.deploy_secrets/TLS_WILDCARD_KEY \
+#     --dry-run=client -o yaml > stage/secret.yaml
+#   kubectl -n new-api apply -f stage/secret.yaml && shred -u stage/secret.yaml
+#   ⇒ 控制器会把该 Secret 上传成 CAS 用户证书再绑监听，命名 {ns}-{secretName}-{identityHash}
+#     （实测 `new-api-new-api-tls-9951c5`，`InstanceId=cas-upload-gyuf01`，**端点 = cn-hangzhou 而非资源地域**）
+#     ⇒ 每次换证新增一条上传记录 ⇒ 孤儿记录清理：
+#       aliyun cas DeleteUserCertificate --region cn-hangzhou --CertId <id>
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: new-api-tls-anchor
+  namespace: new-api
+  labels:
+    app: new-api
+    env: prod
+    purpose: tls-secret-anchor     # 只承载 spec.tls，不参与真实路由
+  annotations:
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/order: "99"
+    alb.ingress.kubernetes.io/actions.redirect: '[{"type":"Redirect","RedirectConfig":{"host":"www.likha.hk","path":"${path}","port":"443","protocol":"HTTPS","query":"${query}","httpCode":"308"}}]'
+spec:
+  ingressClassName: alb
+  tls:
+    - hosts:
+        - tls-anchor.internal.likha.hk   # 故意无 DNS 记录：不可能被真实访问命中
+      secretName: new-api-tls            # 覆盖是监听级，与此处域名清单无关（见硬约束②）
+  rules:
+    - host: tls-anchor.internal.likha.hk
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: redirect          # 必须与注解 actions.<name> 同名（非真实 Service）
+                port:
+                  name: use-annotation  # 固定值
