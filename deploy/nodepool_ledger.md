@@ -16,8 +16,8 @@
 | **资源组** | **`rg-aek4nyivmmsb6iy`（rg-ph-mnl）** ✅ |
 | 集群 | `ack-newapi-mnl` = `cd57e40ce9a634c1698c2f5c5e09bd93c` |
 | 区域 | `ap-southeast-6` |
-| 容量 | **常态 4 台**；自动伸缩 `enable=true` `min=4` `max=8` |
-| **ESS 伸缩组** | **`asg-5tsd68ew4u0wutaqk5cy`**（`acs-nodePool-npaad4181…`，min=4 max=8 `MultiAZPolicy=BALANCE`） |
+| 容量 | **常态 4 台**；自动伸缩 `enable=true` **`min=2`** `max=8`（⚠ 2026-10-14 13:00 由 `min=4` 下调 —— 负责人控制台操作，ActionTrail `05:00:02Z` 实证；**存量 4 台节点未变**） |
+| **ESS 伸缩组** | **`asg-5tsd68ew4u0wutaqk5cy`**（`acs-nodePool-npaad4181…`，**min=2** max=8 `MultiAZPolicy=BALANCE`） |
 | 机型池 | `ecs.g9i.2xlarge` › `ecs.g8ine.2xlarge` › `ecs.g9ae.2xlarge`（均 8C32G 同内存比） |
 | 实配机型 | **`g9ae.2xlarge` ×4**（ESS 自主挑选，**不严格按 `instance_types` 顺序**；见坑 R） |
 | 网络 | vSwitch `vsw-5tswpyzfa8od6je95td1h`(6a) / `vsw-5tshuvvtrqm97tnwe1ddm`(6b)·`multi_az_policy=BALANCE` |

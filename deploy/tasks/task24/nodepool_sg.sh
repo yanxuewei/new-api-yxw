@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# 任务 24｜新加坡备站节点池 np-sg-ph-standby（常态 2 节点 / 自动伸缩 2–12）
+# 任务 24｜新加坡备站节点池 np-sg-ph-standby（常态 2 节点 / 自动伸缩 1–10）
 #
 #   只做参数绑定，实际逻辑**复用任务 11 的同一份脚本**（deploy/tasks/task11/nodepool_mnl.sh）——
 #   符合方案要求「user_data 与任务 11 Step 3 完全同一份脚本（禁止手工点两遍）」。
@@ -40,8 +40,13 @@ export KEY_PAIR="${KEY_PAIR:-newapi-sg}"
 export INSTANCE_TYPES="${INSTANCE_TYPES:-ecs.g9ae.2xlarge,ecs.g9i.2xlarge,ecs.g8ine.2xlarge}"
 export IMAGE_TYPE="${IMAGE_TYPE:-AliyunLinux3ContainerOptimized}"
 export DESIRED="${DESIRED:-2}"
-export MIN_NODES="${MIN_NODES:-2}"
-export MAX_NODES="${MAX_NODES:-12}"
+# ⚠️ 2026-10-14 12:59 线上伸缩边界已由 min2/max12 调整为 **min1/max10**
+#    （负责人控制台操作，ActionTrail 实证 `04:59:20Z`，请求体
+#     {"auto_scaling":{"enable":true,"max_instances":10,"min_instances":1}}）
+#    ⇒ 此处同步为 1/10，**否则重跑本脚本 --enable-autoscaling 会把线上改回去**。
+#    注意：改下限只影响未来缩容边界，**存量 2 台节点不受影响**（实例/磁盘均未变更）。
+export MIN_NODES="${MIN_NODES:-1}"
+export MAX_NODES="${MAX_NODES:-10}"
 export SITE_TAG="${SITE_TAG:-sg}"                                       # tags site=sg
 export MANAGED="${MANAGED:-0}"
 export USERDATA_SRC="${USERDATA_SRC:-$REPO_ROOT/deploy/ops/nodepool-userdata-nofile.sh}"

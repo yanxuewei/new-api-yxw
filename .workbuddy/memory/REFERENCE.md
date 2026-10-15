@@ -149,7 +149,7 @@
 
 ## 节点池（两地已落地 · 任务 11 / 24）
 
-- 马尼拉池 `npaad418131aa84c899be022b5463d13bf`（`np-mnl-app` / `rg-ph-mnl`）· ESS `asg-5tsd68ew4u0wutaqk5cy`（min4/max8 `BALANCE`）· 4 台 `ecs.g9ae.2xlarge` · 4/4 `Ready`，6a:2 / 6b:2 · 标签 `site=ph-mnl`+`track=stable` · 节点 SG `sg-5tsil3ca5dfkqefks1g9`。台账 `deploy/nodepool_ledger.md`；M2 证据 `deploy/d2/nodes-zones.txt`。
+- 马尼拉池 `npaad418131aa84c899be022b5463d13bf`（`np-mnl-app` / `rg-ph-mnl`）· ESS `asg-5tsd68ew4u0wutaqk5cy`（**min2/max8** `BALANCE`，2026-10-14 13:00 由 min4 下调）· 4 台 `ecs.g9ae.2xlarge` · 4/4 `Ready`，6a:2 / 6b:2 · 标签 `site=ph-mnl`+`track=stable` · 节点 SG `sg-5tsil3ca5dfkqefks1g9`。台账 `deploy/nodepool_ledger.md`；M2 证据 `deploy/d2/nodes-zones.txt`。
 - 新加坡池 `npab9d46aefe3a4649b074543f36f32599`（`np-sg-ph-standby` / ESS `asg-t4ngzbg7m9u84y59dkxl`）· `min2/max12` · 1a:1 / 1b:1 · 终验 17/17。**机型顺序 `ecs.g9ae,ecs.g9i,ecs.g8ine` —— 两区都在售的排首位**（1b 无 g9i）。脚本 `deploy/task24_nodepool_sg.sh` 薄封装复用 `task11_nodepool_mnl.sh` 同一逻辑与 user_data。
 - ★★ **跨区均衡是独立开关 `AzBalance`**：**`MultiAZPolicy=BALANCE` ≠ 开启跨区均衡**！ESS 有独立 bool `AzBalance`，**ACK 建池时不设置它** → 只设策略时创建阶段完全不均衡，会顺"有库存的交换机"全塞一区。该字段 **`DescribeScalingGroups` 不回读**，且**经 ACK 改池后可能被覆盖** → 只能**幂等重设 + 用实例可用区分布间接验证**，改池后要**再断言**。修复脚本 `deploy/nodepool_azbalance_fix.sh {mnl|sg}`（配套 `BalanceMode=BalancedBestEffort`、`AutoRebalance=true`）。
 - ★ **删池竞态**：`Min/Max/Desired=0` 是**异步**的，实例先进 `Removing:Wait`，**实测 ~6–7 min** 才释放；ACK 删除流程已跑完 → 报 `ScalingGroup's instances not empty` → 池变 `delete_failed`。**必须轮询 `TotalCapacity==0` 再删**（+ `GroupDeletionProtection false`）。
@@ -1239,8 +1239,108 @@ aliyun actiontrail LookupEvents --LookupAttribute.1.Key EventName --LookupAttrib
 
 **⇒ 结论（2026-10-14 负责人裁定 · 方案 A「保持现状」）**：**不补 `disk_init`，线上零变更**；本机制已写死进 **IaC 真源 `deploy/tasks/task11/nodepool_mnl.sh` 文件头**（+ dry-run / 建池两处分支注释；task24 薄封装指向同一处，防口径漂移），成本表 7.10.8 同步标注「挂盘由 ACK 内置 `[step=diskinit]` 完成，**无需改 `disk_init`**」⇒ 后续维护者不会误判为「漏配」而补它。若将来确要显式化，**必须与"新建 1 台节点灰度验证 `fstab` 四行 + `df`"绑定**，不可只改不验。
 
-**灰度验证成本参考**：mnl ASG 现 `min_instances=4 / max_instances=8`，实际 4 台 ⇒ 可临时 scale-out 1 台（~$0.44/h × 数小时 ≈ $1 内），验 `fstab` 四行与 `df` 后缩回；或在 dev 集群（jakarta `ack-newapi-jkt-dev`）先建临时节点池验证语法。
+**灰度验证成本参考**：mnl ASG 现 `min_instances=2 / max_instances=8`（2026-10-14 13:00 由 4 下调），实际 4 台 ⇒ 可临时 scale-out 1 台（~$0.44/h × 数小时 ≈ $1 内），验 `fstab` 四行与 `df` 后缩回；或在 dev 集群（jakarta `ack-newapi-jkt-dev`）先建临时节点池验证语法。
 
 **取证脚本**：`deploy/logs/t_diskinit_pool.sh`（节点池全字段）· `t_diskinit_ud.sh`（解 user_data）· `t_diskinit_meta2.sh`（OpenAPI meta）· `t_diskinit_node.sh` + `t_diskinit_trace.sh`（节点侧 fstab/ack-deploy 溯源，经 `ack_remote.sh <site>`）。
 **落点（方案 A）**：真源注释 `deploy/tasks/task11/nodepool_mnl.sh`（头 + 2 处分支）· `deploy/tasks/task24/nodepool_sg.sh`（指回头部）· 成本表 `deploy/ops/gen_cost_table.py` 7.10.8 首行 · 本节结论。
 **状态**：**2026-10-14 已裁定 = 方案 A「保持现状」，线上零变更**（仅文档 + IaC 注释；`bash -n` PASS、`--dry-run` 渲染一致）。
+
+---
+
+## ★ 节点池伸缩边界调整（2026-10-14 · 成本表「更新 3」）
+
+**输入**：负责人称「对 ECS 进行了缩容」，要求按**线上实际实例**更新成本结构。
+
+**实测结论：ECS 未发生任何缩容** —— 实例数量（mnl 4 + sg 2 + jkt 2 + ops 1）、机型、磁盘（300G 数据盘 + 100G 系统盘）与 **`CreationTime`（全部 2026-09-29 / 09-30）** 均与建站时一致，**无节点替换、无磁盘变更**。
+
+**实际变更 = 两次节点池伸缩下限调整**（`actiontrail LookupEvents` + `--LookupAttribute EventRW=Write` 过滤实证）：
+
+| 时间（UTC / HKT） | 集群 | API | 请求体 / 变更 |
+| --- | --- | --- | --- |
+| `04:59:20Z` / **12:59:20** | sg `ca75829e…` | `ModifyClusterNodePool` | `{"auto_scaling":{"enable":true,"max_instances":10,"min_instances":1}}` ⇒ **min 2→1 / max 12→10** |
+| `05:00:02Z` / **13:00:02** | mnl `cd57e40c…` | `ModifyClusterNodePool` | `{"auto_scaling":{"enable":true,"max_instances":8,"min_instances":2}}` ⇒ **min 4→2 / max 8** |
+
+同时刻配套 `Ess ModifyScalingGroup`（MinSize/MaxSize）与 `ModifyScalingConfiguration` —— 后者的 **`DataDisk.1.Size` 仍为 300**，确证**只改了伸缩边界、未动磁盘**。
+
+**⚠ ActionTrail 用法坑**：`LookupEvents` 的 `MaxResults` 上限是 **50**（传 100 报 `InvalidParameterValue: invalid MaxResults(100)`）；**`--region` 决定事件地域**，ap-southeast-1 与 ap-southeast-6 数据独立（两个地域都要查，且 ap-southeast-6 端点偶发 timeout → 重试 ≥3 次）。CLI 点号参数 `--LookupAttribute.1.Key/.Value` 在本产品上**可用**（与 GTM 的点号数组不同）。
+
+**成本口径（已落 `gen_cost_table.py`）**：
+- **常态表数字不变**（按实际 4 + 2 台计）⇒ 7.10.1 / 7.10.2 / 7.10.3 与 7.10.4「常态」行均未变。
+- 新增 **7.10.4「目标态」行**：mnl 4→2 + sg 2→1 ⇒ 生产两站 **3,096.15 USD/月**（较常态 4,301.55 省 **1,205.41/月**，**−28.02%**）。
+- 新增 **7.10.8 两条降本行**：mnl 按新下限常态 2 台省 **$756.98/月**（单台 `g9ae.2xlarge`+300G = $378.49）；sg 按新下限常态 1 台省 **$418.49 ~ $448.42/月**。
+
+**⚠ 三个必须记住的约束**：① **改下限 ≠ 立即缩容** —— 是否真缩由 ACK 按负载利用率判定；② mnl 跨 AZ 将由 2/2 变 **1/1**，**失去「单 AZ 故障仍余 2 台」的冗余**；③ sg 缩到 1 台即**单 AZ 单节点**，备站接管 RTO / 容量须重评。
+
+**IaC 同步（防重跑覆盖线上）**：`task11/nodepool_mnl.sh` `MIN_NODES` **4→2**；`task24/nodepool_sg.sh` `MIN_NODES` **2→1** / `MAX_NODES` **12→10**；台账 `deploy/nodepool_ledger.md`（§1 容量/ESS 行）与 `deploy/nodepool_ledger_sg.md`（§1 ESS 行）同步为现值。
+
+**取证**：`deploy/logs/t_ecs_shrink_check.sh`（实例/磁盘/节点池三查）· `t_ecs_age.sh`（`CreationTime`）· `t_trail_write.sh` / `t_trail_hourly.sh` / `t_trail_mnl2.sh` / `t_trail_mnl3.sh`（ActionTrail 分层扫描）。
+
+---
+
+## ★★ 节点缩容机制：为什么「改 min」不会缩，以及怎么真正缩到 mnl=2 / sg=1（2026-10-14 实测）
+
+### 一、结论：自动缩容在本集群**结构性不会发生**
+
+1. **autoscaler 存在**，是 **`ack-goatscaler`（GOATScaler，节点即时弹性）**，**不在用户集群内可见 Pod**（控制面托管）—— 但节点标签 `goatscaler.io/managed=true`、kube-system `lease/ack-goatscaler`、事件 `LeaderElection ack-goatscaler-…became leader` 三处可证。
+   ⚠️ 因此 **`kubectl get pods -A | grep autoscal` 查不到 ≠ 没有 autoscaler**（曾据此误判过一次）。
+2. **它不会自动缩容**，真因写在 `kube-system/autoscaler-meta`（ConfigMap，15d 未变）：
+   ```json
+   {"scaler-type":"goatscaler","unneeded_duration":"10m","cool_down_duration":"10m",
+    "utilization_threshold":"0.5","scale_down_enabled":true,"scan_interval":"60s",
+    "expander":"least-waste","skip_nodes_with_system_pods":true,
+    "skip_nodes_with_local_storage":true,"scale_up_from_zero":true}
+   ```
+   **`skip_nodes_with_system_pods: true`** ⇒ 载有 kube-system **非 DaemonSet** Pod 的节点**永不参与缩容**。
+   实测两集群**每一台**节点都命中（mnl：`.194` 载 **13** 个 + `logtail-statefulset-0`；`.195` 载 2；`.200` 载 1；`.201` 载 4；sg 同构）⇒ **无一台是候选**。
+3. 事件 `ScaleDownLimited: blocked by nodepool minsize limit`（mnl `.194`，`04:58:18Z`）只是**最外层**门槛；**放开 min 之后仍缩不动**（因为还有 skip 系统 Pod 这一层）。⇒ 「改下限 ≠ 立即缩容」的**真正原因**不是"ACK 按利用率判定"，而是这条 skip 规则。
+4. `ScaleClusterNodePool` **只支持扩容**（meta 原文：「扩容节点数量…当前 2 个扩容 2 个后变成 4 个」，`count` 只能加）⇒ **不能**用它缩容。
+
+### 二、要真正缩，只有显式路径
+
+| 路径 | 命令 | 评价 |
+| --- | --- | --- |
+| **A. ACK 原生移除（推荐）** | `cs RemoveNodePoolNodes --instance_ids '["i-x","i-y"]' --release_node true --drain_node true --concurrency false` | 精准选节点、自带 drain、会同步 ESS 期望数；`instance_ids` 是 **`style:json`**（与 GTM 同坑：`--instance_ids.1` 会报"未赋值"，必须整体传 JSON 串） |
+| **B. 压 max 触发 ESS 缩容** | `cs ModifyClusterNodePool --body '{"auto_scaling":{"enable":true,"type":"cpu","min_instances":N,"max_instances":N}}'` → 收敛后回填 max | 官方警告语「最大实例数不要小于当前节点池中的节点数，否则会直接导致节点池缩容」；但**挑哪台由 ESS 决定**，不可控 |
+| C. 调 GOATScaler 配置 | 需在 ACK 控制台组件管理改 `SkipNodesWithSystemPods` / `ScaleDownOnlyEmptyNodes`，或把系统 Pod 用 nodeAffinity 钉到固定节点 | 改动面大（涉及系统组件调度），收益仅"自动"，**不推荐** |
+
+> 工具：**`deploy/tasks/task42/shrink_nodepool.sh <mnl|sg> [--target N] [--keep ...] [--apply]`**（幂等；**默认 dry-run 只出计划**；plan 阶段即校验 `target ≥ ACK min` 与 `target ≥ ESS MinSize`；`--apply` 逐台串行 + 轮询释放；含 `--target` 参数化，mnl 默认 2 / sg 默认 1）。
+> 实测计划：mnl 保留 `i-5ts9wk588cliiweawind`(6a) + `i-5tsawhljdqzwqhmadqv0`(6b)（**刻意保留系统 Pod 最多的 `.194`，把迁移量压到最小**），移除 `.195` + `.201`；sg 保留 `i-t4nb4aj0ssltm7jjawuv`(1a)，移除 `i-t4nha3jicbebtvf3tr7v`(1b)。
+
+### 三、★ 容量硬约束（缩之前必须先过这一关）—— 实测 requests 账
+
+节点可分配：**7910m CPU / 30.2 GiB**（`ecs.g9ae.2xlarge`，g8ine 同）。每节点 DaemonSet 开销 ≈ **0.78 C**；集群级非 DaemonSet 系统 Pod（coredns/gatekeeper/metrics-server/csi-provisioner/ack-cost-exporter/pod-identity-webhook…）两地各 ≈ **3.2 C**（其中 arms-prom 占 ~1.0 C）。
+
+| | 现状 | 缩后 | 判定 |
+| --- | --- | --- | --- |
+| **mnl** | 4 台 = 31.64 C；请求 16.91 C（41/63/61/46%） | 2 台 = 15.82 C；请求 ≈ **15.35 C = 97.0%** | ⚠ **能装下但零余量** |
+| **sg** | 2 台 = 15.82 C；请求 8.81 C | 1 台 = 7.91 C；请求 ≈ **8.03 C = 101.5%** | ❌ **装不下** |
+
+- **sg 必须先降副本**：`new-api-ph-standby` **2 → 1**（−2 C）⇒ 6.03 C / 7.91 C = **76%** 才成立。否则 Pod 起不来 → GOATScaler 会**补回第 2 台**（白折腾）。
+- **mnl 2 台**稳态能容：`new-api-stable` 4×2C + `new-api-canary` 1×2C + `new-api-master` 0.5C + 系统 4.8C ≈ 15.3C。但 **HPA `maxReplicas=13` 在 2 台时不可能达成**（13×2C=26C）⇒ 2 台后 HPA 上限实际上被节点数接管：**稳态满、扩容只能靠 GOATScaler 加节点**（`scale_up_from_zero=true`，扩容路径**不受** skip 规则影响，所以弹性仍在，只是从"热备"变"冷启"）。
+- 若不想这么紧：**mnl 留 3 台**（23.73 C，请求 ≈ 16.1 C = **68%**，省 $378.49/月）是"保留缓冲"的中间态；或 2 台 + 撤 `new-api-canary`（−2C ⇒ 84%）。
+- 冗余代价：mnl 由跨区 **2/2 → 1/1**（单 AZ 故障只剩 1 台，R15「单 AZ 故障仍余 2 副本」不再成立）；sg 变**单 AZ 单节点**（备站 RTO 依赖 GOATScaler 冷启 + 镜像拉取）。
+
+### 四、取证脚本
+`deploy/logs/t_shrink_cloud.sh`（节点池/ESS/实例三查）· `t_shrink_k8s{,2,3}.sh`（容量/HPA/PDB/DS/ns 汇总）· `t_shrink_auto.sh`（ESS 伸缩活动 + RAM 角色）· `t_shrink_goat.sh`（autoscaler 痕迹）· `t_shrink_cfg.sh`（autoscaler-meta + 事件 + lease）· `t_shrink_syspod.sh`（kube-system 非 DS Pod 落点，**缩容阻塞判定**）。
+**状态**：**2026-10-14 裁定「暂不动」** —— mnl 保持 4 台、sg 保持 2 台（不降副本、不摘节点）；仅取证 + dry-run 计划 + 脚本落库，**线上零变更**。需要时执行 `deploy/tasks/task42/shrink_nodepool.sh <mnl|sg> --apply`。
+
+## K8s 免密拉取：「凭据晚于 Pod 创建」时序坑（10-14 · jakarta dev 实证）
+
+**★ 可泛化判据**：`Pod.spec.imagePullSecrets` 由 **ServiceAccount 准入控制器在 Pod 创建那一刻**写入，**Spec 不可变** ⇒
+**「SA 上现在有凭据」不能推出「这个 Pod 拉得动」**。排查顺序必须是
+`Pod 的 spec.imagePullSecrets（实际值）` → `Pod 的 SA` → `SA.imagePullSecrets` → `Secret 在不在/新不新`，
+**而不是**先看 SA 或先看 Secret（这与「Secret 存在 ≠ Pod 拿得到」是同一条约束的两端）。
+- 症状：同 ns、同镜像、同 tag 的另一个 Pod 正常，本 Pod 报 `insufficient_scope: authorization failed`。
+- 真因：凭据是**后来**才挂到该 SA 上的（改 helper 配置 / helper 下一个同步周期 / 手工补 Secret）。
+- 处置：**只重建 Pod**（`rollout restart`）即可；**不需要**改 SA，也**不需要**动 Secret。
+- 对照：若 SA 上**始终没有**凭据（helper 配置没圈到它）⇒ 换 SA（`new-api-app`），**重建无用**。
+- 工具：`deploy/jakarta_dev/bodies/fix_pull_restart.sh` + `dev_deploy.sh --fix-pull-restart <deploy>`（默认 `APPLY=0` 只出计划；
+  闸门含"生效 SA 必须已有免密 Secret，否则提示改走 `--fix-pull-sa`"）。
+- ⚠ **helper 配置读取**：`cs GET /clusters/{id}/addon_instances` **不返回 `config`**，必须走带组件名的
+  `…/addon_instances/managed-aliyun-acr-credential-helper`；`DescribeAddonInstance` / `GetAddonInstance` /
+  `DescribeClusterAddonInstance` 三个具名 API 在 **CLI 3.5.1 元数据缺失**（报 `invalid flag --ClusterId`）。
+- ⚠ **kubectl jsonpath 不认 `{{}}`**：`{{.spec.x}}` 是 **go-template** 语法，误用在 `-o jsonpath` 会报
+  `unrecognized character in action: U+007B`；jsonpath 一律单花括号 `{.spec.x}`。
+- 现状口径（10-14）：jkt dev helper 的 `serviceAccount` = **`new-api-app,default`**（安装时为 `new-api-app`，17:14:53 由负责人
+  经控制台重提，附带占位符 `notifyEmail: xxx@aliyun.com`）⇒ `default` SA 也带上了 EE 免密凭据，**控制台手建负载不再必然拉不到**；
+  代价是 `newapi-dev` 内任何用 default SA 的 Pod 都持有 **EE 实例级**凭据（覆盖含 `newapi-prod` 的全部命名空间）。全文见 `deploy/jakarta_dev_ledger.md` §14。
