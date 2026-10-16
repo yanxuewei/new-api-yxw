@@ -9,9 +9,18 @@ echo "--- 1) 载荷键自证（只报键名与字节数，绝不 cat 值）"
 for f in "$T"/sec/*; do
   printf '    %-18s bytes=%s\n' "$(basename "$f")" "$(wc -c <"$f")"
 done
-for k in SQL_DSN SQL_DSN_MIGRATE LOG_SQL_DSN SESSION_SECRET; do
+for k in SQL_DSN SQL_DSN_MIGRATE LOG_SQL_DSN SESSION_SECRET REDIS_CONN_STRING; do
   [ -s "$T/sec/$k" ] || { echo "    [XX] 缺少键 $k"; exit 1; }
 done
+# REDIS_CONN_STRING 结构闸门：必须是 redis:// URL（common/redis.go:35 用 redis.ParseURL 解析，
+# k/v 形态会直接 ParseURL 失败 ⇒ 首启 FatalLog）。值不回显，只打 host。
+v=$(cat "$T/sec/REDIS_CONN_STRING")
+case "$v" in
+  redis://*) printf '    %-18s host=%s\n' REDIS_CONN_STRING \
+    "$(printf '%s' "$v" | sed -nE 's#^redis://[^@]+@([^:/]+):.*#\1#p')" ;;
+  *) echo "    [XX] REDIS_CONN_STRING 前缀不是 redis:// ⇒ ParseURL 必失败"; exit 1 ;;
+esac
+unset v
 
 echo "--- 2) DSN 结构自检（本地 grep，值不外泄）"
 # 形态必须是 URL（postgres://user:pw@host:5432/db?sslmode=require）：model/main.go:151 的 chooseDB()
@@ -39,7 +48,7 @@ done
 
 echo "--- 3) create secret --dry-run | apply（幂等，键名与生产同构）"
 ARGS=""
-for k in SQL_DSN SQL_DSN_MIGRATE LOG_SQL_DSN SESSION_SECRET; do ARGS="$ARGS --from-file=$k=$T/sec/$k"; done
+for k in SQL_DSN SQL_DSN_MIGRATE LOG_SQL_DSN SESSION_SECRET REDIS_CONN_STRING; do ARGS="$ARGS --from-file=$k=$T/sec/$k"; done
 kubectl -n newapi-dev create secret generic new-api-secrets $ARGS --dry-run=client -o yaml > "$T/secret.yaml" 2>"$T/err" \
   || { echo "    [XX] create secret 失败："; sed 's/^/    /' "$T/err"; exit 1; }
 kubectl apply -f "$T/secret.yaml" 2>&1 | sed 's/^/    /'

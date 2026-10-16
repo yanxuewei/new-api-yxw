@@ -11,7 +11,7 @@
 # 子命令（各自一次独立云助手调用，全部幂等）：
 #   --precheck    零凭据、零 kubectl：本地文件齐备性、ACR EE tag、RDS 白名单、DSN 结构打码自检
 #   --apply-base  Namespace / ResourceQuota / ServiceAccount / ConfigMap
-#   --secret      Secret new-api-secrets（4 键），值从本机保管目录 /root/.deploy_secrets_dev（600）
+#   --secret      Secret new-api-secrets（5 键：4 DSN/secret + REDIS_CONN_STRING，2026-10-15 起），值从本机保管目录 /root/.deploy_secrets_dev（600）
 #   --grants      临时 psql Pod 落 dev_grants.sql 的权限 SQL + 生效判据回读 + 清理临时 Pod/Secret
 #   --apply-app   Deployment + Service（须在 --secret 之后，否则 Pod 卡 ContainerCreating）
 #   --verify      只读体检（Pod/镜像/AZ/配额/事件/键名/日志尾部）
@@ -52,7 +52,7 @@ MANIFEST_SRC="$HERE/newapi-dev.yaml"
 GRANTS_SRC="$HERE/dev_grants.sql"
 BODIES="$HERE/bodies"
 REMOTE="$ROOT/deploy/lib/ack_remote_jkt_dev.sh"
-SECRET_KEYS=(SQL_DSN SQL_DSN_MIGRATE LOG_SQL_DSN SESSION_SECRET)
+SECRET_KEYS=(SQL_DSN SQL_DSN_MIGRATE LOG_SQL_DSN SESSION_SECRET REDIS_CONN_STRING)
 WORK=$(mktemp -d); chmod 700 "$WORK"; trap 'rm -rf "$WORK"' EXIT
 
 notice() { echo "[dev-deploy] $*"; }
@@ -199,10 +199,10 @@ render_check() {
   secret_payload 1                       # 含 DSN_OPS_* 与 grants.sql，供 grants 的组装检查
   local DOCS SEC; DOCS=$(pack_dir "$WORK/docs"); SEC=$(pack_dir "$WORK/sec")
   local b full
-  for b in apply_base.sh apply_secret.sh apply_grants.sh apply_app.sh verify.sh smoke.sh status.sh delete.sh db_owner_fix.sh db_owner_probe.sh logs.sh isolation.sh isolation_rbac.sh diagnose_pull.sh fix_pull_sa.sh fix_pull_restart.sh fix_dsn.sh set_image.sh node_image_cache.sh ns_regression.sh align_labels.sh; do
+  for b in apply_base.sh apply_secret.sh apply_grants.sh apply_app.sh verify.sh smoke.sh status.sh delete.sh db_owner_fix.sh db_owner_probe.sh logs.sh isolation.sh isolation_rbac.sh diagnose_pull.sh fix_pull_sa.sh fix_pull_restart.sh fix_dsn.sh set_image.sh node_image_cache.sh rollout_restart.sh redis_probe.sh ns_regression.sh align_labels.sh; do
     case "$b" in
       apply_base.sh|apply_app.sh) full="$WORK/rc_$b"; { header "DOCS_B64=$DOCS"; cat "$BODIES/$b"; } > "$full" ;;
-      diagnose_pull.sh|fix_pull_sa.sh|fix_pull_restart.sh|set_image.sh|node_image_cache.sh|ns_regression.sh) full="$WORK/rc_$b"; { header; cat "$BODIES/$b"; } > "$full" ;;
+      diagnose_pull.sh|fix_pull_sa.sh|fix_pull_restart.sh|set_image.sh|node_image_cache.sh|ns_regression.sh|rollout_restart.sh|redis_probe.sh|pg_port_probe.sh) full="$WORK/rc_$b"; { header; cat "$BODIES/$b"; } > "$full" ;;
       align_labels.sh) full="$WORK/rc_$b"; { header "TARGET=example" "KV=env=dev,project=new-api" "SCOPE=meta"; cat "$BODIES/$b"; } > "$full" ;;
       db_owner_fix.sh|db_owner_probe.sh) full="$WORK/rc_$b"; { header "SEC_B64=$SEC"; cat "$BODIES/$b"; } > "$full" ;;
       *)                           full="$WORK/rc_$b"; { header "SEC_B64=$SEC";  cat "$BODIES/$b"; } > "$full" ;;
@@ -260,6 +260,36 @@ fix_pull_restart() {
   fi
 }
 node_cache() { run_body node_image_cache.sh nodecache; }
+# Secret 变更不会自动重启 Pod（任务 17 已证）⇒ 显式 rollout restart。
+# 默认 APPLY=0（只出计划）；真做要 `APPLY=1 bash dev_deploy.sh --restart <deploy>`。
+rollout_restart() {
+  [ -n "${TGT:-}" ] || die "--restart 必须显式给第二参目标负载名（刻意不设默认，避免误伤）"
+  if [ -n "${APPLY:-}" ]; then
+    run_body rollout_restart.sh restart "TARGET=$TGT" "APPLY=$APPLY"
+  else
+    notice "（未设 APPLY ⇒ 远端默认 APPLY=0，只出计划）"
+    run_body rollout_restart.sh restart "TARGET=$TGT"
+  fi
+}
+# Redis 连通性探针：临时 Pod 经 secretKeyRef 取 REDIS_CONN_STRING（值通道不进命令体，§13.6 纪律）。
+# 默认 APPLY=0（只出计划）；真做要 `APPLY=1 bash dev_deploy.sh --redis-probe`。
+redis_probe() {
+  if [ -n "${APPLY:-}" ]; then
+    run_body redis_probe.sh redisprobe "APPLY=$APPLY"
+  else
+    notice "（未设 APPLY ⇒ 远端默认 APPLY=0，只出计划）"
+    run_body redis_probe.sh redisprobe
+  fi
+}
+# RDS 托管 PgBouncer 端口预检：5432 直连 / 6432 经池 双格 pg_isready（零凭据）。
+pg_port_probe() {
+  if [ -n "${APPLY:-}" ]; then
+    run_body pg_port_probe.sh pgportprobe "PGHOST=$RDS_HOST" "APPLY=$APPLY"
+  else
+    notice "（未设 APPLY ⇒ 远端默认 APPLY=0，只出计划）"
+    run_body pg_port_probe.sh pgportprobe "PGHOST=$RDS_HOST"
+  fi
+}
 ns_regression() { run_body ns_regression.sh nsreg; }
 align_labels() {
   [ -n "${TGT:-}" ] || die "--align-labels 必须显式给第二参目标负载名"
@@ -326,11 +356,14 @@ case "$A" in
   --apply-ingress) apply_ingress ;;
   --set-image)  set_image ;;
   --node-image-cache) node_cache ;;
+  --restart)    rollout_restart ;;
+  --redis-probe) redis_probe ;;
+  --pg-port-probe) pg_port_probe ;;
   --ns-regression) ns_regression ;;
   --align-labels) align_labels ;;
   --isolation)  isolation ;;
   --smoke)      smoke ;;
   --status)     status ;;
   --delete)     del_all ;;
-  *) die "未知子命令：$A（--precheck/--render-check/--apply-base/--secret/--grants/--db-owner-probe/--db-owner-fix/--apply-app/--verify/--logs/--diagnose-pull/--fix-pull-sa <deploy>/--fix-pull-restart <deploy>/--fix-dsn/--apply-ingress/--set-image <deploy> <image>/--node-image-cache/--ns-regression/--align-labels <deploy> <KV> <meta|template|both>/--isolation/--smoke/--status/--delete）" ;;
+  *) die "未知子命令：$A（--precheck/--render-check/--apply-base/--secret/--grants/--db-owner-probe/--db-owner-fix/--apply-app/--verify/--logs/--diagnose-pull/--fix-pull-sa <deploy>/--fix-pull-restart <deploy>/--fix-dsn/--apply-ingress/--set-image <deploy> <image>/--restart <deploy>/--redis-probe/--node-image-cache/--ns-regression/--align-labels <deploy> <KV> <meta|template|both>/--isolation/--smoke/--status/--delete）" ;;
 esac

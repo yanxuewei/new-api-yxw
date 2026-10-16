@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# ours_likha/ops/local-ci.sh
+# likha/ops/local-ci.sh
 #
 # 本地复现 .github/workflows/ci.yml 的**全部** job。
 # 纪律第 5 条：merge 冲突解决后必须跑全量测试，sync PR 的 CI 不允许 skip 任何 job。
 #   backend : go vet / go build（root + relaykit 两个 module）、make test
 #   frontend: bun install / bun run typecheck / bun run test（web/）
 #
-# 用法: bash ours_likha/ops/local-ci.sh [backend|frontend|all]   （默认 all）
+# 用法: bash likha/ops/local-ci.sh [backend|frontend|all]   （默认 all）
 set -uo pipefail
 export GOWORK=off   # 与 CI 的 env 保持一致
 

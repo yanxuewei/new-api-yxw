@@ -757,14 +757,84 @@ X4  ready=1/1  updated=1
 
 ### 14.5 遗留（待负责人裁定，均未动手）
 
-1. **`SQL_DSN` 取值与该负载的角色不符**：`NODE_TYPE=slave` 但 `SQL_DSN ← secretKeyRef/new-api-secrets[SQL_DSN_MIGRATE]`。
-   生产 slave（`stable-deployment.yaml`）用的是 **`SQL_DSN`**（DML 账号 `newapi`），migrate 账号只给 master。
-   ⇒ 这台 slave 拿着 DDL 权限跑，与 §12.2/§12.4 的最小化口径冲突。改法一行：把 secretKeyRef 的 `key` 换成 `SQL_DSN`。
+1. ~~**`SQL_DSN` 取值与该负载的角色不符**：`NODE_TYPE=slave` 但 `SQL_DSN ← secretKeyRef/new-api-secrets[SQL_DSN_MIGRATE]`~~ ⇒ **2026-10-15 复核已不成立**：控制台手建负载期间已把 secretKeyRef 改为 `key=SQL_DSN`（实测回读 deploy 与 Pod 双规格一致），结合 §16.2 的 Secret 切 6432，slave 主库已经池（@6432），与"slave 不该拿 DDL 账号"的最小化口径同时闭合。
 2. **helper 把 `default` 圈进作用域的影响面**：好处是控制台手建负载不再必然拉不到镜像；代价是 `newapi-dev` 内
    **任何**用 `default` SA 的 Pod（含一次性调试 Pod）都拿到 **EE 实例级**凭据 —— §13.6 已证该 token 覆盖
    `cri-avfqy9xkqi5bj8ee` **全部命名空间（含 `newapi-prod`）**，且 §12.8-4 的公网 ACL 仍未收口。保留 or 回收由负责人定。
 3. `deployment/new-api-dev-slave` 模板标签是 `app=new-api-dev-slave`，**没有任何 Service 选中它**（ns 内只有
    `service/new-api-dev`，selector 为 `app=new-api, track=dev`）⇒ 它当前不对外提供入口；若本意是要承接流量，需要补 Service / Ingress。
+
+## 15. dev Tair（Redis）初始化与接线（2026-10-15，参照生产任务 7 口径）
+
+> 执行参照：指南 v2.0「Day 1 · 任务 7｜Tair 主备 4GB」+ 本台账 §12 的 dev 通道。证据：`deploy/logs/tair_jkt_dev_20261015/`。
+
+### 15.1 实例实测回读（负责人控制台自建，本卡只做初始化，未建实例）
+
+| 项 | 实测值 |
+|---|---|
+| 实例 | `r-d9j5iy2q82p1ugiwrt` / `tair-jkt-dev-newapi`（⚠ 截图辨认曾误作 `r-r9j5…`，以 API 回读为准） |
+| 状态 | `Normal`（创建当天即就绪） |
+| 架构 | `NodeType=double` 主备，**Zone 5a 主 / 5b 备**（雅加达支持多 AZ 主备，与马尼拉"不支持跨 AZ"不同，见 tair.sh 头注释） |
+| 规格 | `tair.rdb.1g`（Tair 企业版内存型 5.0）/ **Capacity=1024MB** |
+| 落位 | `vpc-k1ano67avx98nr3n1bg5d` + data-5a `vsw-k1a9u8pkwwkc6z0x6g0kc` + `rg-aek4hk3prqgqjcy`（rg-nonprod）——与 §10.4 下游参数契约一致 |
+| 端点 | `r-d9j5iy2q82p1ugiwrt.redis.ap-southeast-5.rds.aliyuncs.com:6379`（内网，从连接信息回读，未手拼） |
+| 付费 | `PrePaid` |
+
+**与任务 7 的两处偏差（如实记录）**：
+1. **规格 1GB，非任务 7 标题的 4GB**。dev 单人环境可接受（任务 7 坑 3 的"升集群版"更不适用）；上线后看 `INFO stats` 决定升配。
+2. **实例由负责人控制台自建**（任务 7 是 CLI 建）⇒ 口令未经保管目录，本卡用 `ResetAccountPassword` 轮换后入库（`ResetPassword` 在 CLI 里不是合法 API，r-kvstore 里改口令走 `ModifyInstanceAttribute` / `ResetAccountPassword`；默认账号名 = 实例 ID `r-d9j5iy2q82p1ugiwrt`）。
+
+### 15.2 四步初始化（全部云侧回读复核，非返回码）
+
+| 步 | 命令 | 回读判据 |
+|---|---|---|
+| 参数 | `ModifyInstanceConfig`（tair.sh 实测口径，非 ModifyInstanceParameter） | `maxmemory-policy=allkeys-lru`；`#no_loose_disabled-commands=flushall,flushdb,keys` ✅ |
+| 白名单 | `ModifySecurityIps --SecurityIpGroupName jkt_app --ModifyMode Cover` | `jkt_app = 10.2.80.0/20,10.2.16.0/20,10.2.32.0/20`（**仅 app 三段**，§8 契约；`default` 组保持 127.0.0.1 未动；`hdm_security_ips` 为平台内置）✅ |
+| 口令 | `ResetAccountPassword`（19 位纯字母数字，URL 免转义） | 存 `/root/.deploy_secrets_dev/dev_redis` + `REDIS_CONN_STRING`（均 600，会话零明文）✅ |
+| 接线 | `dev_deploy.sh --secret`（5 键）→ `--restart new-api-dev` | `secret/new-api-secrets configured`；`REDIS_CONN_STRING b64len=136`；`successfully rolled out`，ready=1/1 ✅ |
+
+### 15.3 端到端验证（双口径）
+
+1. **探针 Pod（`--redis-probe`，redis:7-alpine，secretKeyRef 注入，跑完即删）**：
+   `PING→PONG`；`DBSIZE=1`；scan 出 **`rateLimit:v2:ip:GA:10.2.36.199`**（应用真实写入，与任务 29 新加坡 V2 同形状）；
+   `CONFIG GET maxmemory-policy→allkeys-lru`（运行面复核）；`FLUSHALL→NOPERM`（禁用命令真生效）；
+   `INFO stats：total_commands_processed=10080 / instantaneous_ops_per_sec=6`。
+2. **应用面**：新 Pod `Running ready=true`，`New API ready in 1998 ms`，`/api/status` 探针 200（Pod 能起来本身就证明 Redis Ping 过了——`common/redis.go` 的 Ping 失败走 `FatalLog`）。
+
+### 15.4 本卡产物与遗留
+
+- 产物：`dev_deploy.sh` 加 `--restart <deploy>` / `--redis-probe` 两个子命令（APPLY=0 计划制，负载名必须显式给）；
+  `bodies/rollout_restart.sh`、`bodies/redis_probe.sh`（均**零凭据 body**：探针口令经 secretKeyRef 进 Pod，不进命令体/节点 shell，§13.6 纪律）；
+  `apply_secret.sh` 键列表 4→5 并加 `redis://` 前缀闸门（`common/redis.go:35` 只认 `ParseURL`，k/v 形态必 FatalLog——与 PG DSN 前缀坑同构）。
+- 遗留：① `new-api-dev-slave` 同挂 `envFrom: new-api-secrets`，下次重启起也会启用 Redis（本卡未动它）；② 1GB 容量余量观察（`INFO memory`）；③ dev Tair 为包月，到期口径待与 §12.8-1（dev RDS 到期）一并裁定。
+
+## 16. dev RDS 托管 PgBouncer 开启 + 参数对齐马尼拉 + DSN 切 6432（2026-10-15）
+
+> 参照生产任务 41。证据：`deploy/logs/pgbouncer_jkt_dev_20261015/`。dev 实例是 **Basic 系列**——官方文档证实 PgBouncer 支持**基础系列与高可用系列**（PG 11+、内核 20240830+），Basic 不是障碍。
+
+### 16.1 云侧（全部回读复核）
+
+| 步 | 动作 | 判据 |
+|---|---|---|
+| 开启 | `ModifyDBInstanceConfig --ConfigName pgbouncer --ConfigValue true` | `PGBouncerEnabled=true`，16 条 `pgbouncer.*` 出现，实例全程 Running（无重启）✅ |
+| 参数同步 | `ModifyParameter --Forcerestart false`（差异仅 4 项） | 回读 diff=0，**与马尼拉现网逐字一致** ✅：`default_pool_size 20→50`、`max_client_conn 100→2000`、`pool_mode transaction→session`、`stats_users ''→newapi_ops` |
+| 连通 | `--pg-port-probe`（pg_isready，Pod 侧零凭据） | 5432 与 6432 双格 accepting ✅ |
+
+两处实测坑：① CLI 里**没有**开 PgBouncer 的具名代理 API（`ModifyDBProxy` 系是 MySQL PolarProxy，对 PG 恒空——任务 41 坑 1 的同源结论），开启走 `ModifyDBInstanceConfig`；② `ModifyParameter --Parameters` 的**值必须全字符串**（数字字面量报 `InvalidParameters.Format`，与指南 3b 示例一致）。
+
+⚠ **`pool_mode` 同步取的是马尼拉现网值 `session`**（10-12 已核实为 09-30 未登记云写；指南日常基线是 transaction、待兼容矩阵后热切）。dev 按"以马尼拉实况为准"同步；切回一条命令：`ModifyParameter --Parameters '{"pgbouncer.pool_mode":"transaction"}' --Forcerestart false`。
+
+### 16.2 Secret 与负载（经云助手，APPLY 闸门制）
+
+- 保管目录与集群 Secret 同步：`SQL_DSN`、`LOG_SQL_DSN` 端口 **5432→6432**；`SQL_DSN_MIGRATE` **保持 5432**（与生产 master 口径逐字同构：迁移账号不经池，`ph/master-deployment.yaml:100`）。
+- `new-api-dev`、`new-api-dev-slave` 各一次 rollout restart → 均 `1/1 Running`。
+- 三库冒烟（psql 用应用自己的 Secret）：`SQL_DSN(@6432 经池) tables=36`、`LOG_SQL_DSN(@6432 经池) tables=2`、`SQL_DSN_MIGRATE(@5432) tables=36`；S1/S2/S3 200、S5 权限链正常 ⇒ **经池链路真实生效** ✅。
+
+### 16.3 生效面与遗留
+
+- 本次切 6432 实际经池的是：两负载的**日志库**（LOG_SQL_DSN）+ Secret 的 `SQL_DSN` 键。master 主库 env 显式取 `SQL_DSN_MIGRATE`（5432 直连，生产口径：迁移账号不经池）。~~slave 主库仍取 MIGRATE 键~~ ⇒ **2026-10-15 补核：slave 的 secretKeyRef 已是 `SQL_DSN`（控制台侧改过，§14.5-1 同步订正），且其 Pod 晚于 Secret 切 6432 重启（startedAt 09:36:44Z）⇒ slave 主库经池已生效，无需任何写入**。回读：Pod `Running/ready/restarts=0`，`ready in 159 ms`，无 fatal。至此 dev 侧主库经池状态 = **master 直连（口径如此）/ slave 经池**，与生产 `ph/master-deployment.yaml`（master 直连、stable 经池）逐位同构。
+- 产物：`dev_deploy.sh` 新增 `--pg-port-probe`（零凭据 body `bodies/pg_port_probe.sh`，pg_isready 双格预检）。
+- dev 池参数随马尼拉联动：马尼拉侧任何 `pgbouncer.*` 变更后，dev 需同轮重发（本卡只做了一次性对齐，未建自动同步）。
 
 
 ## 15. 四项裁定落地：DSN 收权 + dev.likha.hk 对外入口（2026-10-15，**已执行**）

@@ -262,10 +262,10 @@ processors:
 
 **fork 二次开发纪律落地**（用户 2026-10-09 下达 5 条；与 `deploy/docs/git开发-发布-值班规范.md §4.3` **同源**，两处口径已对齐）：
 - 根目录新增 **`UPSTREAM_CHANGES.md`** —— 定制清单（逐条：上游文件/改动/原因/提交号）+ "不动的地方"反例表
-- 新增 **`ours_likha/{code,ops,doc}`** —— 自研与上游**物理隔离**（含 `ours_likha/.gitattributes` 固化行尾）
-- `ours_likha/ops/patches/0001-log-ms-precision.patch` —— 复现补丁（`git apply` 可直接回放）
-- `ours_likha/ops/verify-upstream-changes.sh` —— **定制在位校验**（sync 前后必跑，退出码非 0 即有定制被覆盖）
-- `ours_likha/ops/local-ci.sh` —— 本地复现 `ci.yml` **全量** job（backend + frontend）
+- 新增 **`likha/{code,ops,doc}`** —— 自研与上游**物理隔离**（含 `likha/.gitattributes` 固化行尾）
+- `likha/ops/patches/0001-log-ms-precision.patch` —— 复现补丁（`git apply` 可直接回放）
+- `likha/ops/verify-upstream-changes.sh` —— **定制在位校验**（sync 前后必跑，退出码非 0 即有定制被覆盖）
+- `likha/ops/local-ci.sh` —— 本地复现 `ci.yml` **全量** job（backend + frontend）
 
 #### 二、SLS 侧（app-file，两站点已 apply ✅）
 
@@ -297,13 +297,13 @@ processors:
 |---|---|
 | `go vet ./...`（root + relaykit） | ✅ 通过 |
 | `go build ./...`（root + relaykit） | ✅ 通过 |
-| `make test`（全部包） | ✅ **全绿**（`ours_likha/ops/local-ci.sh` → PASS=5 FAIL=0） |
+| `make test`（全部包） | ✅ **全绿**（`likha/ops/local-ci.sh` → PASS=5 FAIL=0） |
 | 两站点 SLS `processors` 持久化 | ✅ `success: true`（回读一致） |
 | 前端 job（`bun typecheck` / `bun test`） | ⚠ 本机 WSL 无 bun 未跑；改动**纯后端**，由 PR 的 CI 覆盖（CI 不 skip 任何 job） |
 
 #### 四、发布状态（⛔ 待用户一步）
 
-- **提交**：`9fff2aa47`（`feat(log)`）+ `373c1d580`（`chore(ours_likha)`）（+ 清单回填/脚本/报告随后的 `chore` 提交），分支 **`feature/log-ms-precision`**（PR 待开）。
+- **提交**：`9fff2aa47`（`feat(log)`）+ `373c1d580`（`chore(likha)`）（+ 清单回填/脚本/报告随后的 `chore` 提交），分支 **`feature/log-ms-precision`**（PR 待开）。
 - **目标镜像**：`acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com/newapi-prod/newapi-master:20261009-373c1d580`（tag 不可变，新 tag 合规）。
 - ⛔ **未推送**：ACR 访问凭证（开通服务时设置的密码）本机未配置，`push.sh` 需交互输入 ⇒ 待提供后执行 `bash push.sh -n prod -t 20261009-373c1d580`。
 - ⛔ **未部署**：按规范 §7.1「集群内任何变更必须体现为 ops 仓库一次 commit，禁止手工 `kubectl set image`」——建议走 release 通道，或**至少先过 canary**（`deploy/aliyun/ph/canary-deployment.yaml` 已存在）验证 ms 再接全量。
@@ -331,7 +331,7 @@ processors:
 
 #### 一、代码侧：运行时自检通过 ✅（不再只有静态校验）
 
-新增 `ours_likha/code/cmd/logms-check`（自研目录，不依赖 DB/Redis/Docker），把 `gin.DefaultWriter`
+新增 `likha/code/cmd/logms-check`（自研目录，不依赖 DB/Redis/Docker），把 `gin.DefaultWriter`
 重定向到内存 buffer 后，**真实调用**三条被改路径并机械断言：
 
 ```
@@ -348,8 +348,8 @@ ms 命中 = 6   秒级行 = 0   → RESULT=MS_CONFIRMED
 其中 `[GIN]` 行是经 `middleware.SetUpLogger` 的**真实 formatter**（含 `redactTaskArtifactAccessQuery` 中间件）
 发真实 HTTP 请求产生的 ⇒ **6/6 行带 `.mmm`、0 行秒级**，改动确认生效。
 
-用法：`go run ./ours_likha/code/cmd/logms-check`（已并入 `UPSTREAM_CHANGES.md` 的同步流程第 4 步与「相关文档」）。
-`go vet ./ours_likha/...`、`go test ./ours_likha/...` 均通过；`local-ci.sh` 仍 **PASS=5 FAIL=0**（backend 全绿）。
+用法：`go run ./likha/code/cmd/logms-check`（已并入 `UPSTREAM_CHANGES.md` 的同步流程第 4 步与「相关文档」）。
+`go vet ./likha/...`、`go test ./likha/...` 均通过；`local-ci.sh` 仍 **PASS=5 FAIL=0**（backend 全绿）。
 
 #### 二、构建卡点：是**高并发出网塌陷**，不是随机抖动（修正「追加 4」结论）
 

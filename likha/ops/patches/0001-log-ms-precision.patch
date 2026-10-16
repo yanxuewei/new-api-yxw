@@ -6,10 +6,10 @@
 #        "2006/01/02 - 15:04:05"  →  "2006/01/02 - 15:04:05.000"
 #        （GIN 访问日志 + [SYS]/[FATAL] + [INFO]/[ERR]）
 # 原因：SLS / 文件日志需毫秒精度（app-file 从内容提取 ms，见部署文档）。
-# 验证：bash ours_likha/ops/verify-upstream-changes.sh
+# 验证：bash likha/ops/verify-upstream-changes.sh
 #
-# 应用：git apply ours_likha/ops/patches/0001-log-ms-precision.patch
-# 干跑：git apply --check ours_likha/ops/patches/0001-log-ms-precision.patch
+# 应用：git apply likha/ops/patches/0001-log-ms-precision.patch
+# 干跑：git apply --check likha/ops/patches/0001-log-ms-precision.patch
 # ============================================================================
 diff --git a/common/sys_log.go b/common/sys_log.go
 index 2d6022f77..71902ccf4 100644

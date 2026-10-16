@@ -1,4 +1,4 @@
-# ours_likha/code — 自研代码区
+# likha/code — 自研代码区
 
 规则：自研 Go 包 / 工具 / 扩展放这里，与上游目录物理隔离（上游**不得**反向 import 本目录）。
 
@@ -12,11 +12,11 @@
 
 ```bash
 # 在仓库根目录执行；只编译/运行，不需要 DB、不需要 Redis、不需要 Docker
-go run ./ours_likha/code/cmd/logms-check
+go run ./likha/code/cmd/logms-check
 # 期望最后一行：RESULT=MS_CONFIRMED
 ```
 
-用途：`ours_likha/ops/verify-upstream-changes.sh` 只做**静态文本**在位校验；本工具提供**运行时**
+用途：`likha/ops/verify-upstream-changes.sh` 只做**静态文本**在位校验；本工具提供**运行时**
 证据，两者互补。改了任何日志时间格式后，两个都应重跑。
 
 ## 新增代码时请

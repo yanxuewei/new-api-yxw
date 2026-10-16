@@ -1,4 +1,4 @@
-# ours_likha/ops — 运维脚本区
+# likha/ops — 运维脚本区
 
 | 文件 | 用途 |
 |---|---|
@@ -9,11 +9,11 @@
 
 ```bash
 # 校验定制项是否在位（退出码非 0 = 有定制项被上游覆盖或冲突未解决）
-bash ours_likha/ops/verify-upstream-changes.sh
+bash likha/ops/verify-upstream-changes.sh
 
 # 若某补丁被上游 sync 冲掉，可用补丁重新应用（-3 三方合并 / --check 干跑）
-git apply --check ours_likha/ops/patches/0001-log-ms-precision.patch
-git apply ours_likha/ops/patches/0001-log-ms-precision.patch
+git apply --check likha/ops/patches/0001-log-ms-precision.patch
+git apply likha/ops/patches/0001-log-ms-precision.patch
 ```
 
 ## 约定

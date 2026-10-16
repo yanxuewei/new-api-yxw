@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# ours_likha/ops/verify-upstream-changes.sh
+# likha/ops/verify-upstream-changes.sh
 #
 # 对照根目录 UPSTREAM_CHANGES.md，机械校验本仓库对上游的定制是否全部在位。
 #   · 上游 sync / merge 前后必跑（纪律第 2、5 条）
 #   · 退出码 0 = 全部在位；非 0 = 有定制项被覆盖或冲突未解
 #
-# 用法: bash ours_likha/ops/verify-upstream-changes.sh
+# 用法: bash likha/ops/verify-upstream-changes.sh
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

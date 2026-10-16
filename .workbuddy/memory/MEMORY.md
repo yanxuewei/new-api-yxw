@@ -7,15 +7,19 @@
 - ⚠ CRLF：`/mnt/e` 文本残 `\r` 比对假失败 ⇒ `tr -d '\r'`；`$?` 被吞 ⇒ `&& echo A || echo B`；**`bash -c` 内联 `$VAR`/循环变量不可靠 ⇒ 全写绝对路径或落脚本**；变量后紧跟中文标点被吞 ⇒ `${VAR}`。
 - Go 1.25.1 + GOPROXY=goproxy.cn；`web/` 用 bun（WSL 无 node）；**本机不适合构建镜像**（WSL2 上行丢 SYN，`bun install` 永挂）⇒ 发版走 CI / macOS。
 
-## 上游二次开发五铁律（10-09）
-能扩展不改源码 · `UPSTREAM_CHANGES.md` 记清单 · 自研放 `ours_likha/{code,ops,doc}` · 禁无意义格式化上游 · merge 后全量测试（CI 不许 skip）。origin `git@github.com:yanxuewei/new-api-yxw.git`，单人直推无 PR。
+## 上游二次开发纪律（10-09 下达）
+`new-api-yxw` = `QuantumNous/new-api` 二次开发分支（origin `git@github.com:yanxuewei/new-api-yxw.git`，`main`，**单人直推、无 PR 流程**）。
+**五铁律**：① 能扩展不改源码 ② `UPSTREAM_CHANGES.md` 记清单、sync 前对照 ③ 自研代码放 `likha/{code,ops,doc}` 隔离 ④ 禁无意义格式化上游文件 ⑤ merge 冲突后跑全量测试、CI 不许 skip job。（落地物/唯一上游改动见 REFERENCE）
 
-## 高频铁律（全文见 REFERENCE）
-- 写操作先干跑：`--cli-dry-run` / ALB `--DryRun true`（托管 ALB 例外）；cs REST POST 必须 `--header "Content-Type=application/json"`。
-- K8s `imagePullSecrets` 创建即固化不可变 ⇒ 排查看 Pod 实际字段、处置优先重建 Pod；`-o jsonpath` 不认 `{{}}`。
-- CLI 3.5.1：配额 `--ProductCode / --MaxResults(≤100) / --QuotaCategory CommonQuota`；地域必须维度 `--Dimensions.1.Key regionId`；**CLI 说参数名非法就先信它**；巡检一律 `jq -e`；RDS 报价 `--PayType Prepaid --TimeType Month --Quantity 1`（无 `--Period`，按量 Postpaid 不带 TimeType）。
-- 探针法：踩服务端校验点看错误落哪层；权限探测用幂等写（禁子串匹配/不存在 ID）；写操作重试 ≥3 次防 VPC 抖动静默漏建。
-- 脚本日志与 API 输出分流（`exec 3>&2`，数据落文件）；一键复核 `deploy/verify_deploy_0_6.sh`，`WARN` ≠ 通过；`UID` 是 bash 只读变量。
+## 高频铁律
+- 变量后紧跟中文/全角标点被 bash 3.2 吞 → 一律 `${VAR}`。**PATH 自愈**：脚本头加 `case ":${PATH}:"` 兜底。
+- **脚本日志勿与 API 输出混流**：日志走 `exec 3>&2`、数据落文件（污染 JSON → jq 假失败）。`tee` ≈0.6 s/次 → 逐行日志不用 tee。
+- **★ 写操作先干跑**：`--cli-dry-run` / ALB `--DryRun true` → `DryRunOperation` 即全过（⚠ 托管 ALB 例外）。
+- **★ K8s `Pod.spec.imagePullSecrets` 创建即固化、不可变** ⇒ 「SA 上现在有凭据」≠「这个 Pod 拉得动」；查拉取失败必须看 **Pod 的实际字段**，处置优先**重建 Pod**（详见 REFERENCE「凭据晚于 Pod 创建」节）。`-o jsonpath` **不认 `{{}}`**（那是 go-template）。
+- **CLI 3.5.1**：配额只有 `--ProductCode`、`--MaxResults`（上限 **100**）、`--QuotaCategory CommonQuota`；vCPU 在 `ecs-spec`；地域**必须用维度** `--Dimensions.1.Key regionId`；**`Agree` 只在 `ListQuotaApplications` 返回** ⇒ 巡检一律 `jq -e`；**CLI 说参数名非法就先信它**。
+- **探针法**：踩**服务端**校验点看错误落哪层；**禁用 CLI 已声明 enum/range 的参数当"必失败点"**；跑完复核资源数未变。权限探测**严禁子串匹配**、**不能用不存在的资源 ID**（存在性先于鉴权）→ 用幂等写。**资源前缀不代表地域**。
+- **VPC 端点两端皆偶发抖动** → 写操作**重试 ≥3 次**并校验合法 JSON，否则**静默漏建**。
+- 一键复核 `deploy/verify_deploy_0_6.sh`。**`WARN` ≠ 通过**。⚠️ **`UID` 是 bash 只读变量**（root 下=0）→ 换名。
 
 ## 资源与集群（细节见 REFERENCE / impl_deploy.md §7.10）
 - 集群(3)：mnl `cd57e40ce9a634c1698c2f5c5e09bd93c`(apse-6) · sg `ca75829e3492d491d9d434de087913798`(apse-1) · jkt dev `cb0abf5bc06034f7bbdb991752f6f3e62`(apse-5)。

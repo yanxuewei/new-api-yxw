@@ -5,7 +5,7 @@
 > 对应哪次提交/PR，**每次同步上游（sync fork）前必须对照本清单逐条检查冲突点**。
 >
 > 维护规则见 §「二次开发纪律」。**新增任何上游文件改动，必须同步在本表追加一行**，
-> 并在 `ours_likha/ops/patches/` 下附可复现补丁 —— 否则视为不合规提交。
+> 并在 `likha/ops/patches/` 下附可复现补丁 —— 否则视为不合规提交。
 
 ---
 
@@ -13,7 +13,7 @@
 
 | # | 上游文件（行） | 改动 | 原因 | 我们的提交 / PR | 复现补丁 |
 |---|---|---|---|---|---|
-| 1 | `middleware/logger.go:38` | `param.TimeStamp.Format("2006/01/02 - 15:04:05")` → `…:05.000` | GIN 访问日志需毫秒，供 SLS 采集到 ms | `9fff2aa47` | `ours_likha/ops/patches/0001-log-ms-precision.patch` |
+| 1 | `middleware/logger.go:38` | `param.TimeStamp.Format("2006/01/02 - 15:04:05")` → `…:05.000` | GIN 访问日志需毫秒，供 SLS 采集到 ms | `9fff2aa47` | `likha/ops/patches/0001-log-ms-precision.patch` |
 | 2 | `common/sys_log.go:20` | `t.Format("2006/01/02 - 15:04:05")` → `…:05.000` | `[SYS]` 日志需毫秒 | `9fff2aa47` | 同上 |
 | 3 | `common/sys_log.go:27` | 同上（`SysError`） | `[SYS]` 错误日志需毫秒 | `9fff2aa47` | 同上 |
 | 4 | `common/sys_log.go:34` | 同上（`FatalLog`） | `[FATAL]` 日志需毫秒 | `9fff2aa47` | 同上 |
@@ -56,7 +56,7 @@
 1. **能扩展不改源码**：优先用插件 / hook / 配置覆盖方式实现定制，其次才是直接修改上游文件。
 2. **定制清单**：仓库根目录维护 `UPSTREAM_CHANGES.md`，逐条记录「我们改了上游哪些文件、为什么、
    对应我们仓库的 PR 号」。**每次 sync 前对照该清单检查冲突点。**
-3. **本地定制集中存放**：自研代码放独立目录 / 包（`ours_likha/{code,ops,doc}`），与上游目录**物理隔离**。
+3. **本地定制集中存放**：自研代码放独立目录 / 包（`likha/{code,ops,doc}`），与上游目录**物理隔离**。
 4. **禁止无意义的格式化改动上游文件**（一次格式化 = 永久冲突源）。
 5. **merge 冲突解决后必须跑全量测试**；sync PR 的 CI **不允许 skip 任何 job**。
 
@@ -68,14 +68,14 @@ git fetch upstream
 git checkout -b sync/upstream-$(date +%Y%m%d) origin/main
 
 # 2) ★ 先跑定制项在位检查（对照本清单机械校验，见 verify 脚本）
-bash ours_likha/ops/verify-upstream-changes.sh
+bash likha/ops/verify-upstream-changes.sh
 
 # 3) merge（有冲突则解决；本清单所列文件是**唯一预期冲突源**）
 git merge upstream/main
 
 # 4) 冲突解决后：重跑 verify + 全量测试（CI 不得 skip 任何 job）
-bash ours_likha/ops/verify-upstream-changes.sh
-go run ./ours_likha/code/cmd/logms-check   # 运行时证据，期望 RESULT=MS_CONFIRMED
+bash likha/ops/verify-upstream-changes.sh
+go run ./likha/code/cmd/logms-check   # 运行时证据，期望 RESULT=MS_CONFIRMED
 make test && go vet ./... && go build ./...
 
 # 5) 提 sync PR，CI 全绿后合并；更新本清单「我们的提交/PR」列
@@ -85,8 +85,8 @@ make test && go vet ./... && go build ./...
 
 ## 四、相关文档
 
-- 自研目录说明：`ours_likha/README.md`
-- 复现补丁：`ours_likha/ops/patches/`
-- 在位校验脚本（静态）：`ours_likha/ops/verify-upstream-changes.sh`
-- 运行时自检（动态，期望 `RESULT=MS_CONFIRMED`）：`go run ./ours_likha/code/cmd/logms-check`
+- 自研目录说明：`likha/README.md`
+- 复现补丁：`likha/ops/patches/`
+- 在位校验脚本（静态）：`likha/ops/verify-upstream-changes.sh`
+- 运行时自检（动态，期望 `RESULT=MS_CONFIRMED`）：`go run ./likha/code/cmd/logms-check`
 - 部署侧背景（SLS 毫秒落地）：`deploy/docs/Day3任务26_SLS与可观测_执行报告.md`
