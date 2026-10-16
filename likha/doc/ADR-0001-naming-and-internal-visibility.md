@@ -1,12 +1,20 @@
 # ADR-0001：自研代码目录命名与 `internal` 可见性边界
 
-- 状态：Accepted
+- 状态：Accepted（2026-10-16 修订：顶层目录更名，见 §0）
 - 日期：2026-10-09
+- 范围：`likha/` 目录骨架、Go 包命名与导入可见性纪律
 - 范围：`likha/` 目录骨架、Go 包命名与导入可见性纪律
 - 验证环境：go1.27.1（Windows，源码引用行号以该版本为准）
 
+## 0. 修订记录
+
+| 日期 | 变更 | 影响 |
+|---|---|---|
+| 2026-10-16 | 顶层自研目录由 `ours_likha/` **更名为 `likha/`**（三段式 `{code,ops,doc}` 与全部纪律不变） | 修订 §2 决策 1（原「顶层目录名不改」作废）；§3.1 关于"下划线目录名"的分析退化为**历史依据**（新名无下划线，该问题不再存在） |
+
 ## 1. 背景
 
+本仓库是 `QuantumNous/new-api` 的 fork。自研逻辑集中放在 `likha/`，按三段式与上游物理隔离：
 本仓库是 `QuantumNous/new-api` 的 fork。自研逻辑集中放在 `likha/`，按三段式与上游物理隔离：
 
 | 目录 | 用途 |
@@ -47,9 +55,11 @@
   ```
 
   构建完全正常。所以 `likha` 这个顶层目录名对 Go 零影响。
+  构建完全正常。所以 `likha` 这个顶层目录名对 Go 零影响。
 
 - **包目录名会参与包名推断。** 下划线是合法标识符字符，`my_code/` 推断出的包名就是 `my_code`，编译通过，但违反 Go 官方评审规范（包名应小写、无下划线、非混合大小写）。裸 `_` 不能作包名（`package _` 报 `invalid package name _`）。
 - **`_` / `.` 前缀是硬坑**：go 工具忽略以 `.` 或 `_` 开头的文件与目录（以及名为 `testdata` 的目录），`go build ./...` 会**静默跳过**，不报错。因此绝不可用 `_` 作源码目录前缀。
+- 不含 `.go` 文件的目录会被 `go list ./...` 跳过（`ops/`、`doc/` 属于此类），但 `go build ./likha/doc` 会报 `no Go files`。
 - 不含 `.go` 文件的目录会被 `go list ./...` 跳过（`ops/`、`doc/` 属于此类），但 `go build ./likha/doc` 会报 `no Go files`。
 
 ### 3.2 `internal` 的可见性由谁保证
@@ -98,6 +108,8 @@
 
 ```17:18:likha/README.md
 1. `code/` 下的包**不得**被上游目录反向依赖（保持单向：上游 ← 我们的补丁；`likha` 独立生长）。
+```17:18:likha/README.md
+1. `code/` 下的包**不得**被上游目录反向依赖（保持单向：上游 ← 我们的补丁；`likha` 独立生长）。
    若确需上游调用，走**最小化原地补丁 + 登记 UPSTREAM_CHANGES.md**，而非让上游 import 本目录。
 ```
 
@@ -108,15 +120,20 @@
 | `.../new-api/internal/likha` | `github.com/QuantumNous/new-api` | **能**（上游路径也以该前缀开头） |
 | `.../new-api/likha/internal/x` | `.../new-api/likha` | 不能 |
 | `.../new-api/likha/code/internal/x` | `.../new-api/likha/code` | 不能 |
+| `.../new-api/likha/internal/x` | `.../new-api/likha` | 不能 |
+| `.../new-api/likha/code/internal/x` | `.../new-api/likha/code` | 不能 |
 
+根目录 `internal/` 的语义是"**整个模块**私有"。但上游目录（`common/`、`relay/`、`model/`…）与自研目录**同属一个模块**，前缀相同，所以它对本仓库的目标**毫无隔离作用**。想让纪律机械化，父前缀必须收到 `likha` 这一层。
 根目录 `internal/` 的语义是"**整个模块**私有"。但上游目录（`common/`、`relay/`、`model/`…）与自研目录**同属一个模块**，前缀相同，所以它对本仓库的目标**毫无隔离作用**。想让纪律机械化，父前缀必须收到 `likha` 这一层。
 
 ### 3.4 当前为何也不需要 `internal`
 
 `likha/code/` 下目前唯一的 Go 代码是 `cmd/logms-check/`，为 `package main`。`main` 包在语言层面就不可被任何包 import，因此给它套 `internal` 收益为零；其唯一用途是 `go run`。
+`likha/code/` 下目前唯一的 Go 代码是 `cmd/logms-check/`，为 `package main`。`main` 包在语言层面就不可被任何包 import，因此给它套 `internal` 收益为零；其唯一用途是 `go run`。
 
 改名的其他代价：
 
+1. **语义错位**：`likha` 表达"归属（我们自己的、非上游）"，`internal` 表达"导入权限"，两者正交；改名会丢掉 fork 治理最核心的信息。
 1. **语义错位**：`likha` 表达"归属（我们自己的、非上游）"，`internal` 表达"导入权限"，两者正交；改名会丢掉 fork 治理最核心的信息。
 2. **破坏三段式**：`ops/` 是 shell + patch、`doc/` 是 markdown，都不是 Go 包；`internal` 与 `code` 平级会让 `code` 的定位变得不确定。
 3. **挡住未来模块化**：`internal` 检查基于模块路径前缀，将来若把 `code/` 抽成独立模块（如 `relaykit/`），全部失效须先搬家。AGENTS.md 已规定 `relaykit/` 不得依赖主模块。
@@ -130,14 +147,17 @@
 
 ```
 likha/code/internal/<pkg>/
+likha/code/internal/<pkg>/
 ```
 
 效果精确匹配纪律第 1 条：
 
 - `likha/code/cmd/logms-check` 仍可正常 import（前缀匹配）；
+- `likha/code/cmd/logms-check` 仍可正常 import（前缀匹配）；
 - 上游 `common/`、`relay/`、`model/` 一律编译期拒绝；
 - 纪律从"人工 review + `UPSTREAM_CHANGES.md` 登记"升级为编译器强制。
 
+**不要**放到 `likha/internal/`（与三段式混杂，且放宽到整个 `likha` 可见）或模块根 `internal/`（完全无效，见 3.3）。
 **不要**放到 `likha/internal/`（与三段式混杂，且放宽到整个 `likha` 可见）或模块根 `internal/`（完全无效，见 3.3）。
 
 ## 5. 注意事项
@@ -154,13 +174,16 @@ likha/code/internal/<pkg>/
 ```bash
 # 1) 确认自研目录被纳入构建（应列出 cmd/logms-check）
 go list ./likha/...
+go list ./likha/...
 
 # 2) internal 生效性自测（临时创建后务必撤回）
+#    在 common/ 下临时 import ".../likha/code/internal/<pkg>"，
 #    在 common/ 下临时 import ".../likha/code/internal/<pkg>"，
 #    期望编译失败：use of internal package ... not allowed
 go build ./common/
 
 # 3) 现有定制项仍在位
+bash likha/ops/verify-upstream-changes.sh
 bash likha/ops/verify-upstream-changes.sh
 ```
 

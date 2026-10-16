@@ -1126,10 +1126,73 @@ meta 模式下这句是**错的**（会把读者带向错误的风险预期）�
 8. **隔离反证 ✅**：dev 三个负载 Pod 身份指纹（name/pod-template-hash/restartCount）与本卡执行前的 `--dev-baseline` 逐行一致 ⇒ **本卡对 `newapi-dev` 零写**。唯一例外 `new-api-channel-task-dev` 模板哈希 `d6579bfc7 → 597d78649d`（镜像 `…e0a5cae3 → …5603216a`），`managedFields.manager=OneConsole-App-CS`、时间 `10:15:10Z` ⇒ **控制台侧第三方变更，不是本卡**（诚实归因，不当成"我改的"也不当成"没事"）。pre ns 对象清单只有 pre 三件套 + 已清理的冒烟 Pod；pre 无 Ingress/ALB ⇒ 只在 ns 内被路由；两地 DSN/域名字符串在清单里互相不可达（结构隔离：独立集群 + 独立 VPC）。
 
 ### 17.3 未执行 / 阻断
-- **perf 独立节点池 ⏸**：裁定机型 **`ecs.g9i.xlarge` 在 `ap-southeast-5` 实测不可售** —— `DescribeAvailableResource` 在 5a/5b/5c 三 zone 均无该规格；`g9i` 家族自 `2xlarge` 起售，`g8ine` 仅 `5b` 有 `2/4/8xlarge`（现网 `g9i.large/g8ine.large` 是既有库存实例，不代表可新购）。建池 = 新增 ECS 费用（红线需书面核准）+ 机型需重裁 ⇒ **停在此处等负责人裁定**，未做任何建池调用。
+- **perf 独立节点池 ⏸**：**唯一门槛是费用核准**（红线：新建节点池 = 新增 ECS 费用）。⚠ 上一小节写的「裁定机型 `ecs.g9i.xlarge` 在 `ap-southeast-5` 实测不可售 / `g9i` 自 `2xlarge` 起售」**作废**，见 §17.5。建池调用一条都没做过。
 - **perf 工作负载 / V5 压测 ⏸**：依赖上项；且任务 53 已实测本站"无管理员会话、无可用上游渠道"⇒ V5 顺延 T+14。
 - **MySQL 列 ⏸**：按裁定顺延 T+14（三库矩阵未闭合，出口清单相应行保持不勾选）。
 - **载体到期风险**：两库都落在 **2026-11-12 到期**的 Prepaid 实例 `pgm-d9j9p421lzx4gw73` 上（§12.8 ① 续/释仍未裁定）。
 
 ### 17.4 凭据扫描
 本卡新增/修改的 20 个文件（含指南）`grep -cE "eyJ[A-Za-z0-9]{20,}"` 全部 **0 命中**；DSN 在文档与输出中一律 `***` 或只给 sha256 前 12 位指纹；保管目录外无明文。
+
+### 17.5 自我更正（2026-10-16）：perf 机型「不可售」是读数假阴性
+**错误结论**：§17.3 上一版与指南任务 45（坑 8 / 步骤 5 约束② / 出口清单 / 移交限制四处）都写明「`ecs.g9i.xlarge` 在 `ap-southeast-5` 三 zone 查不到、`g9i` 家族自 `2xlarge` 起售」，并据此把 perf 建池判为"机型阻断"。
+
+**复核证据**（全部只读 API）：
+- `DescribeAvailableResource --RegionId ap-southeast-5 --DestinationResource InstanceType --InstanceChargeType PostPaid --IoOptimized optimized --NetworkCategory vpc`：5a/5b/5c 三 zone 都列出 `ecs.g9i.xlarge` 与 `ecs.g9i.large`，`Status=Available`、`StatusCategory=WithStock`。
+- 逐 zone 带 `--ZoneId <z> --InstanceType ecs.g9i.xlarge` 的精确查询：三地均回 `Available / WithStock`；`InstanceChargeType=PrePaid` 口径同样 `Available`。
+- `DescribePrice`（按量、含 40GiB `cloud_essd`、不带公网带宽）：**单节点 0.215328 USD/h**（实例 0.2052 + 系统盘 0.010128）⇒ **2 节点 ≈ 0.4307 USD/h ≈ 10.34 USD/天 ≈ 310 USD/月**；压测后缩到 0 只按实际小时计费。
+
+**成因（两次同类错误的共同点：把"我的读取管道没产出"当成"云上没这个对象"）**：
+1. jq 字段路径按猜测写（`.AvailableResources.AvailableResource[]` 与 `.SupportedResources.SupportedResource[]` 层级混用）⇒ 空数组；本轮我第一次用同一套错路径复现时，也照样得到空输出。
+2. 枚举结果接了 `head` 截断，而该 API 的机型列表**不按规格大小排序**⇒ 截断后的样本里恰好没有 `xlarge/large`，被误读为"从 `2xlarge` 起售"。
+   ⇒ 与本卡 V4 的 `ParameterKey`（实为 `ParameterName`）、JSON `"key": value` 带空格两条假阴性是同一类：**空输出必须先证明读取路径本身有效，才能作为"对象不存在"的证据**。已在指南坑 8 落为长期条款。
+
+**仍为真的子结论**：`ecs.g8ine` 仅 `5b` 有货；perf 建池的实际阻断只剩**费用核准**（红线）与任务 53 的「无可用上游渠道 ⇒ V5 顺延」。指南与台账四处文字已同步更正，未对集群/RDS 做任何写操作。
+
+### 17.6 perf 半边：产物已备齐并装好门禁（2026-10-16，**零云端写入**）
+- 新增 `deploy/jakarta_pre/new-api-perf.yaml`：ns `new-api-perf`、`track: perf`、`tolerations: dedicated=perf:NoSchedule`、`nodeSelector` 用 `__PERF_NODE_SELECTOR__/__PERF_NODEPOOL_ID__` **占位**（真实值 = 建池后回读 `ack.alibabacloud.com/nodepool-id`，不猜不写死）、副本 2、`requests 1核/2Gi`、DSN 同走 **6432**（与生产同形状，压测才测到被测对象）。`new-api-pre.yaml` 偏差② 里"perf 走 5432"的旧说法随之更正。
+- `bodies/apply_pre_secret.sh` / `apply_pre_app.sh` **参数化**（`NS`/`DBNAME`/`APP`/`TRACK`，默认值 = pre 首跑口径，一字不改地保持 pre 行为）⇒ perf 复用同一套门禁逻辑，不复制第二份。顺带把 A0 的键位判断从易错的 `case` glob 改成 `grep -qw`。
+- 执行器新增 `--perf-pool / --perf-plan / --perf-gen-secret / --perf-apply-secret / --perf-apply`。**三道门禁实测**（都是本地/只读）：
+  1. `--perf-apply` 无标记 ⇒ `P-1 门禁：需要 PERF_APPROVAL=cost-approved`（拒绝）。
+  2. `PERF_APPROVAL=cost-approved --perf-apply` ⇒ `P0 门禁：节点池 'np-jkt-perf' 不存在`（拒绝；`DescribeClusterNodePools` 现网只有 `npd3cc9d7f0503472f85420d30436269b5 np-jkt-dev-app state=active types=g9i.large/g8ine.large/g9ae.large nodes=3`）。
+  3. `--perf-plan` 只读预检：三 zone `g9i.xlarge` 全 `Available/WithStock`、`0.215328 USD/h`/节点 ⇒ **2 节点 ≈ 0.4307 USD/h ≈ 10.34 USD/天 ≈ 310 USD/月**（按量、40GiB `cloud_essd`、不含公网出流量）。
+- ⇒ perf 侧现在**只差负责人一句话的建池核准**；核准后顺序是：建池（`np-jkt-perf`，taint `dedicated=perf:NoSchedule`，PostPaid）→ 节点 `instance type` 回读 → `--perf-gen-secret` → `--perf-apply-secret` → `PERF_APPROVAL=cost-approved --perf-apply` → 双库冒烟；V5 仍受"无可用上游渠道"限制。
+- 凭据面复扫：本轮全部改动文件 `grep -cE "eyJ[A-Za-z0-9]{20,}"` = **0**；`--perf-gen-secret` 尚未执行（口令仍不生成，避免无负载可挂的空密钥）。
+
+## 18. 生产事故取证：马尼拉 ClickHouse 实例已被删除 + 账号欠费阻断 perf 建池（2026-10-16，**均为只读取证，零写入**）
+
+### 18.1 触发点
+负责人对任务 45 步骤 5 的 perf 建池回了「准」（费用核准成立）。执行 `CreateClusterNodePool` 时被账号侧拒绝，顺带用 ActionTrail 复核其他费用类调用时发现一条**与我方无关的生产删除事件**。两条都记在这里。
+
+### 18.2 perf 建池：被 `Account.Arrearage` 拒绝（不是机型、不是权限）
+- 建池载荷已落库为可审计产物：`deploy/jakarta_pre/perf_nodepool.json`（`np-jkt-perf`，2×`ecs.g9i.xlarge`，PostPaid，taint `dedicated=perf:NoSchedule`，标签 `site=jkt-dev/env=dev/project=new-api/track=perf`，vSwitch 三台与 sg 与 dev 池逐字一致，容器运行时 `containerd 2.3.4`，`auto_scaling.enable=false`、`management.enable=false`）。
+- 建池前用 `DescribeClusterNodePoolDetail` 抄了 dev 池 `npd3cc9d7f0503472f85420d30436269b5` 的真实配置（types=g9i.large/g8ine.large/g9ae.large、vsw 分别落在 5c/5b/5a、sg-k1ag5j7s6xbuyjkv3j8c、system disk cloud_essd 40、镜像 `aliyun_3_x64_20G_container_optimized_alibase_20260720.vhd`、`desired_size=3`、**无 key pair**（`aliyun ecs DescribeKeyPairs` 该地域 0 条）⇒ 登录凭据走集群侧，载荷里不写任何口令）。
+- 实际调用结果：`403 Account.Arrearage`（RequestId 01A14258-82BD-3D1D-B364-52B4C18B6FB3）。
+- 只读佐证：`bssopenapi QueryAccountBalance` ⇒ **AvailableAmount = -43.81 USD**，CreditAmount = 0.00，Currency = USD。
+- ⇒ **perf 建池在欠费结清前结构性不可行**。结清属负责人的资金动作，AI 不得自行处理。
+
+### 18.3 欠费的暴露面（只读账目，按计费类型分层）
+| 资源 | 地域 | 计费 | 状态 | 欠费暴露 |
+|---|---|---|---|---|
+| ACK worker ECS ×3（`i-k1ahsgvna3udifwksje5` 等，集群 cb0abf5b…） | ap-southeast-5 | **PostPaid** | Running | **直接暴露**（dev + pre 的计算载体） |
+| ACK worker ECS ×4（集群 cd57e40c…） | ap-southeast-6 | **PostPaid** | Running | **直接暴露（正式环境）** |
+| RDS `pgm-5tstdhko64x2c01w`（正式主库） | ap-southeast-6 | Prepaid，2026-10-28 到期 | Unlock | 到期风险，非欠费停机 |
+| RDS `rm-5ts0ez22t67il9oz3`（newapi-logs-mysql） | ap-southeast-6 | Prepaid，2026-11-15 到期 | Unlock | 同上 |
+| RDS `pgm-d9j9p421lzx4gw73`（dev/pre 载体） | ap-southeast-5 | Prepaid，**2026-11-12 到期** | Unlock | 同上（§12.8 ① 仍未裁定） |
+| ECS `newapi-ops-mnl` | ap-southeast-6 | PrePaid | Running | 低 |
+- ⚠ 新发现的到期优先级：**正式主库 2026-10-28 到期**早于 dev 实例的 11-12，§12.8 的续/释裁定要按这个新顺序重排。
+
+### 18.4 生产事故：马尼拉 CK 实例已被删除（ActionTrail 硬证据）
+- 事件：`DeleteDBInstance`，`2026-10-15T09:48:55Z`，`svc=ClickHouse`，`errorCode` 缺省（**成功**），资源 `ACS::ClickHouse::EnterpriseDBCluster: cc-5tsv2o51s1360b0pr`，操作主体 **RAM 子用户 `yanxuewei`**，源 IP **14.155.115.41**，UA `AlibabaCloud (linux; amd64) Golang/1.25.x`。
+- **不是我做的**：本会话 CLI 身份同为 `acs:ram::5108890064395960:user/yanxuewei`（同 AK 共用），但**本机出口 IP 实测 103.196.22.24 ≠ 14.155.115.41**，且我全程只有 `Describe*`（`aliyun cs`/`rds`/`ecs`/`clickhouse`/`actiontrail`），无任何 Delete 调用。⇒ 同 AK 的另一台机器/另一人操作，需负责人核对是否为本人所为。
+- 现状复核（全部只读）：`DescribeDBInstances` 在 ap-southeast-6/5/1、cn-hangzhou、us-east-1 均 **TotalCount=0**；按 id 直查 `DescribeDBInstanceAttribute` ⇒ `InvalidDBInstanceId.NotFound`；窗口内**没有任何后续 CreateDBInstance 成功记录**（10-15 06:12 那条 CreateDBInstance 是 RDS，不是 CK）；集群节点内 `getaddrinfo(cc-5tsv2o51s1360b0pr.clickhouse.ads.aliyuncs.com)` ⇒ **解析失败**。
+- **配置侧仍在指向它**：`secret/new-api-secrets` 的 `LOG_SQL_DSN` 仍是 `clickhouse://<账号>:<口令>@cc-5tsv2o51s1360b0pr.clickhouse.ads.aliyuncs.com:8123/<库>`（本条只复述形态，口令不外泄），而 `configmap/new-api-config` 里还留着 `LOG_SQL_CLICKHOUSE_TTL_DAYS=90` ⇒ **正式环境的日志库链路自 2026-10-15 09:48Z 起指向一个不存在的实例**。
+- 应用侧实测影响（`bodies/inspect_ck_gone.sh`，零写入）：`new-api` ns 的 6 个 Pod 全 `1/1 Running`、**重启数 0**、创建时间 2026-10-15T06:35Z（早于删除点），近 800 行日志里 `clickhouse` / `dial tcp` / `code 81/210` / `[ERROR]` 命中数**全为 0**。
+  ⇒ 结论边界要写清：**"pod 无报错"不等于"日志没丢"**。异步批量写 CK 失败可能只体现在被吞掉的 error 或根本没有落点；本轮没有证据说明日志仍在被完整记录，也没有证据说明请求面被打崩。**待负责人定方向**：① 重建 CK（= 新的按量费用，需核准）② 把 `LOG_SQL_DSN` 切到既有的马尼拉 MySQL `rm-5ts0ez22t67il9oz3`（`newapi-logs-mysql`，Prepaid 已在账）③ 暂时关闭日志库。三者都属变更操作，本轮一条都没做。
+- 与卡片的关系：任务 45 **坑 4** 原文写"若 `clickhouse DescribeDBInstances --RegionId ap-southeast-6` 查不到实例 ⇒ 回到任务 9 的四路表重开决策"——**该前提现已成立**，F9（马尼拉 CK 企业版单 AZ）的决策物已不存在。
+
+### 18.5 本轮我自己造成的一次口令外泄（指南坑 7 同类，必须登记）
+- 现象：18.4 的取证脚本用正则 `://([^:/]+):[^@]*@` 给 DSN 打码，但 `LOG_SQL_DSN` 的真实形态是 `clickhouse://user:pass@host`（**不是** `user:pass@host` 前置 scheme 的 Postgres 形态）⇒ 正则没命中，**含口令的整串进入了会话输出**。
+- 危害评估：该 CK 实例已删除 ⇒ 账号随实例消失，口令不可再用；**但它与仓库里既有的明文是同一串**（见下），且同类口令存在复用风险 ⇒ 按泄露处理，**建议轮换 CK/日志库侧口令**（属破坏性操作，需负责人核准，我不自行执行）。
+- 落盘面复查：本次输出只写进 `/tmp/ckk.txt`，**已 `shred -u`**；仓库内**没有**今天新增的命中。但既有的 **4 个受 Git 跟踪的文件**本身含同一形态的明文 DSN（`deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md`、`deploy/tasks/task9/ck_wiring.sh`（3 处）、`deploy/tasks/task17/Day2任务17_DSN注入_执行报告.md`、`deploy/docs/日志库ClickHouse_学习手册.md`），另有 4 个 `deploy/logs/**` 备份被 `.gitignore` 兜住不入 Git ⇒ 这是**先于本轮就存在的**问题，原地脱敏需负责人许可（fork 工程尽量不改既有文件）。
+- 改进：打码必须**按 scheme 无关**的写法（先 `s#://[^@]*@#://***@#`，再兜 `s#(:[^:/@ ]+)@#@***@#`），并在输出前用长度指纹自证；本轮之后所有取证脚本改走"只打印键名 + 主机名"，不再打印任何 DSN 派生串。

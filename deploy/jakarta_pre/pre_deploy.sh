@@ -223,6 +223,113 @@ pre_smoke() {
 }
 diag_pending() { run_body diag_pending.sh diagpending; }
 
+# ---- 步骤 5 的 perf 半边（2026-10-16 补齐产物；**建池是费用操作 ⇒ 一律带门禁**）----
+PERF_MANIFEST="$HERE/new-api-perf.yaml"
+PERF_NS=new-api-perf
+PERF_DB=newapi_perf
+PERF_POOL_NAME=${PERF_POOL_NAME:-np-jkt-perf}
+
+perf_pool_state() {  # 只读：专用节点池是否存在（存在 = 已核准并产生费用）
+  aliyun cs DescribeClusterNodePools --ClusterId "$CID" --region "$REGION" 2>&1 \
+    | jq -r '[.nodepools[]? | {id:.nodepool_info.nodepool_id, name:.nodepool_info.name, state:.status.state,
+              inst:(.scaling_group.instance_types // [] | join("/")), nodes:(.status.total_nodes // 0)}] | .[]
+              | "\(.id) \(.name) state=\(.state) types=\(.inst) nodes=\(.nodes)"'
+}
+
+gen_perf_secret() {  # 与 pre 同构，只是库名/端口账目不同；口令只落保管目录（600）
+  mkdir -p "$SEC_DIR"; chmod 700 "$SEC_DIR"
+  [ -s "$SEC_DIR/dev_app" ] && [ -s "$SEC_DIR/dev_migrate" ] || die "缺 dev_app/dev_migrate"
+  if [ ! -s "$SEC_DIR/perf_session_secret" ]; then
+    local s; s=$(head -c 2048 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | cut -c1-21)
+    [ "${#s}" -ge 16 ] || die "随机 SESSION_SECRET 生成异常"
+    printf '%s' "$s" > "$SEC_DIR/perf_session_secret"; chmod 600 "$SEC_DIR/perf_session_secret"
+    notice "perf_session_secret 已生成 len=${#s} fp=$(fp "$s")"
+    unset s
+  else
+    v=$(cat "$SEC_DIR/perf_session_secret"); notice "perf_session_secret 已存在 len=${#v} fp=$(fp "$v")（幂等复用）"; unset v
+  fi
+  local pfx=""
+  for f in dev_session_secret pre_session_secret perf_session_secret; do
+    [ -s "$SEC_DIR/$f" ] || continue
+    v=$(cat "$SEC_DIR/$f")
+    [ "$f" = perf_session_secret ] || pfx="$pfx $f=$(fp "$v")"
+    unset v
+  done
+  pfp=$(fp "$(cat "$SEC_DIR/perf_session_secret")")
+  notice "  跨环境反证：perf fp=$pfp vs$pfx（必须两两不同）"
+  unset pfp
+  local app mig
+  app=$(cat "$SEC_DIR/dev_app"); mig=$(cat "$SEC_DIR/dev_migrate")
+  printf 'postgres://newapi:%s@%s:6432/%s?sslmode=require'         "$app" "$RDS_HOST" "$PERF_DB" > "$SEC_DIR/PERF_SQL_DSN"
+  printf 'postgres://newapi_migrate:%s@%s:6432/%s?sslmode=require' "$mig" "$RDS_HOST" "$PERF_DB" > "$SEC_DIR/PERF_SQL_DSN_MIGRATE"
+  chmod 600 "$SEC_DIR/PERF_SQL_DSN" "$SEC_DIR/PERF_SQL_DSN_MIGRATE"
+  unset app mig
+  for f in PERF_SQL_DSN PERF_SQL_DSN_MIGRATE; do notice "  $f => $(mask "$(cat "$SEC_DIR/$f")")"; done
+}
+
+apply_perf_secret() {
+  [ -s "$SEC_DIR/PERF_SQL_DSN" ] || gen_perf_secret
+  mkdir -p "$WORK/sec"; chmod 700 "$WORK/sec"
+  cp "$SEC_DIR/PERF_SQL_DSN"         "$WORK/sec/SQL_DSN"
+  cp "$SEC_DIR/PERF_SQL_DSN_MIGRATE" "$WORK/sec/SQL_DSN_MIGRATE"
+  cp "$SEC_DIR/perf_session_secret"  "$WORK/sec/SESSION_SECRET"
+  chmod 600 "$WORK/sec"/*
+  # 复用 pre 的 body（2026-10-16 参数化：NS/DBNAME 注入，门禁逻辑一字不改）
+  run_body apply_pre_secret.sh perfsecret "SEC_B64=$(pack_dir "$WORK/sec")" "NS=$PERF_NS" "DBNAME=$PERF_DB"
+  rm -rf "$WORK/sec"
+}
+
+render_perf() {  # 只渲染，不落集群；节点池不存在 ⇒ 拒绝（占位符不替换就没有 nodeSelector）
+  [ -f "$PERF_MANIFEST" ] || die "缺清单 $PERF_MANIFEST"
+  local np json
+  json=$(aliyun cs DescribeClusterNodePools --ClusterId "$CID" --region "$REGION" 2>&1)
+  np=$(printf '%s' "$json" | jq -r --arg n "$PERF_POOL_NAME" '[.nodepools[]? | select(.nodepool_info.name==$n) | .nodepool_info.nodepool_id] | first // empty')
+  [ -n "$np" ] || die "P0 门禁：节点池 '$PERF_POOL_NAME' 不存在 ⇒ perf 不许落地。建池 = 新增 ECS 费用（红线），需负责人书面核准；perf 与 dev/pre 共机也已被实测否决（requests 已饱和，台账 §17.2-6）"
+  notice "P0 通过：$PERF_POOL_NAME = $np（已存在 ⇒ 费用已核准）"
+  local cm ck
+  cm=$(awk 'BEGIN{RS="\n---\n"} /kind: ConfigMap/ {print}' "$PERF_MANIFEST")
+  [ -n "$cm" ] || die "清单里找不到 ConfigMap 文档"
+  ck=$(printf '%s' "$cm" | sha256sum | cut -c1-12)
+  mkdir -p "$WORK/docs"
+  sed -e "s/__CONFIG_CHECKSUM__/$ck/" -e "s/__PERF_NODEPOOL_ID__/$np/" "$PERF_MANIFEST" > "$WORK/rendered.yaml"
+  grep -q "__PERF_NODE_SELECTOR__" "$WORK/rendered.yaml" && die "P1 门禁：nodeSelector 键名仍是占位符 ⇒ 拒绝 apply"
+  notice "checksum/config=$ck  nodeSelector=ack.alibabacloud.com/nodepool-id=$np"
+  python3 - "$WORK" <<'PY'
+import re, os, sys
+W = sys.argv[1]
+src = open(os.path.join(W, "rendered.yaml"), encoding="utf-8").read()
+for d in src.split("\n---\n"):
+    m = re.search(r"^kind:\s*(\w+)", d, re.M)
+    if m:
+        open(os.path.join(W, "docs", "doc_%s.yaml" % m.group(1)), "w", encoding="utf-8").write(d.lstrip("\n"))
+        print("[pre-deploy]   split: %-16s %d bytes" % (m.group(1), len(d)))
+PY
+  [ -s "$WORK/docs/doc_Deployment.yaml" ] || die "切分失败：没有 doc_Deployment.yaml"
+}
+
+apply_perf_app() {
+  # 双保险：既要求池真实存在（render_perf 的 P0），也要求显式核准标记，避免"顺手 apply"
+  [ "${PERF_APPROVAL:-}" = "cost-approved" ] || die "P-1 门禁：perf apply 需要 PERF_APPROVAL=cost-approved（建池费用已书面核准）"
+  render_perf
+  run_body apply_pre_app.sh perfapp "DOCS_B64=$(pack_dir "$WORK/docs")" "NS=$PERF_NS" "APP=new-api-perf" "TRACK=perf"
+}
+
+perf_plan() {  # 纯只读：现有节点池清单 + 机型报价，供负责人一次性核准
+  notice "P-R1 现网节点池（只读）"; perf_pool_state | sed 's/^/    /'
+  notice "P-R2 机型可售性与报价（DescribeAvailableResource / DescribePrice，只读）"
+  for z in ap-southeast-5a ap-southeast-5b ap-southeast-5c; do
+    st=$(aliyun ecs DescribeAvailableResource --RegionId "$REGION" --DestinationResource InstanceType \
+          --InstanceChargeType PostPaid --ZoneId "$z" --InstanceType ecs.g9i.xlarge 2>&1 \
+          | jq -r '[.AvailableZones.AvailableZone[]?|"\(.Status)/\(.StatusCategory // "-")"]|join(",")')
+    pr=$(aliyun ecs DescribePrice --RegionId "$REGION" --ResourceType instance --InstanceType ecs.g9i.xlarge \
+          --PriceUnit Hour --SystemDisk.Category cloud_essd --SystemDisk.Size 40 --Amount 1 \
+          --IoOptimized optimized --InternetChargeType PayByTraffic 2>&1 \
+          | jq -r '.PriceInfo.Price.TradePrice // "ERR"')
+    printf '    %s g9i.xlarge avail=%s price=%s USD/h\n' "$z" "${st:-空读数}" "${pr:-ERR}"
+  done
+  notice "P-R3 2 节点账目：0.215328 × 2 ≈ 0.4307 USD/h ≈ 10.34 USD/天 ≈ 310 USD/月（按量，40GiB ESSD，不含公网出流量）"
+}
+
 A="${1:---help}"
 TGT="${2:-}"
 case "$A" in
@@ -242,5 +349,10 @@ case "$A" in
   --diag-nodes)  run_body diag_nodes.sh diagnost ;;
   --diag-mem)    run_body diag_mem.sh diagmem ;;
   --diag-sqlite) run_body diag_sqlite_and_devroll.sh diagsqlite ;;
-  *) die "未知子命令：$A（--ns-base / --addon-verify / --pull-check <ns> / --db-ports / --db-state / --create-db / --apply-grants / --dev-baseline / --gen-secret / --apply-secret / --apply-app / --smoke）" ;;
+  --perf-pool)   perf_pool_state ;;
+  --perf-plan)   perf_plan ;;
+  --perf-gen-secret) gen_perf_secret ;;
+  --perf-apply-secret) apply_perf_secret ;;
+  --perf-apply)  apply_perf_app ;;
+  *) die "未知子命令：$A（--ns-base / --addon-verify / --pull-check <ns> / --db-ports / --db-state / --create-db / --apply-grants / --dev-baseline / --gen-secret / --apply-secret / --apply-app / --smoke / --perf-pool / --perf-plan / --perf-gen-secret / --perf-apply-secret / --perf-apply[需 PERF_APPROVAL=cost-approved]）" ;;
 esac

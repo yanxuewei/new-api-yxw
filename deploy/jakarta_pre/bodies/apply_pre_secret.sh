@@ -1,8 +1,10 @@
 #!/bin/bash
-# bodies/apply_pre_secret.sh —— 建/更新 Secret new-api-secrets（new-api-pre ns，3 键，无明文回显）
+# bodies/apply_pre_secret.sh —— 建/更新 Secret new-api-secrets（pre/perf ns，3 键，无明文回显）
 # 载荷 $SEC_B64 = tar.gz：SQL_DSN / SQL_DSN_MIGRATE / SESSION_SECRET
+# 载荷 $NS / $DBNAME（header 注入）：目标命名空间与该环境专属库名（默认 pre/newapi_pre）。
 # 与 dev 的差别（刻意的，不是漏了）：**没有 LOG_SQL_DSN、没有 REDIS_CONN_STRING** ⇒
 #   日志表随主库、缓存走进程内（卡片偏差 ③④）。
+NS="${NS:-new-api-pre}"; DBNAME="${DBNAME:-newapi_pre}"
 trap 'shred -u "$T"/sec/* 2>/dev/null; rm -rf "$T"' EXIT
 mkdir -p "$T/sec"; chmod 700 "$T/sec"
 printf '%s' "$SEC_B64" | base64 -d | tar xz -C "$T/sec" || { echo "  [XX] 载荷解包失败"; exit 1; }
@@ -29,7 +31,7 @@ for k in SQL_DSN SQL_DSN_MIGRATE; do
   usr=$(printf '%s' "$v"  | sed -nE 's#^.*://([^:]+):[^@]*@.*#\1#p')
   ssl=$(printf '%s' "$v"  | sed -nE 's#.*sslmode=([a-z-]+).*#\1#p')
   printf '    %-16s host=%s port=%s db=%s user=%s sslmode=%s\n' "$k" "$host" "$port" "$db" "$usr" "$ssl"
-  [ "$db" = newapi_pre ] || { echo "    [XX] $k 的库名不是 newapi_pre ⇒ 会写进 dev 的库，终止"; exit 1; }
+  [ "$db" = "$DBNAME" ] || { echo "    [XX] $k 的库名不是 $DBNAME ⇒ 会写进别的环境的库，终止"; exit 1; }
   case "$k" in
     SQL_DSN_MIGRATE) [ "$usr" = newapi_migrate ] || { echo "    [XX] SQL_DSN_MIGRATE 账号不是 newapi_migrate"; exit 1; } ;;
     SQL_DSN)         [ "$usr" = newapi ]         || { echo "    [XX] SQL_DSN 账号不是 newapi"; exit 1; } ;;
@@ -48,17 +50,17 @@ unset SS
 echo "=== K3 apply Secret（幂等）"
 ARGS=""
 for k in SQL_DSN SQL_DSN_MIGRATE SESSION_SECRET; do ARGS="$ARGS --from-file=$k=$T/sec/$k"; done
-kubectl -n new-api-pre create secret generic new-api-secrets $ARGS --dry-run=client -o yaml > "$T/secret.yaml" 2>"$T/err" \
+kubectl -n "$NS" create secret generic new-api-secrets $ARGS --dry-run=client -o yaml > "$T/secret.yaml" 2>"$T/err" \
   || { echo "    [XX] create 失败："; sed 's/^/    /' "$T/err"; exit 1; }
 kubectl apply -f "$T/secret.yaml" 2>&1 | sed 's/^/    /'
 
 echo "=== K4 反证：pre 的 SESSION_SECRET 不能等于 dev 的（坑 1 跨环境越权）"
-FP_PRE=$(kubectl -n new-api-pre get secret new-api-secrets -o go-template='{{ index .data "SESSION_SECRET" }}' 2>/dev/null | base64 -d | sha256sum | cut -c1-12)
+FP_PRE=$(kubectl -n "$NS" get secret new-api-secrets -o go-template='{{ index .data "SESSION_SECRET" }}' 2>/dev/null | base64 -d | sha256sum | cut -c1-12)
 FP_DEV=$(kubectl -n newapi-dev get secret new-api-secrets -o go-template='{{ index .data "SESSION_SECRET" }}' 2>/dev/null | base64 -d | sha256sum | cut -c1-12)
-printf '    pre fp=%s  dev fp=%s ⇒ ' "$FP_PRE" "$FP_DEV"
+printf '    %s fp=%s  dev fp=%s ⇒ ' "$NS" "$FP_PRE" "$FP_DEV"
 [ -n "$FP_PRE" ] && [ "$FP_PRE" != "$FP_DEV" ] && echo "不同（合规）" || echo "相同或缺失 ⇒ 违规，必须重生成"
 
 echo "=== K5 键面回读（值只以 base64 长度出现）"
-kubectl -n new-api-pre get secret new-api-secrets -o go-template='{{range $k, $v := .data}}    {{$k}} b64len={{len $v}}{{"\n"}}{{end}}' 2>&1 | sed 's/^/  /'
+kubectl -n "$NS" get secret new-api-secrets -o go-template='{{range $k, $v := .data}}    {{$k}} b64len={{len $v}}{{"\n"}}{{end}}' 2>&1 | sed 's/^/  /'
 echo "=== K6 现网 dev 指纹（改 pre 不该动 dev；与 --dev-baseline 的读数对照）"
 kubectl -n newapi-dev get pod -o jsonpath='{range .items[*]}{.metadata.name}{"|"}{.metadata.labels.pod-template-hash}{"|"}{range .status.containerStatuses[*]}{.restartCount}{end}{"\n"}{end}' 2>&1 | sed 's/^/    /'

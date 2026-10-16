@@ -266,6 +266,10 @@ processors:
 - `likha/ops/patches/0001-log-ms-precision.patch` —— 复现补丁（`git apply` 可直接回放）
 - `likha/ops/verify-upstream-changes.sh` —— **定制在位校验**（sync 前后必跑，退出码非 0 即有定制被覆盖）
 - `likha/ops/local-ci.sh` —— 本地复现 `ci.yml` **全量** job（backend + frontend）
+- 新增 **`likha/{code,ops,doc}`** —— 自研与上游**物理隔离**（含 `likha/.gitattributes` 固化行尾）
+- `likha/ops/patches/0001-log-ms-precision.patch` —— 复现补丁（`git apply` 可直接回放）
+- `likha/ops/verify-upstream-changes.sh` —— **定制在位校验**（sync 前后必跑，退出码非 0 即有定制被覆盖）
+- `likha/ops/local-ci.sh` —— 本地复现 `ci.yml` **全量** job（backend + frontend）
 
 #### 二、SLS 侧（app-file，两站点已 apply ✅）
 

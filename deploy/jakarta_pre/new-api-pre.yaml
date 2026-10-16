@@ -6,7 +6,7 @@
 #      （项目负责人裁定 ⑤）⇒ 不写 nodeSelector / nodeAffinity / tolerations，只靠 ResourceQuota 约束用量。
 #   ② DSN 走 **6432 托管池**：雅加达实例现已开池且 `pgbouncer.pool_mode=session`（实测见台账 §17）；
 #      dev 当年写 5432 是因为**那时没有池**（6432 BLOCKED）。session 模式下池不改语义，
-#      这一条同时是"池真的能用"的端到端证据（比 TCP 握手强）。perf 侧仍按 5432 直连口径另算。
+#      这一条同时是"池真的能用"的端到端证据（比 TCP 握手强）。perf 侧同样走 6432（与生产同形状），见 new-api-perf.yaml 偏差③。
 #   ③ **不挂 Redis**：dev 现网 Secret 已有 `REDIS_CONN_STRING`，pre 若复用同一实例同一库
 #      ⇒ 缓存/会话键空间互串（new-api 的 Redis key 不带环境前缀）。pre 用 `MEMORY_CACHE_ENABLED=false`。
 #   ④ **无 `LOG_SQL_DSN`**：裁定只建 `newapi_pre` / `newapi_perf` 两库，不建 pre 专用日志库

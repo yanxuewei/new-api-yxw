@@ -1,0 +1,46 @@
+{
+  "nodepool_info": {
+    "name": "np-jkt-perf",
+    "type": "ess"
+  },
+  "scaling_group": {
+    "vswitch_ids": [
+      "vsw-k1agmhxtf974bmzbjlnkp",
+      "vsw-k1aoupd0er378rku728d3",
+      "vsw-k1an7x32b5qjtsmklelkt"
+    ],
+    "security_group_ids": ["sg-k1ag5j7s6xbuyjkv3j8c"],
+    "instance_types": ["ecs.g9i.xlarge"],
+    "instance_charge_type": "PostPaid",
+    "system_disk_category": "cloud_essd",
+    "system_disk_size": 40,
+    "image_id": "aliyun_3_x64_20G_container_optimized_alibase_20260720.vhd",
+    "platform": "AliyunLinux",
+    "image_type": "AliyunLinux3ContainerOptimized",
+    "multi_az_policy": "BALANCE",
+    "desired_size": 2,
+    "internet_charge_type": "PayByTraffic",
+    "internet_max_bandwidth_out": 0
+  },
+  "auto_scaling": {
+    "enable": false
+  },
+  "kubernetes_config": {
+    "runtime": "containerd",
+    "runtime_version": "2.3.4",
+    "cpu_policy": "none",
+    "cms_enabled": false,
+    "labels": [
+      { "key": "site", "value": "jkt-dev" },
+      { "key": "env", "value": "dev" },
+      { "key": "project", "value": "new-api" },
+      { "key": "track", "value": "perf" }
+    ],
+    "taints": [
+      { "key": "dedicated", "value": "perf", "effect": "NoSchedule" }
+    ]
+  },
+  "management": {
+    "enable": false
+  }
+}

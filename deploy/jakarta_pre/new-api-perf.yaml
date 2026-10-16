@@ -1,0 +1,145 @@
+# 雅加达 perf · new-api-perf 工作负载（任务 45 步骤 5 的 perf 半边）
+#
+# 状态：**尚未落地**。唯一门槛是"新建节点池 = 新增 ECS 费用"这条红线（负责人核准前，执行器
+# `--perf-apply` 会被 P0 门禁直接拒）。2026-10-15 曾记为"机型不可售"，2026-10-16 复核作废
+# （`ecs.g9i.xlarge` 在 5a/5b/5c 全 `WithStock`，见台账 §17.5）。
+#
+# 形状抄 deploy/jakarta_pre/new-api-pre.yaml，四处**有意偏差**：
+#   ① **落点必须是独立节点池**（裁定 ⑤ 的反面：perf 不许和 dev/pre 抢那三台 2C 机器）。
+#      实测依据：dev 节点池按 requests 已近饱和（三台各 1930m，已请求 1.69–1.80 核，一台 16/15 Pod），
+#      pre 是被迫降到 100m 才排进去的 ⇒ 压测负载若共机，测到的是"邻居干扰"而不是应用容量。
+#      `nodeSelector` 用 `__PERF_NODE_SELECTOR__` 占位：真实值 = 建池后回读的
+#      `ack.alibabacloud.com/nodepool-id=<np-xxxx>`（**不猜、不写死**），由 pre_deploy.sh render 注入。
+#   ② `tolerations` 对应 taint `dedicated=perf:NoSchedule` ⇒ 压测 Pod 只落专用节点，
+#      反向保证 dev/pre 的 Pod（无此 toleration）不会被调度到 perf 机器上。
+#   ③ **DSN 与 pre 同走 6432 托管池**（`pgbouncer.pool_mode=session`）：压测的目的就是复现
+#      生产的主链路形状（马尼拉 prod 也是 6432），直连 5432 会绕过被测对象。
+#      连接账目：default_pool_size=50 / max_client_conn=2000，dev(3×20)+pre(1×10)+perf(本文件) 合计需 < 上限。
+#   ④ 副本数 2、requests 1核/2Gi：专用节点是 `g9i.xlarge`（4 vCPU/16 GiB）档，
+#      与 dev/pre 那套"贴 requests 余量取 100m"的约束无关，按压测需要取整档。
+#
+# 红线核对：无明文密钥（Secret 从保管目录注入）；镜像 tag = 日期+git sha，禁 latest；
+# 只允许 `newapi-dev/*` 仓库，**禁止**引用 `newapi-prod/*`；库名必须是 `newapi_perf`（不是 newapi_pre/newapi）。
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: new-api-config
+  namespace: new-api-perf
+  labels:
+    app: new-api
+    project: new-api
+    site: jkt-dev
+    track: perf
+    env: dev
+data:
+  TZ: "Asia/Jakarta"
+  NODE_TYPE: "slave"                    # 偏差：迁移由 pre/dev 侧 master 承担过；perf 空库首启若需建表，执行器会临时改 master 并回读表数
+  MEMORY_CACHE_ENABLED: "false"         # 不挂 Redis：跨环境键空间互串（与 pre 偏差③ 同因）
+  SYNC_FREQUENCY: "30"
+  SQL_MAX_OPEN_CONNS: "30"              # 压测侧连接上限，按 3 副本 × 30 = 90 < default_pool_size 放大后的账目取
+  SQL_MAX_IDLE_CONNS: "10"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: new-api-perf
+  namespace: new-api-perf
+  labels:
+    app: new-api
+    project: new-api
+    site: jkt-dev
+    track: perf
+    env: dev
+spec:
+  replicas: 2
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxUnavailable: 0, maxSurge: 1}
+  selector:
+    matchLabels: {app: new-api, track: perf}
+  template:
+    metadata:
+      labels:
+        app: new-api
+        project: new-api
+        site: jkt-dev
+        track: perf
+        env: dev
+      annotations:
+        checksum/config: "__CONFIG_CHECKSUM__"
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "3000"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: new-api-app
+      terminationGracePeriodSeconds: 30
+      # 偏差②：专用节点池带 taint，没有这条 toleration 就永久 Pending
+      tolerations:
+        - key: "dedicated"
+          operator: "Equal"
+          value: "perf"
+          effect: "NoSchedule"
+      # 偏差①：建池后由 render 注入 nodepool-id；占位符未替换时执行器拒绝 apply（P1 门禁）
+      nodeSelector:
+        __PERF_NODE_SELECTOR__: "__PERF_NODEPOOL_ID__"
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway   # 单 AZ 建池（如只在 5b）时不能用 DoNotSchedule
+          labelSelector:
+            matchLabels: {app: new-api, track: perf}
+      containers:
+        - name: new-api
+          image: acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com/newapi-dev/newapi-master:20261015-c62445555
+          imagePullPolicy: IfNotPresent
+          args: ["-log-dir=/data/logs"]
+          ports:
+            - {name: http, containerPort: 3000}
+          volumeMounts:
+            - {name: app-logs, mountPath: /data/logs}
+          env:
+            - {name: NODE_TYPE, value: "slave"}
+            - {name: GOMAXPROCS, value: "2"}  # 专用节点 4 vCPU 档，仍显式钉住（生产坑 2 同因）
+            - {name: SQL_SLOW_THRESHOLD_MS, value: "200"}
+            - name: SQL_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: new-api-secrets
+                  key: SQL_DSN_MIGRATE
+          envFrom:
+            - configMapRef: {name: new-api-config}
+            - secretRef: {name: new-api-secrets}
+          startupProbe:
+            httpGet: {path: /api/status, port: http}
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            httpGet: {path: /api/status, port: http}
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: {path: /api/status, port: http}
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 5
+          resources:
+            requests: {cpu: "1", memory: 2Gi}
+            limits: {cpu: "2", memory: 4Gi}
+      volumes:
+        - name: app-logs
+          emptyDir: {sizeLimit: 2Gi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: new-api-perf
+  namespace: new-api-perf
+  labels: {app: new-api, track: perf}
+spec:
+  type: ClusterIP
+  selector: {app: new-api, track: perf}
+  ports:
+    - {name: http, port: 80, targetPort: http}
