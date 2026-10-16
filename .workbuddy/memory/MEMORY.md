@@ -19,18 +19,18 @@
 
 ## 资源与集群（细节见 REFERENCE / impl_deploy.md §7.10）
 - 集群(3)：mnl `cd57e40ce9a634c1698c2f5c5e09bd93c`(apse-6) · sg `ca75829e3492d491d9d434de087913798`(apse-1) · jkt dev `cb0abf5bc06034f7bbdb991752f6f3e62`(apse-5)。
-- 实例：RDS `pgm-5tstdhko64x2c01w`（PG 17.0 2C8G/100G HA 包月，到期 2026-10-28 已自动续费）· Tair mnl `r-5tsf1fe16543e274` · Tair sg `r-gs5ltv3m4i3655besh` · CK `cc-5tsv2o51s1360b0pr`（企业版按量 $35.587/天）· jkt dev ALB `alb-4okmogghe7hbv5fwm6`（`dev.likha.hk`，10-15 落地，IaC `deploy/jakarta_dev/dev_ingress.yaml`）。
+- 实例：RDS `pgm-5tstdhko64x2c01w`（PG 17.0 2C8G/100G HA 包月，到期 2026-10-28 已自动续费）· Tair mnl `r-5tsf1fe16543e274` · Tair sg `r-gs5ltv3m4i3655besh` · ~~CK `cc-5tsv2o51s1360b0pr`~~（**2026-10-15 已释放**）· 日志库 MySQL `rm-5ts0ez22t67il9oz3`（x2.medium.2c 跨AZ HA 包月 $133.06/月）· jkt dev ALB `alb-4okmogghe7hbv5fwm6`（`dev.likha.hk`，10-15 落地，IaC `deploy/jakarta_dev/dev_ingress.yaml`）。
 - 权限两套互不相通（RAM 管调 OpenAPI / K8s RBAC 管集群内）；`newapi-ops-operator`=v3；`cs GrantPermissions` 全量覆盖须读现状保全部集群；`bssopenapi` 一律 `--region ap-southeast-1`。
 - 域名：GTM 3.0 已接管 `www.likha.hk`（10-13 任务 21）；DV 通配符 `606823-ap-southeast-1`（2027-03 前续签）；`_dnsauth` TXT 保留；加域名一条命令 `deploy/ops/add-domain.sh`。
 - 节点池（10-14 起）：mnl `np-mnl-app` min2/max8 · sg `np-sg-ph-standby` min1/max10；**自动缩容结构性不会发生**（goatscaler `skip_nodes_with_system_pods:true`，每台节点都命中）⇒ 真缩用 `deploy/tasks/task42/shrink_nodepool.sh`。
 
 ## 成本与账务（真源 `gen_cost_table.py --apply`，勿手改 md）
-- 生产两站 **4,301.55 USD/月**（含 jkt 4,628.85），日烧 ≈$152；**CK $1,082.44/月 = 最大单项**；流量 $0.124/GB 当前≈0；证书一次性 $212.07（OV $997 已退款）；数据盘 300G→100G 省 $221.80/月（未执行，云盘不支持原地缩容）。
+- 生产两站 **3,352.18 USD/月**（含 jkt 3,679.48），日烧 ≈$110；流量 $0.124/GB 当前≈0；证书一次性 $212.07（OV $997 已退款）；数据盘 300G→100G 省 $221.80/月（未执行，云盘不支持原地缩容）。
 
-## 日志库去 CK（2026-10-15 已实施 → task58）
+## 日志库去 CK（2026-10-15 已实施并收口 → task58）
 - 代码事实：`LOG_SQL_DSN` 支持 PG/MySQL/CK（`model/main.go:140-184`）；`LOG_SQL_CLICKHOUSE_TTL_DAYS=90` 仅 CK 生效；清理走 system_task → `DeleteOldLogBatch`（`model/log.go:705`）。
 - **★ GORM 硬差异（决定性）**：mysql driver v1.5.7 `DeleteClauses` 含 LIMIT ⇒ 批删生效；**postgres driver v1.5.9（`postgres.go:77`）不含 ⇒ PG 上 `Limit()` 被静默忽略 = 一次全删大事务**（长锁/膨胀），PG 日志库清理需运维侧兜底。
-- **已实施 B 方案**：专用 MySQL `rm-5ts0ez22t67il9oz3`（x2.medium.2c 跨 AZ HA，$133.06/月，净省 $949.38）；mnl 内网 / sg 公网 `newapi-logs-public`（SSL 已开）+ `tls=skip-verify`（知情偏离，云端证书不在公共信任链）；两站切换完成 0 错误；**CK `cc-5tsv2o51s1360b0pr` 保留回滚 3–7 天**。细节/回滚 → `deploy/tasks/task58_log_mysql/README.md` + REFERENCE。
+- **已实施 B 方案并收口**：专用 MySQL `rm-5ts0ez22t67il9oz3`（x2.medium.2c 跨 AZ HA，$133.06/月）；mnl 内网 / sg 公网 `newapi-logs-public`（SSL 已开）+ `tls=skip-verify`（知情偏离）；两站 0 错误。**CK 已于 10-15 释放（存量日志弃），回滚 = 重建 CK**。logs 表 TTL：system_task 一次性基线 + **Windows 计划任务 `newapi-log-cleanup`**（每日唤起，每月 2 号执行）→ WSL `/usr/local/bin/newapi_log_cleanup.sh`；root access_token 在 `/root/.deploy_secrets/ADMIN_API_TOKEN`（600）。细节/回滚 → `deploy/tasks/task58_log_mysql/README.md` + REFERENCE。
 
 ## 已打通通道（详见 REFERENCE）
 `ack_remote.sh <mnl|sg> <body.sh>` · `deploy/lib/aliyun_rpc.py`（绕 CLI 嵌套参数）· `aliyun workorder --region ap-southeast-1` · 凭据 `/root/.deploy_secrets/`（600）。

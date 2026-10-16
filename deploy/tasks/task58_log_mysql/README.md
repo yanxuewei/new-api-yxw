@@ -30,15 +30,23 @@ MySQL 客户端 `VERIFY_IDENTITY` 报 `CA certificate is required` ⇒ 阿里云
 - `verify.sh`：应用日志核验（DB 选择行 + DB 错误扫描）
 - `wait_running.sh`：实例创建轮询
 
-## 回滚（单条链路，CK 实例保留至稳定 3-7 天）
+## 回滚（⚠ CK 已于 2026-10-15 释放 ⇒ 单条 DSN 切回不再可用）
 ```bash
-# 例：sg 回滚到 CK（mnl 同理换 mnl 与 MYSQL_LOG_DSN_MNL）
+# 原回滚方式（CK 存续期）：DSN 切回 + 滚动重启
 DSN_OVERRIDE=/root/.deploy_secrets/CK_LOG_DSN_sg bash deploy/tasks/task58_log_mysql/switch.sh sg switch
 ```
-CK 回滚稳定后释放实例：`cc-5tsv2o51s1360b0pr`（按量释放即停计费），释放后跑 `deploy/ops/gen_cost_table.py --apply` 更新成本表。
+CK 释放后如需回滚：**重建 CK 实例**（`CreateDBInstance`，Serverless 4 CU 起步 ≈$35.6/天）→ 从 `CK_LOG_DSN_{mnl,sg}` 留档恢复连接串口径 → 重建库 → `switch.sh` 切回。
+
+## 收尾（2026-10-15 17:5x 全部完成 ✅）
+1. ~~CK 未释放~~ → **CK `cc-5tsv2o51s1360b0pr` 已于 2026-10-15 17:4x 释放**（`clickhouse DeleteDBInstance`，按量即停计费）。⚠ **回滚路径随之降级**：CK DSN 留档文件仍可参考，但实例没了，真要回滚需**重建 CK**（重建 + 改 DSN + 重启）。
+2. ~~存量日志导出~~ → **fanyan 裁定：无用户、日志可直接弃**（CK 内 90 天历史未导出，随实例释放销毁）。
+3. ~~清理自动化~~ → **已完成**：
+   - 一次性基线任务：system_task `log_cleanup`（task_id `systask_MVAW7KoPubr7ZaTjcO3YbQx73pdhnGDf`，target=30 天前，`deleted_count=0`，succeeded）；
+   - 每月定期：**Windows 计划任务 `newapi-log-cleanup`**（每日 09:30 唤起）→ WSL `/usr/local/bin/newapi_log_cleanup.sh`（脚本自判每月 2 号执行，或距上次成功 ≥28 天兜底；调 `POST /api/system-task/log-cleanup?target_timestamp=<now-30d>`，日志落 `/var/log/newapi_log_cleanup.log`）。⚠ 该计划任务为「仅登录时运行」——fanyan 工作站长期在线即有效。
+   - 凭据：root `access_token`（32hex，2026-10-15 经主库生成，等价管理台「生成访问令牌」）落 `/root/.deploy_secrets/ADMIN_API_TOKEN`（600）。**撤销方式**：管理台 root「撤销访问令牌」或 SQL 置空。
+4. 成本表已重算：生产两站 **4,301.55 → 3,352.18 USD/月**（`gen_cost_table.py --apply`，impl_deploy/impl_tech §7.10 同步）。
 
 ## 遗留
-1. **余额告急**：2026-10-15 15:0x 实测 **$44.51**（包月 MySQL 已扣 $133.06）；充值未到账 → 生产随时欠费停机。
-2. CK 实例未释放（回滚窗口）；释放后成本表需更新（生产两站预计 4,301.55 → 3,352.17 USD/月）。
-3. 数据迁移：本次**未迁移** CK 存量日志（90 天历史留 CK 内，未导出）；如需保留先从 CK 导出再释放。
-4. 清理自动化：logs 表 TTL 需运维侧定期调管理台「清理历史日志」或外部 cron（MySQL 批删原生生效，system_task 可直接用）。
+1. ~~余额告急~~ → 当日充值 $2,000 已入现金余额（对公汇款），延停服务已开通；月度消耗仍需盯（日烧 ≈$110）。
+2. sg `tls=skip-verify` 知情偏离维持现状；强校验需上游 custom CA 改造。
+3. `LOG_SQL_CLICKHOUSE_TTL_DAYS=90`（ConfigMap）保留不删：仅 CK 生效，若未来重建 CK 回滚仍需要。

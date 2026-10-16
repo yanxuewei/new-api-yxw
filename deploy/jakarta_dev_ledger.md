@@ -1029,3 +1029,37 @@ meta 模式下这句是**错的**（会把读者带向错误的风险预期）�
 - 未做（都需要负责人点头，见 §12.8）：dev RDS 续费/转按量/释放、节点池 2↔1、DB owner 改 aurora、
   马尼拉 ACR EE 公网 ACL 收紧。
 - §13.10 的冷缓存跨区下载仍未验证，等下一次真实版本发布时顺带采集。
+## 17. 任务 45（改口径后执行）：雅加达 pre/perf 底座 + 双库冒烟（2026-10-15，**pre 侧已闭合 / perf 侧被可售性阻断**）
+
+**裁定（负责人 2026-10-15 五条 + 收口授权「可以直接按现网实际情况修改内容 / 可以直接操作」）**：① staging 与 perf 都建在雅加达开发站，**正式环境（马尼拉）零改动**；② ns 名 `new-api-staging` → **`new-api-pre`**（perf 仍 `new-api-perf`）；③ `pgbouncer.pool_mode` 回到 `session`，**只改雅加达**；④ RDS 不复用主实例的独立 schema/库 ⇒ **新建库 `newapi_pre` / `newapi_perf`**；⑤ `new-api-pre` **与 dev 共用机器**（现网唯一节点池 `np-jkt-dev-app`），perf 保持独立节点池 2×`g9i.xlarge` + taint；单人本轮口径降为 **SQLite + PG 双库冒烟**。
+
+### 17.1 落地产物（全部为新文件，未改既有清单）
+`deploy/jakarta_pre/pre_deploy.sh`（执行器，子命令 `--ns-base/--addon-verify/--pull-check/--db-ports/--db-state/--create-db/--apply-grants/--dev-baseline/--gen-secret/--apply-secret/--apply-app/--smoke/--diag*`）+ `bodies/*.sh`（13 个远端 body）+ `pre_grants.sql` + `new-api-pre.yaml`。通道仍是 `deploy/lib/ack_remote_jkt_dev.sh`（云助手 → 节点内 kubectl，硬门禁 15000 字节 ⇒ 冒烟拆两个 body，不是绕过）。
+
+### 17.2 每步实测回读
+1. **ns 底座 ✅**：`new-api-pre` / `new-api-perf` 各 Namespace + ResourceQuota + SA `new-api-app`（`create_ns.sh`）。配额有 ResourceQuota ⇒ 任何 Pod 必须声明 requests/limits，首版漏写被 API 直接拒（已补）。
+2. **免密作用域 ✅ + 真实拉取反证**：`managed-aliyun-acr-credential-helper` 的 `watchNamespace=newapi-dev,new-api-pre,new-api-perf`；探针 Pod 在两 ns 各自看到 `secret/acr-credential-secret-aggregation` 且 SA `imagePullSecrets` 非空，实测从**马尼拉 EE 公网入口跨区**拉到 `newapi-master:20261015-c62445555`：**77,430,712 B / 42.157 s ≈ 1.85 MB/s**（冷缓存，顺带闭合 §13.10 的余项）。
+3. **pool_mode ⇒ 零写操作**：09:2x 读数时雅加达实例无池字段；17:5x 再读已出现 `PGBouncerEnabled=true` + 18 条 `pgbouncer.*`，其中 **`pgbouncer.pool_mode=session`**。⇒ 开池发生在我的两次读数之间、**不是我做的**（我全程只 `Describe*`；`set_rds_pooler.sh` 只在 `APPLY=0` 计划态跑过）。判据按实况记为"目标值已达成 + 非本卡所改"。
+   - **6432 实测**：节点侧 TCP `OPEN`、PG 握手应答 `SSLRequest=S`（5432 同样 OPEN）。**业务侧真正走池**：`new-api-pre` 的 `SQL_DSN` 端口 = 6432，AutoMigrate 经池建出 **42 张表** ⇒ "池在承载真实 DDL/DML"，握手只是必要条件。
+   - **马尼拉同步纠错（不改马尼拉）**：卡片原判据写"马尼拉维持 `transaction`"与现网不符 —— `DescribeParameters` 实测马尼拉亦为 `pool_mode=session`，且 `deploy/docs/G11连接数预算表_线上核实_2026-10-12.md` 已用 ActionTrail 证成 2026-09-30 09:33 由 root 主账号未登记切换、2026-10-13 裁定"先不切回 = 维持 session"。⇒ **"只改雅加达"没有可改对象**，两地都已是 session，本卡零写即满足。
+   - 读数教训（已写进卡片 V4）：字段名是 **`ParameterName`** 不是 `ParameterKey`，且 JSON 是 `": "` 带空格的美化格式 —— 紧格式 grep 会**静默假阴性**（我先后踩过这两条）。`DescribeModifyParameterLog` 回 `InternalError`，不可用。
+4. **两库 + 权限链 ✅**：`newapi_pre` / `newapi_perf` 建成（UTF8，`DescribeDatabases` 回读 `Running`，空库）。owner 走 `GrantAccountPrivilege`（PG+云盘只有 `DBOwner` 一个值）→ 目标账号 **`newapi_ops`**（业务账号绝不可为 owner，坑 11）；库内三段式由 `pre_grants.sql` 逐条执行并回读：`db_owner=newapi_ops`、`has_create_migrate=true`、`has_usage_migrate=true`、**`has_create_runtime=false`**、`has_usage_runtime=true`、`default_acl=newapi_migrate=…{newapi=arwdDxt}`、`tables=0`（建库时点）。
+   - **权限链反证 ✅**：以运行账号 `newapi` 直接 `CREATE TABLE` ⇒ `permission denied for schema public`；migrate 账号建表成功 ⇒ 切分真正生效（不是"命令返回 0"）。
+   - 与 dev 同构的有意偏差：**无 logs 段**（本轮不建 pre 日志库）、**不写 database 级 CONNECT/REVOKE**（坑 14 与 dev 台账口径保持一致）。
+5. **Secret ✅**：`--gen-secret` 在堡垒机保管目录 `/root/.deploy_secrets_dev/`（mode 600）内生成 `PRE_SQL_DSN` / `PRE_SQL_DSN_MIGRATE`（端口 **6432**）等键；`--apply-secret` 的 payload 门禁 K1–K6 全过（键集合、URL 前缀 `postgres://`、非空 SESSION_SECRET），并**只输出指纹不输出值**：`SESSION_SECRET` 指纹 pre=`881a665a44ff` vs dev=`734c5af1db1d` ⇒ **不同**（坑 1）。口令未进 Pod spec 命令行、未进 stdout、未进台账。
+6. **pre 工作负载 ✅（被容量实测倒逼改了资源档）**：首版按 dev 清单 `requests 500m/1Gi` ⇒ 两副本全 Pending，scheduler 原文 `0/3 nodes are available: 1 Too many pods, 3 Insufficient cpu`。诊断（`diag_nodes.sh`/`diag_mem.sh`）实测：三台 `allocatable.cpu=1930m`，已请求 **1.69–1.80 核**（大头 `arms-prometheus` 单 Pod 报 **1 核**），一台 **16/15 Pod 超限**；而**集群实际 CPU 使用率仅 2%** ⇒ 这是**请求量分配饱和，不是物理容量不足**。⇒ pre 降为 `requests 100m/256Mi / limits 500m/512Mi` 后排进，rollout 完成、**`1/1 Running`**，集群内 `http://new-api-pre.new-api-pre.svc.cluster.local/api/status` 200（`"success":true`）。
+   - **与裁定 ⑤ 的冲突已记账**：pre 与 dev 共机 ⇒ dev 的验证窗口会被 pre 挤占；**perf 独立节点池因此从"可选"变"必需"**。
+7. **双库冒烟 ✅**：
+   - **PG（V1）**：经 6432 池，`/api/status` 200 + `newapi_pre` 内 **42 表** + 服务端 `ssl=1`（TLS 在池侧终结，回读自 `pg_stat_ssl`）。
+   - **SQLite（V2）**：同镜像、无 `SQL_DSN` 的临时 Pod，日志自证 `SQL_DSN not set, using SQLite as database`、`ready in 307 ms`、落盘文件 **`/data/one-api.db`**。
+   - **两条原判据按实况作废**：① "version 与镜像 tag 一致" 实测不成立（`/api/status` 回 `"version":""`，构建未注 ldflags）；② SQLite 文件名原写 `new-api.db`，现网是 `one-api.db`。两者降级为"记录，不门槛"。
+8. **隔离反证 ✅**：dev 三个负载 Pod 身份指纹（name/pod-template-hash/restartCount）与本卡执行前的 `--dev-baseline` 逐行一致 ⇒ **本卡对 `newapi-dev` 零写**。唯一例外 `new-api-channel-task-dev` 模板哈希 `d6579bfc7 → 597d78649d`（镜像 `…e0a5cae3 → …5603216a`），`managedFields.manager=OneConsole-App-CS`、时间 `10:15:10Z` ⇒ **控制台侧第三方变更，不是本卡**（诚实归因，不当成"我改的"也不当成"没事"）。pre ns 对象清单只有 pre 三件套 + 已清理的冒烟 Pod；pre 无 Ingress/ALB ⇒ 只在 ns 内被路由；两地 DSN/域名字符串在清单里互相不可达（结构隔离：独立集群 + 独立 VPC）。
+
+### 17.3 未执行 / 阻断
+- **perf 独立节点池 ⏸**：裁定机型 **`ecs.g9i.xlarge` 在 `ap-southeast-5` 实测不可售** —— `DescribeAvailableResource` 在 5a/5b/5c 三 zone 均无该规格；`g9i` 家族自 `2xlarge` 起售，`g8ine` 仅 `5b` 有 `2/4/8xlarge`（现网 `g9i.large/g8ine.large` 是既有库存实例，不代表可新购）。建池 = 新增 ECS 费用（红线需书面核准）+ 机型需重裁 ⇒ **停在此处等负责人裁定**，未做任何建池调用。
+- **perf 工作负载 / V5 压测 ⏸**：依赖上项；且任务 53 已实测本站"无管理员会话、无可用上游渠道"⇒ V5 顺延 T+14。
+- **MySQL 列 ⏸**：按裁定顺延 T+14（三库矩阵未闭合，出口清单相应行保持不勾选）。
+- **载体到期风险**：两库都落在 **2026-11-12 到期**的 Prepaid 实例 `pgm-d9j9p421lzx4gw73` 上（§12.8 ① 续/释仍未裁定）。
+
+### 17.4 凭据扫描
+本卡新增/修改的 20 个文件（含指南）`grep -cE "eyJ[A-Za-z0-9]{20,}"` 全部 **0 命中**；DSN 在文档与输出中一律 `***` 或只给 sha256 前 12 位指纹；保管目录外无明文。
