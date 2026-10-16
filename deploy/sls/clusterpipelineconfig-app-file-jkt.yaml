@@ -1,0 +1,60 @@
+# jkt dev 集群（ack-newapi-jkt-dev）：new-api 容器**文件日志**采集（毫秒时间戳）
+#
+# 口径来源：马尼拉 `clusterpipelineconfig-app-file.yaml`（2026-10-09 版），逐项同构，
+# 仅按 jkt 实况替换 project / endpoint / flusher Region / 输入过滤（同 stdout 版，见其文件头）。
+#
+# 前置（实测）：dev 侧 `new-api-dev` 与 `new-api-dev-slave` 都以 `-log-dir=/data/logs` 启动并挂
+# emptyDir → 容器内 `/data/logs/*.log` 有文件日志；`new-api-channel-task-dev` 未带该参数（无文件侧，属预期）。
+#
+# 取值两步（缺一不可，与 mnl 完全一致）：
+#   ① processor_regex 抓行内毫秒时间戳 → log_ts（FullMatch 必须显式 false）
+#   ② processor_gotime 解析 log_ts + SetTime → 触发 TimeNs → 落 __time_ns_part__
+# 注：文件采集的容器元数据天生是 `__tag__:` 前缀标签，`UsingOldContentTag` 改不动（与 stdout 不同）。
+apiVersion: telemetry.alibabacloud.com/v1alpha1
+kind: ClusterAliyunPipelineConfig
+metadata:
+  name: new-api-app-file-ns
+spec:
+  project:
+    name: k8s-log-cb0abf5bc06034f7bbdb991752f6f3e62
+    endpoint: ap-southeast-5.log.aliyuncs.com
+  config:
+    global:
+      EnableTimestampNanosecond: true
+      UsingOldContentTag: true
+    inputs:
+      - Type: input_file
+        FilePaths:
+          - /data/logs/*.log
+        MaxDirSearchDepth: 1
+        EnableContainerDiscovery: true
+        FileEncoding: utf8
+        ContainerFilters:
+          # ★ jkt 差异：按命名空间（同 stdout 版）
+          IncludeContainerLabel:
+            io.kubernetes.pod.namespace: newapi-dev
+    processors:
+      - Type: processor_regex
+        SourceKey: content
+        Regex: '^\[[A-Z]+\]\s+(\d{4}/\d{2}/\d{2} - \d{2}:\d{2}:\d{2}\.\d{3})'
+        Keys:
+          - log_ts
+        FullMatch: false
+        KeepSource: true
+        NoMatchError: false
+      - Type: processor_gotime
+        SourceKey: log_ts
+        SourceFormat: "2006/01/02 - 15:04:05.000"
+        DestKey: event_time_ms
+        DestFormat: "2006-01-02 15:04:05.000"
+        SetTime: true
+        KeepSource: true
+        NoKeyError: true
+        AlarmIfFail: false
+    flushers:
+      - Type: flusher_sls
+        Project: k8s-log-cb0abf5bc06034f7bbdb991752f6f3e62
+        Logstore: app-file
+        Region: ap-southeast-5
+        Endpoint: ap-southeast-5-intranet.log.aliyuncs.com
+        TelemetryType: logs

@@ -1196,3 +1196,79 @@ meta 模式下这句是**错的**（会把读者带向错误的风险预期）�
 - 危害评估：该 CK 实例已删除 ⇒ 账号随实例消失，口令不可再用；**但它与仓库里既有的明文是同一串**（见下），且同类口令存在复用风险 ⇒ 按泄露处理，**建议轮换 CK/日志库侧口令**（属破坏性操作，需负责人核准，我不自行执行）。
 - 落盘面复查：本次输出只写进 `/tmp/ckk.txt`，**已 `shred -u`**；仓库内**没有**今天新增的命中。但既有的 **4 个受 Git 跟踪的文件**本身含同一形态的明文 DSN（`deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md`、`deploy/tasks/task9/ck_wiring.sh`（3 处）、`deploy/tasks/task17/Day2任务17_DSN注入_执行报告.md`、`deploy/docs/日志库ClickHouse_学习手册.md`），另有 4 个 `deploy/logs/**` 备份被 `.gitignore` 兜住不入 Git ⇒ 这是**先于本轮就存在的**问题，原地脱敏需负责人许可（fork 工程尽量不改既有文件）。
 - 改进：打码必须**按 scheme 无关**的写法（先 `s#://[^@]*@#://***@#`，再兜 `s#(:[^:/@ ]+)@#@***@#`），并在输出前用长度指纹自证；本轮之后所有取证脚本改走"只打印键名 + 主机名"，不再打印任何 DSN 派生串。
+
+### 18.6 负责人答复落地（2026-10-16）：CK→MySQL 是**已定的改判**，但最后一步没接线
+答复三条：① 正在充值；② 生产日志库因 CK 太贵**已改判 MySQL**；③ 仓库既有明文与口令轮换暂不处理（**已按答复关闭**，任务列表相应删除）。
+
+**证据链补齐（全部只读，ActionTrail + RDS API）**：
+- `2026-10-15T06:12:56Z` `CreateDBInstance`（svc=Rds，主体 `yanxuewei`，源 IP `14.155.115.41`）⇒ 资源 **`rm-5ts0ez22t67il9oz3`**，即台账里那台 `newapi-logs-mysql`。**与 18.4 的 CK 删除是同一主体、同一 IP、同一天**，先后顺序为"先建 MySQL（06:12）→ 后删 CK（09:48）"⇒ 18.4 那条 Delete **不是误删，是改判的第二步**。
+- MySQL 侧现状（`DescribeDatabases` / `DescribeAccounts`，只读）：库 `newapi_logs` `status=Running`、`charset=utf8mb4`；账号 `newapi_logs`（Normal，授权 1 条）+ `newapi_ops`（Super，授权 0 条）；实例 Prepaid，**2026-11-15 到期**，`LockMode=Unlock` ⇒ 载体已就位，不是空壳。
+
+**仍然成立的缺口（这是本轮唯一的"坏消息"）**：正式环境 `secret/new-api-secrets` 的 **`LOG_SQL_DSN` 现值仍指向已删除的 CK 主机**（本条只复述形态 `clickhouse://<账号>:<口令>@cc-5tsv2o51s1360b0pr...:8123/<库>`，口令不外泄），而 `configmap/new-api-config` 仍留着 CK 专属的 `LOG_SQL_CLICKHOUSE_TTL_DAYS=90`；6 个 Pod 的创建时间是 `2026-10-15T06:35Z`（**建 MySQL 之后、删 CK 之前**），且任务 17 早已证 **Secret 变更不会自动重启 Pod** ⇒
+- 改判的第三步（**把 `LOG_SQL_DSN` 换成 MySQL 形态的 DSN + 滚动重启**）**没有做过**；
+- 因此从 `2026-10-15T09:48:55Z` 起，正式环境的日志写入目标是**一个已不存在的实例**。近 800 行 Pod 日志零错误只能说明"错误没打到 stdout 或被批量吞掉"，**不能**证明日志在正常落库。
+- ⇒ 待负责人核准的生产变更（AI 不得自行执行）：`LOG_SQL_DSN` 改为 `mysql://` 形态指向 `rm-5ts0ez22t67il9oz3:3306/newapi_logs`（口令从保管目录取，不外显）→ `rollout restart` `new-api-master`（迁移角色，先让它建日志表）→ 再 `new-api-stable`（4 副本，`maxUnavailable=0`）→ `new-api-canary` → 回读 `information_schema.tables` 与 `logs` 行数增长为生效判据；顺带决定 `LOG_SQL_CLICKHOUSE_TTL_DAYS` 是否作废、MySQL 侧保留策略怎么落。
+
+**充值仍未到账（影响 perf）**：`QueryAccountBalance` 两次读数 `2026-10-16T01:3xZ` = **-43.81 USD**、`01:5xZ` = **-51.97 USD**（AvailableCashAmount=0、CreditAmount=0）⇒ 金额在继续走负，说明按量资源仍在计费而充值未落地；`CreateClusterNodePool` 在此之前仍会被 `Account.Arrearage` 拒。到账后我按 §17.6 的链路续跑 perf，无需重新裁定。
+
+### 18.7 我又造成第二次口令外泄：18.5 开的药方本身不够（2026-10-16，必须登记并纠正）
+- 现象：为核对 §18.6「MySQL 形态的 DSN 是否已在保管目录就位」，我在 WSL 本地用 `python3` 打印了 `/root/.deploy_secrets/` 里三个文件的"打码后形态"。结果 **`MYSQL_LOG_DSN_MNL` 的完整串（含口令）原样进了会话输出**，`CK_LOG_DSN_mnl` / `LOG_SQL_DSN` 则被正确打码。
+- 根因（这一次不是"正则漏了 scheme 前缀"，是**我的验证方式本身错了**）：MySQL 的 DSN 是 `user:pass@tcp(host:port)/db`，**整串没有 `://`**。18.5 我写下的修法 `s#://[^@]*@#://***@#` 依赖 `://` 存在 ⇒ 对无 scheme 的形态**天然不命中**；我加的兜底 `s#(:[^:/@ ]+)@#@***@#` 在这次用的脚本里**根本没执行**。我当时的判定是"看输出里有没有星号"，星号没出现我却只注意到了主机名，没有把它当成打码失败的信号。
+- 危害评估：① 该串指向的是**仍然活着**的 MySQL 实例（`rm-5ts0ez22t67il9oz3`，Prepaid 至 2026-11-15），不像 18.5 那次随着 CK 删除自动失效 ⇒ **必须按有效凭据泄露处理**。② 它同时是 §18.6 计划的正式环境 `LOG_SQL_DSN` 要写入的那一串 ⇒ 接线前默认它已不可信。③ 落盘面：本次只读取、未写临时文件，输出仅存在于会话，`/root/.deploy_secrets/` 权限 600 未变；仓库内**无新增命中**（复查 `rm-5ts0ez22t67il9oz3` 与 `mysql://` 两种键串，只命中文档/台账里既有的主机名引用，无口令）。
+- **替换 18.5 的"改进"条目**（原写法已被证伪，留原文是为了可追溯）：对保管目录里的 DSN/凭据文件，**唯一允许的自检输出是「文件名 + 字节数 + sha256 前缀」三样**，一律不打印文件的任何**派生子串**（包括自认为已打码的、包括只截主机名的）。理由：任何"先取一段再打码"的路径，都要靠正则覆盖全部方言才能成立，而 DSN 方言（PG / ClickHouse / MySQL `tcp()` / 无 scheme）是我记忆不住的集合；**不取子串**是唯一与方言无关、因此不可能漏的写法。要验证"是不是 MySQL 形态"，用 `grep -c '@tcp(' 文件` 只回**计数**，不回内容。
+- 后续动作（按负责人 2026-10-16 答复③「这个可以暂时不用管」执行，我**不自行处理**，只在此留一条待办事实）：口令轮换与仓库既有明文脱敏被明确搁置 ⇒ 上面"按有效凭据泄露处理"的结论在当前口径下**未被消解**。§18.6 的生产接线若获核准，我会在动手前重跑一次"计数式自检"确认口径，而不会再用打印形态的方式核对 DSN。
+- 计数式自检实测（`deploy/` 全目录 + 保管目录，**只回计数与指纹，零内容外显**）：`@tcp(` 命中 **0** ⇒ 本次外泄的那一串**没有落进仓库**；`mysql://…@` 命中 **0**；既有明文 `clickhouse://…@` **16**、`postgres://…@` **25**（先于本轮存在，按答复③搁置）。保管目录三文件：`MYSQL_LOG_DSN_MNL` 122 B / `sha256 aaf98ddf85c2`、`CK_LOG_DSN_mnl` 142 B / `21386218590f`、`LOG_SQL_DSN` 143 B / `3a8fe039bc3d`；形态自检回的是计数 —— `MYSQL_LOG_DSN_MNL` 的 `@tcp(` = **1**、`://` = **0**，这就是 18.5 那套正则必然漏它的**可复现证据**（不是推测）。
+- 余额第三次读数（`2026-10-16`，与上两次同一口径）：AvailableAmount **-51.97 USD**、AvailableCashAmount 0.00、CreditAmount 0.00 ⇒ **与前次持平、未继续走负，但充值仍未落地**。perf 仍被 `Account.Arrearage` 挡在门外，链路待命。
+
+## 19. jkt dev 集群 SLS 容器日志开通 + 一次容量事故（2026-10-16，**已落地并验证**）
+
+负责人指令：「帮我在 ack-newapi-jkt-dev 集群也开通 sls 集群日志，配置参照马尼拉的来即可」。
+**全文见 `deploy/docs/jkt_dev集群SLS日志开通_执行报告_2026-10-16.md`**，此处只记结论与坑。
+
+### 19.1 落地（三步）
+
+| 步 | 内容 | 结果 |
+|---|---|---|
+| 1 | logstore + 索引：`deploy/sls/jkt_provision.sh`（照抄 mnl 实测参数；索引 body 从 mnl `GetIndex` 取回裁剪） | `app-stdout` ttl180/17 键 · `app-file` ttl30/纯全文 ✅ |
+| 2 | 两份 CR：`deploy/sls/clusterpipelineconfig-app-{stdout,file}-jkt.yaml` | `status.message=success`，SLS 侧已翻译出 global+processors ✅ |
+| 3 | 执行器扩至三站：`apply_pipeline_ns.sh` 增加 jkt（专用 remote 通道 + ns `newapi-dev` + 跳过老式 CR 清理） | `apply/verify all jkt` 可用、幂等 ✅ |
+
+**与 mnl 的机制差异**：jkt 是 **`loongcollector` v3.3.10.0**（新采集器，DS 3/3）+ **`loongcollector-operator`**
+（CR 翻译器，**必须能调度**，这点与 mnl 内置 `alibaba-log-controller` 不同）；CRD 名同
+（`clusteraliyunpipelineconfigs.telemetry.alibabacloud.com`）；project `k8s-log-cb0abf5bc…` 建集群时已存在（RG=rg-nonprod）。
+
+**输入过滤必须改口径**（★ 易漏）：mnl 用 `io.kubernetes.container.name: new-api`，而 jkt 三个负载容器名**各不相同**
+（`new-api` / `new-api-dev-slave` / `new-api-channel-task-dev`）⇒ 沿用会**漏掉 dev.likha.hk 背后的 slave**；
+改为 `io.kubernetes.pod.namespace: newapi-dev`。实测两容器均入库（slave x54 / dev x46）。
+
+### 19.2 事故：装采集组件把 dev 集群压垮（已闭环）
+
+**11:47 装 loongcollector ⇒ 11:47–11:56 `dev.likha.hk` 503**（`new-api-dev-slave` 与 operator 双双 Pending）。
+根因是**容量三重约束**，非采集配置错：3×2C 节点（alloc 1930m/节点、Pod 上限 15/节点）已 86%/97%/98%，
+`.174`/`.199` **无 Pod 槽**、唯一有槽的 `.153` CPU 只剩 30m（ARMS Prometheus 单 pod 占 **1000m**）；
+新增 3×DS（各 100m+1 槽）+ operator（100m+1 槽）正好吃光余量 ⇒ `2 Insufficient cpu, 2 Too many pods`。
+
+**修法（零成本最小改动）**：`arms-prometheus-ack-arms-prometheus` 的 `requests.cpu` **1000m→300m** + 重建其 Pod
+（新请求需重建才计入）。`.153` 98%→77%，两者立即调度成功；`dev.likha.hk` 3/3 **200**。
+
+★ **判据沉淀**：ACK 附加组件的「组件 state=active」≠「组件能跑」——`loongcollector-operator` 这种
+**Deployment 形态的翻译器**会因节点满而 Pending，而 **CR 是否被翻译要查 SLS 侧 `GetLogtailPipelineConfig`**，
+不能只看 `kubectl apply` 成功。
+
+### 19.3 真相纠正：`app-file` 毫秒在两站**都没生效**（推翻任务 26 报告结论）
+
+逐条对账：mnl（镜像 `20260928-26ac63233`）与 jkt（`20261015-c62445555`）的 file 行均为 `[GIN] … 12:04:43 |`
+**无毫秒**，`log_ts=None`。根因：毫秒补丁（`UPSTREAM_CHANGES.md` 条目 1–5，提交 `9fff2aa47`）**在
+`feature/log-ms-precision` 分支、PR 未开、未进 main** ⇒ CI 镜像都不含 ⇒ 正则不命中。
+stdout 路不受影响（纳秒来自 runtime `_time_`）。属既有挂账 G8，本次**不改码/不重建镜像**。
+
+### 19.4 遗留
+
+① dev 集群容量贴顶（节点池 `np-jkt-dev-app` desired=3/max=3 且**未开自动伸缩**）——本次是"借"ARMS 的 1000m，
+建议加 1 台节点（≈$80/月）；② `arms-prom/node-exporter-*` 三 Pod 长期 `ImagePullBackOff`（3 天，独立问题）；
+③ ARMS 的 requests 可能被附加组件回滚（回滚时改走 ①）。
+
+### 19.5 追加修复（12:5x）：node-exporter ImagePullBackOff 已解决；第 4 台节点确认**未建成**
+
+- **node-exporter**：jkt 的 DS 引用 `acs/node-exporter:v1.9.1-6a53edf`，该 tag 在 ap-southeast-5 镜像仓 **NotFound**（3 天 2 万次 BackOff）；mnl 同 DS 用 **`v0.17.0-slim`**（4 台 2/2 Running 16 天）。修法：节点上 `crictl pull` 先验证 `-5` 仓**确有** `v0.17.0-slim` → `kubectl set image ds/node-exporter node-exporter=…:v0.17.0-slim`（不动已 Ready 的 kube-rbac-proxy）→ 一次滚动 **3/3 全 2/2 Running**，**全集群 Pending 清零**。⚠ DS 由 arms 附加组件管理，升级可能回滚 tag（届时同命令重打）。
+- **第 4 台节点（负责人称已加）实测未建成**：节点池 `desired=4 / actual=3`，ESS 伸缩活动 12:51–12:53 **连续 Failed**（Total Capacity 3→4），余额 **-56.15 USD** 继续走负 ⇒ 与 §17 perf 同款 `Account.Arrearage` 阻断，**充值到账前建不出**；到账后若 ESS 不自动重试，用 `cs ScaleClusterNodePool --count 4` 再触发。

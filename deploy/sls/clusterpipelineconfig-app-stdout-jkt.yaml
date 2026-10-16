@@ -1,0 +1,55 @@
+# jkt dev 集群（ack-newapi-jkt-dev）：new-api 容器 **stdout 采集**（纳秒时间戳）
+#
+# 口径来源：马尼拉 `clusterpipelineconfig-app-stdout.yaml`（2026-10-08 版），逐项同构，
+# 仅四处按 jkt 实况替换：project / endpoint / flusher Region / 输入过滤。
+#
+# 【与 mnl 的唯一语义差异 —— 输入过滤】
+#   mnl：`io.kubernetes.container.name: new-api`（生产 ns 内三个 Deployment 的容器都叫 new-api）
+#   jkt：容器名**各不相同**（实测 `new-api` / `new-api-dev-slave` / `new-api-channel-task-dev`），
+#        沿用容器名过滤会**漏掉 dev.likha.hk 背后的 new-api-dev-slave** ⇒ 改为按命名空间过滤
+#        `io.kubernetes.pod.namespace: newapi-dev`，该 ns 内全部应用容器自动纳入，
+#        且对新负载（含控制台手建）天然覆盖。
+#
+# 【集群侧前置（已验证）】loongcollector 附加组件（v3.3.10.0，新一代采集器，替代 mnl 的 logtail-ds）
+#   已装且 3/3 Running；`ALICLOUD_LOG_DEFAULT_PROJECT=k8s-log-cb0abf5bc06034f7bbdb991752f6f3e62`
+#   （project 由附加组件绑定，与 mnl 同机制）；CRD `clusteraliyunpipelineconfigs.telemetry.alibabacloud.com` 就位。
+#
+# 【纳秒精度三件套（与 mnl 同坑）】必须 `service_docker_stdout`（旧版 Go 插件）+
+#   `global.EnableTimestampNanosecond` + `global.UsingOldContentTag` + `processor_gotime(SetTime)`；
+#   原生 `input_container_stdio` 会把容器元数据写成 `__tag__:` 标签，`UsingOldContentTag` 也改不动。
+apiVersion: telemetry.alibabacloud.com/v1alpha1
+kind: ClusterAliyunPipelineConfig
+metadata:
+  name: new-api-app-stdout-ns
+spec:
+  project:
+    name: k8s-log-cb0abf5bc06034f7bbdb991752f6f3e62
+    endpoint: ap-southeast-5.log.aliyuncs.com
+  config:
+    global:
+      EnableTimestampNanosecond: true
+      UsingOldContentTag: true
+    inputs:
+      - Type: service_docker_stdout
+        Stdout: true
+        Stderr: true
+        IncludeLabel:
+          # ★ jkt 差异：按命名空间（容器名在 dev 各不相同，见文件头）
+          io.kubernetes.pod.namespace: newapi-dev
+    processors:
+      - Type: processor_gotime
+        SourceKey: _time_
+        SourceFormat: "2006-01-02T15:04:05.999999999Z07:00"
+        DestKey: event_time_ms
+        DestFormat: "2006-01-02 15:04:05.000"
+        SetTime: true
+        KeepSource: true
+        NoKeyError: false
+        AlarmIfFail: false
+    flushers:
+      - Type: flusher_sls
+        Project: k8s-log-cb0abf5bc06034f7bbdb991752f6f3e62
+        Logstore: app-stdout
+        Region: ap-southeast-5
+        Endpoint: ap-southeast-5-intranet.log.aliyuncs.com
+        TelemetryType: logs

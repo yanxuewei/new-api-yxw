@@ -21,8 +21,11 @@ set -uo pipefail
 
 MNLCID=cd57e40ce9a634c1698c2f5c5e09bd93c
 SGCID=ca75829e3492d491d9d434de087913798
+JKTCID=cb0abf5bc06034f7bbdb991752f6f3e62
 MNLREGION=ap-southeast-6
 SGREGION=ap-southeast-1
+JKTREGION=ap-southeast-5
+SITES="mnl sg jkt"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
 
@@ -33,15 +36,20 @@ target_manifest() {  # target_manifest <site> <stdout|file>
     sg:stdout)  echo "$HERE/clusterpipelineconfig-app-stdout-sg.yaml" ;;
     mnl:file)   echo "$HERE/clusterpipelineconfig-app-file.yaml" ;;
     sg:file)    echo "$HERE/clusterpipelineconfig-app-file-sg.yaml" ;;
+    jkt:stdout) echo "$HERE/clusterpipelineconfig-app-stdout-jkt.yaml" ;;
+    jkt:file)   echo "$HERE/clusterpipelineconfig-app-file-jkt.yaml" ;;
     *) return 1 ;;
   esac
 }
-target_oldcrd() {  # 老式 CRD 名（迁移期需删，避免同容器双采集）
+target_oldcrd() {  # 老式 CRD 名（迁移期需删，避免同容器双采集；jkt 无老式 CR）
   case "$2" in stdout) echo new-api-app-stdout ;; file) echo new-api-app-file ;; esac
 }
 
-site_cid()  { case "$1" in mnl) echo "$MNLCID" ;; sg) echo "$SGCID" ;; esac; }
-site_reg()  { case "$1" in mnl) echo "$MNLREGION" ;; sg) echo "$SGREGION" ;; esac; }
+site_cid()  { case "$1" in mnl) echo "$MNLCID" ;; sg) echo "$SGCID" ;; jkt) echo "$JKTCID" ;; esac; }
+site_reg()  { case "$1" in mnl) echo "$MNLREGION" ;; sg) echo "$SGREGION" ;; jkt) echo "$JKTREGION" ;; esac; }
+# jkt dev 走独立执行器（临时私网 kubeconfig 通道），ns 也不同（newapi-dev）
+site_remote() { case "$1" in jkt) echo "$REPO/deploy/lib/ack_remote_jkt_dev.sh" ;; *) echo "$REPO/deploy/lib/ack_remote.sh" ;; esac; }
+site_ns()     { case "$1" in jkt) echo "newapi-dev" ;; *) echo "new-api" ;; esac; }
 
 apply_one() {  # apply_one <site> <stdout|file>
   local site=$1 target=$2 cid region manifest
@@ -50,9 +58,15 @@ apply_one() {  # apply_one <site> <stdout|file>
   echo "== [$site/$target] apply $(basename "$manifest")"
   local body="/tmp/ns_apply_${site}_${target}_$$.sh"
   { echo "kubectl apply -f - <<'YAMLEOF'"; tr -d '\r' < "$manifest"; echo "YAMLEOF"
-    echo "kubectl -n new-api delete aliyunlogconfig $(target_oldcrd "$site" "$target") --ignore-not-found"
+    if [ "$site" != "jkt" ]; then
+      echo "kubectl -n $(site_ns "$site") delete aliyunlogconfig $(target_oldcrd "$site" "$target") --ignore-not-found"
+    fi
     echo "sleep 40"; } > "$body"
-  bash "$REPO/deploy/lib/ack_remote.sh" "$site" "$body" || echo "[!] $site/$target 远端执行异常"
+  if [ "$site" = "jkt" ]; then
+    bash "$(site_remote "$site")" "$body" || echo "[!] $site/$target 远端执行异常"
+  else
+    bash "$(site_remote "$site")" "$site" "$body" || echo "[!] $site/$target 远端执行异常"
+  fi
   rm -f "$body"
   echo "-- [$site/$target] SLS 侧复核（global / processors）"
   aliyun sls GetLogtailPipelineConfig --region "$region" --project "k8s-log-$cid" \
@@ -74,17 +88,18 @@ verify_one() {  # verify_one <site> <stdout|file>
   fi
 }
 
-run_targets() {  # run_targets <apply|verify> <stdout|file|all>
-  local fn=$1 which=$2 t
+run_targets() {  # run_targets <apply|verify> <stdout|file|all> [site]
+  local fn=$1 which=$2 only=${3:-} s t
+  local sites=${only:-$SITES}
   case "$which" in
-    stdout|file) "$fn" mnl "$which"; "$fn" sg "$which" ;;
-    all) for t in stdout file; do "$fn" mnl "$t"; "$fn" sg "$t"; done ;;
-    *) echo "用法: $0 apply|verify [stdout|file|all]"; exit 2 ;;
+    stdout|file) for s in $sites; do "$fn" "$s" "$which"; done ;;
+    all) for t in stdout file; do for s in $sites; do "$fn" "$s" "$t"; done; done ;;
+    *) echo "用法: $0 apply|verify [stdout|file|all] [mnl|sg|jkt]"; exit 2 ;;
   esac
 }
 
 case "${1:-}" in
-  apply)  run_targets apply_one  "${2:-all}" ;;
-  verify) run_targets verify_one "${2:-all}" ;;
-  *) echo "用法: $0 apply|verify [stdout|file|all]"; exit 2 ;;
+  apply)  run_targets apply_one  "${2:-all}" "${3:-}" ;;
+  verify) run_targets verify_one "${2:-all}" "${3:-}" ;;
+  *) echo "用法: $0 apply|verify [stdout|file|all] [mnl|sg|jkt]"; exit 2 ;;
 esac

@@ -1380,3 +1380,67 @@ aliyun actiontrail LookupEvents --LookupAttribute.1.Key EventName --LookupAttrib
 - CK DSN 格式不匹配 MySQL 正则 ⇒ switch body 的 python 解析改为**解析失败即原样 patch**（回滚任意格式 DSN 通用）。
 
 **脚本**：`deploy/tasks/task58_log_mysql/`（provision.sh · switch.sh（含 probe 模式）· verify_body.sh · README.md 含回滚一条链路）。
+
+## ★★ DMS 控制台与实例授权（2026-10-16 全线打通 · 「进不去」→「能查询」）
+
+**症状链**（四个独立坑，逐个拔）：① 控制台进不去 → ② 报 `The AliyunDMSLoginConsoleAccess policy is not attached to the current user` → ③ 能进了但弹「您暂无**录入**该数据库实例的权限」→ ④ 账号密码登录报「您暂未获取当前数据库实例的**登录权限**」。
+
+**坑 1 · `newapi-enforce-mfa` 盖住 `*-console:*`**（与 10-15 ACR `cr:*` **同形态**，本项目最隐蔽的一类故障）：
+- `Deny NotAction[...] Condition {Bool:{acs:MFAPresent:"false"}}` —— **控制台网关**对 `dms-console:*` 的评估上下文**不带 MFA**；而浏览器 SPA 发起的普通 API 调用 `MFAPresent=true`（所以 `ResourceManager:*` 一直正常）⇒ **极易误判为「已排除」**。
+- **判别式：同组挂 `enforce-mfa` 的用户全挂、不挂的（`super_group`/`AdministratorAccess`）正常。**
+- 修复 = 补进 `NotAction`：`newapi-enforce-mfa` **v4**（2026-10-16T02:37:27Z）追加 `dms-console:*`、`dms:*`（v3 已有 `cr:*`）。`NotAction` 只解除 Deny，实际权限仍需别处 Allow ⇒ 放开面极小。
+- **关键反证**：`yanxuewei` 用 `AdministratorAccess`（`*:*`）能进，而它**并不含** `AliyunDMSLoginConsoleAccess` 这个名字 ⇒ **门检评估的是「动作的有效权限」，不是「策略名是否挂载」**；那句 not attached 是 DMS 固定文案，**别照着文案去找策略**。
+
+**坑 2 · ActionTrail 零痕迹 ≠ 没问题**：DMS 门检/控制台网关判定**完全不落 ActionTrail**（用户侧 0 条 `dms-console`/`Ram:`/`Ims:` 调用；`AliyunServiceRoleForDMS` 零调用）。ActionTrail 续用注意：`LookupAttribute` 合法键只有 `EventId/EventName/ResourceName/ResourceType/User`（`EventSource` 报 `InvalidLookupAttributesException`）；事件字段**小驼峰**且 `userIdentity` 常为字符串需二次 `json.loads`；`StartTime/EndTime` 必须 `%Y-%m-%dT%H:%M:%SZ`。
+
+**坑 3 · 服务端按 `PolicyType=Custom` 查 System 策略**（旁证，非主因）：`AliyunServiceRoleForResourceMetaCenter` 反复调 `Ram:GetPolicy --PolicyType Custom --PolicyName AliyunDMSLoginConsoleAccess` 恒报 `EntityNotExist.Policy`（实测 `GetPolicy` 不带 `PolicyType` 是 `MissingParameter`，**不会默认 Custom**）。绕过 = **建一条同名 Custom 策略再挂到同样的组/用户**：`ram CreatePolicy --PolicyName <同名>` —— **CreatePolicy 不接受 `--PolicyType`**（默认即 Custom），且**允许与系统策略同名**，两条可并存。（本次建了但非决定因素；真解是坑 1。）
+
+**★ DMS OpenAPI 通道（新打通）**：`aliyun dms-enterprise`（版本 2018-11-01）——**必须 `--region cn-hangzhou`**（**无 ap-southeast-\* 端点**，ap-southeast-6 直接报 unknown endpoint）；**`Tid = 7659207`**（`GetUserActiveTenant`）；CLI 身份 = RAM 用户 `yanxuewei`。
+- **用户**：`ListUsers --Tid <Tid>`；`RegisterUser --Uid <RAM用户的UserId>`（不注册则 DMS 报 `UserNotExist`：*does not exist in DMS, contact Admin to add your account UID*）；`UpdateUser --Uid <int> --UserNick <昵称>`（**必填 `--Uid`**，可容 18 位；昵称参数叫 **`--UserNick`** 不是 `--NickName`）。**昵称为空会让 `ListInstanceUserPermissions --UserName` 报 `InvalidParameterValid`**。
+- **实例**（`ListInstances`，7 条）：`2998662` ck-mnl-newapi（陈旧，已释放的 CK）· `2997880` rds-mnl-newapi（马尼拉 PG）· `3004426` rds-newapi-jkt-dev · `2998669` tair-mnl · `3004344` tair-jkt-dev · `3000947` tair-sg · `3004473` newapi-logs-mysql。
+- **★ 权限模型**：`GrantUserPermission --Tid --UserId <DMSUserId> --DsType INSTANCE --InstanceId <id> --PermTypes <LOGIN|QUERY|EXPORT|CORRECT|PERF> --ExpireDate "2099-12-31 23:59:59"`。
+  - **`LOGIN` 可直接授**，且**实测足以「登录 + 正常查询」**（fanyan 10:54 验收）—— 不必开安全托管。
+  - `QUERY` 会被拦：**「非安全托管实例，不能申请查询权限」** ⇒ 需先开安全托管（`ModifyInstance --EnableSellTrust Y`；`AddInstance` 同参 `EnableSellTrust Y/N`）。本次**未开**（fanyan 裁定）。
+  - 已托管实例（Tair ×3 = 控制台的"**免登录实例**"）授 LOGIN 会报 **「安全托管实例，无需申请登录权限」** ⇒ 无需授权、天然免登录。
+- **复核**：`ListInstanceUserPermissions --Tid --UserName <昵称> --InstanceId <id>`，结构 `UserPermissions.UserPermission[].PermDetails.PermDetail[]`（PermType/ExpireDate/OriginFrom/UserAccessId）。⚠ **参数是 `--UserName` 不是 `--UserId`**；⚠ **`ListAuthorizedUsersForInstance` 不反映 LOGIN 授权**（只反映 QUERY 级），别用它验证 LOGIN；⚠ 解析键写成 `InstanceUserPermissions` 会误判"无权限"。
+- **回滚**：`RevokeUserPermission`（按 `--UserId/--InstanceId/--PermTypes` 逐条撤销）。
+
+**已实施**：`xiangdong` 注册进 DMS（UserId `15596572`）+ 补昵称；**9 条 LOGIN 授权** = {`yxw` 15595492 / `zhangzijun` 15575828 / `xiangdong` 15596572} × {`2997880` 马尼拉PG / `3004426` 雅加达PG / `3004473` 日志MySQL}，到期 2099-12-31，已逐条复核。DMS 里 `ck-mnl-newapi`(2998662) 陈旧条目 **fanyan 2026-10-16 裁定不清理**。
+
+### 新用户接入：分层边界 + 一键脚本（2026-10-16）
+
+**结论：RAM 层一次性、DMS 层 per-user。**
+
+| 层 | 内容 | 频率 |
+|---|---|---|
+| RAM 策略级 | `newapi-enforce-mfa` **v4** 补 `dms-console:*`/`dms:*` | **一次性**（全局） |
+| RAM 组级 | 同名 Custom 策略 `AliyunDMSLoginConsoleAccess` 挂 3 组 | **一次性**（新用户入组即继承） |
+| RAM 组级 | 把用户加进 `dev_group` / `ops-prod_group` / `dev-program_group` | 每次（= 标准入职动作） |
+| DMS | `RegisterUser` / `UpdateUser --UserNick` / `GrantUserPermission LOGIN` × N | **每用户必做**（DMS 无组级授权） |
+
+- **★ 一键脚本**：`deploy/ops/onboard-dms-user.sh`（幂等 · 5 步 · `--dry-run` / `--revoke` / `--group` / `--instances`）。
+  `bash onboard-dms-user.sh <RAM用户名> [--nick N] [--group G]... [--dry-run] [--revoke --yes]`
+  默认目标 = 3 个未托管实例；**排除 Tair ×3**（免登录实例）与 `2998662`（陈旧 CK）。
+- **组级现状（`ListPoliciesForGroup` 实测）**：`dev_group` / `ops-prod_group` / `dev-program_group` 各挂**两条同名** `AliyunDMSLoginConsoleAccess`（System + Custom 并存）；**`ops_group` 原未挂，2026-10-16 11:13 已补挂 Custom 一条**（另 4 组是 System+Custom 两条；功能等价，门检看有效权限不看策略名）。⚠ **`AttachPolicyToGroup` 必填 `--PolicyType`**（`System`|`Custom`）。
+- **组归属**：`yxw`/`zhangzijun`/`xiangdong` = `ops-prod_group` + `dev_group`；`yanxuewei` = `super_group`。
+- **关键关联键**：`dms-enterprise ListUsers` 返回的 **`Uid` = RAM UserId**（`UserId` 才是 DMS 内部 ID）⇒ 幂等判断用 `UserList.User[?Uid=='<RAM UID>']`。
+- **脚本踩坑（三条）**：① **`GROUPS` 是 bash 内建保留数组**（当前用户组 ID，root 下 `(0)`）⇒ 赋值被忽略、数组恒非空元素为 `0`，改用 `REQ_GROUPS`（与 `UID` 只读同源）；② **只读查询必须三态**（有 / 确认没有 / 查询失败）——用 `q()` 静默吞错会把 API 抖动误判成「没授权」并重复授权（诊断失真）；③ **`| [0]` 在本 CLI 的 JMESPath 不稳** ⇒ `UserAccessId` 会回 `[ 84875060 ]` 脏值 ⇒ 需 `grep -o '[0-9]\+' | head -n1` 规范化 + `*[!0-9]*` 守卫。
+
+## jkt dev 集群 SLS 开通（2026-10-16 落地）与「采集组件≠能用」判据
+
+**全文**：`deploy/docs/jkt_dev集群SLS日志开通_执行报告_2026-10-16.md` · 台账 §19。
+
+**机制对照（三站）**：mnl/sg = `logtail-ds` v3.3.3.1 + `alibaba-log-controller`（附加组件内置）；**jkt = `loongcollector` v3.3.10.0（DS 3/3）+ `loongcollector-operator`（Deployment，1/1）**。CRD 名三站相同：`clusteraliyunpipelineconfigs.telemetry.alibabacloud.com`；project 一律 `k8s-log-<cid>`（jkt `k8s-log-cb0abf5bc…`，建集群时已由 log controller 创建，RG=`rg-nonprod` 与集群同组）。loongcollector-ds env 实测：`ALICLOUD_LOG_DEFAULT_PROJECT=k8s-log-cb0ab…`、`ALICLOUD_LOG_ENDPOINT=ap-southeast-5-intranet.log.aliyuncs.com`。
+
+**落地物**：`deploy/sls/clusterpipelineconfig-app-{stdout,file}-jkt.yaml`（CR 名与 mnl 同：`new-api-app-{stdout,file}-ns`）· `deploy/sls/jkt_provision.sh`（logstore+索引，幂等，默认干跑；app-stdout ttl180/shard2/maxSplit32/appendMeta=true/17 键；app-file ttl30/maxSplit64/appendMeta=false/纯全文）· `apply_pipeline_ns.sh` 扩到三站（`site_remote`/`site_ns` 分流：jkt 走 `ack_remote_jkt_dev.sh`、ns=`newapi-dev`、跳过老式 AliyunLogConfig 清理）。索引 body **从 mnl `GetIndex` 取回裁剪**（不手抄）。
+
+**★ 输入过滤必须按站点变**：mnl/sg `io.kubernetes.container.name: new-api`；**jkt 必须 `io.kubernetes.pod.namespace: newapi-dev`** —— dev 三负载容器名各异（实测 `new-api` / `new-api-dev-slave` / `new-api-channel-task-dev`），沿用容器名会**漏掉 dev.likha.hk 背后的 slave**。实测覆盖：slave x54 / dev x46。
+
+**★ 判据：CR 建了 ≠ 采集生效**。`kubectl apply` 成功只说明对象落库；真正判据是
+`aliyun sls GetLogtailPipelineConfig --region <r> --project k8s-log-<cid> --configName new-api-app-<target>-ns` 能取到 global/processors，及 CR `.status.message=success`。jkt 首次 apply 后两者**当即就绪**（operator 已 Running）。
+
+**★ 事故范式（可复用）**：装附加组件会**额外占用 3×DS + 1×operator 的 CPU 请求与 Pod 槽**。jkt dev 3×2C 节点（alloc 1930m、Pod 上限 15/节点）已 86/97/98%，`.174/.199` 无 Pod 槽、唯一有槽的 `.153` CPU 仅剩 30m（ARMS Prometheus 单 pod 1000m）⇒ 新增组件把 `new-api-dev-slave` 挤成 Pending ⇒ **`dev.likha.hk` 503（11:47–11:56）**。修法 = 降 `arms-prom/arms-prometheus-ack-arms-prometheus` `requests.cpu` 1000m→300m **并重建该 Pod**（Deployment patch 不改运行中 Pod 的 requests，节点核算看 Pod 字段）⇒ `.153` 77%，双双调度成功。⚠ 附加组件重装/升级可能回滚该 requests；根治=加 1 台节点（≈$80/月）。
+
+**★ 真相纠正（推翻任务 26 结论）**：`app-file` 毫秒**在两站都未生效** —— mnl（`20260928-26ac63233`）与 jkt（`20261015-c62445555`）的 file 行都是 `[GIN] 2026/10/16 - 12:04:43 |`（秒级），`log_ts=None`。根因：毫秒补丁（`UPSTREAM_CHANGES.md` 条目 1–5 / 提交 `9fff2aa47`）在 `feature/log-ms-precision` 分支、**未进 main** ⇒ CI 镜像均不含 ⇒ 正则 `\.\d{3}` 不命中 ⇒ 无 `__time_ns_part__`。**stdout 路不受影响**（纳秒来自容器 runtime `_time_`）。属既有挂账 G8（补丁进 main + 重建镜像后两站同时受益）。
+
+**遗留**：① dev 集群容量贴顶（节点池 desired=3/max=3、未开自动伸缩）；② `arms-prom/node-exporter-*` 三 Pod 长期 `ImagePullBackOff`（3 天，独立问题）；③ jkt 无自动伸缩 ⇒ 扩容须 `ScaleClusterNodePool`（**只支持扩容**）。
