@@ -1444,3 +1444,16 @@ aliyun actiontrail LookupEvents --LookupAttribute.1.Key EventName --LookupAttrib
 **★ 真相纠正（推翻任务 26 结论）**：`app-file` 毫秒**在两站都未生效** —— mnl（`20260928-26ac63233`）与 jkt（`20261015-c62445555`）的 file 行都是 `[GIN] 2026/10/16 - 12:04:43 |`（秒级），`log_ts=None`。根因：毫秒补丁（`UPSTREAM_CHANGES.md` 条目 1–5 / 提交 `9fff2aa47`）在 `feature/log-ms-precision` 分支、**未进 main** ⇒ CI 镜像均不含 ⇒ 正则 `\.\d{3}` 不命中 ⇒ 无 `__time_ns_part__`。**stdout 路不受影响**（纳秒来自容器 runtime `_time_`）。属既有挂账 G8（补丁进 main + 重建镜像后两站同时受益）。
 
 **遗留**：① dev 集群容量贴顶（节点池 desired=3/max=3、未开自动伸缩）；② `arms-prom/node-exporter-*` 三 Pod 长期 `ImagePullBackOff`（3 天，独立问题）；③ jkt 无自动伸缩 ⇒ 扩容须 `ScaleClusterNodePool`（**只支持扩容**）。
+
+## ACK 控制台「nodes forbidden」= dev 角色的结构性限制（2026-10-16 实证）
+
+- **ACK 内置 `dev`（开发人员）角色不含 cluster 级 `nodes` 读取** ⇒ 控制台节点管理页必报
+  `nodes is forbidden ... cannot list resource "nodes" at the cluster scope`（APISERVER.403）。
+  用户明明有 dev×3 也会报 —— 别再按「缺授权」排查。要看节点：`ops`（运维）及以上；纯浏览用 `admin-view`。
+- **RAM 真源 UID 以 `ram ListUsers` 为准**：控制台报错串可能与真实 UserId 差一位（抄写/OCR）；
+  19 位错串调 `cs DescribeUserPermission` 报 `invalid uid`。
+- `deploy/ops/ack_rbac_grant.sh` 三处升级（10-16）：① `GrantPermissions` **必须
+  `--header "Content-Type=application/json"`**（缺头 415，与 `components/install` 同坑）；
+  ② 失败检测兜 `^ERROR:`（SDK.ServerError 统一前缀，防误判 [OK]）；③ 新增 `CLUSTERS=all|<id…>`
+  首授模式（现状为空时旧行为会拒绝）。现状口径：xiangdong/zhangzijun 均 **ops×3**（17:25:39，
+  负责人改）；daimingming **空**（10-10 自授 admin×3 已被清）。

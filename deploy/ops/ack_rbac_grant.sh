@@ -21,17 +21,30 @@
 #   ALLOW_DOWNGRADE=1 ROLE=ops bash ... apply                  # 确认降权时才允许
 #
 # 环境变量：RAM_UID（默认 daimingming=218577891456544282）· ROLE（默认 admin）
+#   CLUSTERS：**新增授权**用 —— "all"=三集群，或空格分隔的集群 id 列表；
+#   不设 = 沿用旧行为（仅改角色，集群取自现状）。⚠ 现状为空且未设 CLUSTERS 时 apply 拒绝。
 #   ⚠️ 不要用 UID 作变量名 —— 它是 bash 只读变量（root 下=0），赋值静默失败。
+# 2026-10-16 扩展：xiangdong（UID 219177890344347995）首授 dev×3（先例 = zhangzijun 同口径）。
 # =============================================================================
 set -uo pipefail
 
 MNL_CLUSTER="cd57e40ce9a634c1698c2f5c5e09bd93c"   # ap-southeast-6
 SG_CLUSTER="ca75829e3492d491d9d434de087913798"    # ap-southeast-1
+JKT_CLUSTER="cb0abf5bc06034f7bbdb991752f6f3e62"   # ap-southeast-5（jkt dev）
 MNL_REGION="ap-southeast-6"
 
 RAM_UID_V="${RAM_UID:-218577891456544282}"
 ROLE="${ROLE:-admin}"
+CLUSTERS="${CLUSTERS:-}"          # "all" 或空格分隔的集群 id；空 = 仅改现状里的集群
 ALLOW_DOWNGRADE="${ALLOW_DOWNGRADE:-0}"
+
+target_clusters() {  # 授权目标集群列表（每行一个）
+  case "$CLUSTERS" in
+    all|ALL) printf '%s\n' "$MNL_CLUSTER" "$SG_CLUSTER" "$JKT_CLUSTER" ;;
+    "")      : ;;
+    *)       printf '%s\n' $CLUSTERS ;;
+  esac
+}
 
 ALIYUN="${ALIYUN:-$(command -v aliyun || echo "$HOME/.workbuddy/binaries/aliyun-cli/aliyun")}"
 PY="${PY:-$(command -v python3 || echo /usr/bin/python3)}"
@@ -50,9 +63,17 @@ print(json.dumps([{'cluster':x.get('resource_id'),'role':x.get('role_type'),
                  ensure_ascii=False, indent=2))"
 }
 
-# 由现状派生 body：保留所有已授权集群，把角色改成 $ROLE
+# 由现状/CLUSTERS 派生 body：优先 CLUSTERS（新增授权）；否则保留现状全部集群并改角色
 build_body() {
-  cur_raw | "$PY" -c "
+  if [ -n "$CLUSTERS" ]; then
+    target_clusters | "$PY" -c "
+import sys,json
+ROLE='$ROLE'
+out=[{'cluster':l.strip(),'role_name':ROLE,'role_type':'cluster',
+      'is_custom':False,'is_ram_role':False} for l in sys.stdin if l.strip()]
+print(json.dumps(out, ensure_ascii=False))"
+  else
+    cur_raw | "$PY" -c "
 import sys,json
 ROLE='$ROLE'
 try: d=json.load(sys.stdin)
@@ -60,6 +81,7 @@ except Exception: d=[]
 out=[{'cluster':x.get('resource_id'),'role_name':ROLE,'role_type':'cluster',
       'is_custom':False,'is_ram_role':False} for x in d if x.get('resource_id')]
 print(json.dumps(out, ensure_ascii=False))"
+  fi
 }
 
 # 输出：首行=降权条数，后续行为明细
@@ -115,14 +137,21 @@ do_apply() {
 
   local b; b="$(build_body)"
   if [ -z "$b" ] || [ "$b" = "[]" ]; then
-    say "=== 现状为空，无可保留的集群 → 拒绝（请先在控制台授权）==="
+    if [ -n "$CLUSTERS" ]; then
+      say "=== [X] CLUSTERS 已设但 body 为空（脚本错误）==="
+    else
+      say "=== 现状为空，无可保留的集群 → 拒绝（请设 CLUSTERS=all 或指定集群做新增授权）==="
+    fi
     return 1
   fi
 
   say "=== GrantPermissions（全量覆盖；保留现状全部集群，role=$ROLE）==="
-  local out; out=$("$ALIYUN" cs GrantPermissions --uid "$RAM_UID_V" --region "$MNL_REGION" --body "$b" 2>&1)
+  # ★ cs REST POST 必须带 Content-Type: application/json，否则 415 Unsupported Media Type
+  local out; out=$("$ALIYUN" cs GrantPermissions --uid "$RAM_UID_V" --region "$MNL_REGION" \
+    --header "Content-Type=application/json" --body "$b" 2>&1)
   say "  raw: $(printf '%s' "$out" | head -c 300)"
-  if printf '%s' "$out" | grep -qiE 'FORBIDDEN|INVALID|ClientError'; then say "  [FAIL]"; return 1; fi
+  # 失败检测必须兜住 "ERROR:"（SDK.ServerError 的统一前缀，2026-10-16 曾漏判成 [OK]）
+  if printf '%s' "$out" | grep -qE '^ERROR:|FORBIDDEN|INVALID|ClientError|SDK\.ServerError'; then say "  [FAIL]"; return 1; fi
   say "  [OK] 已提交；等 5s"
   sleep 5
   do_verify
