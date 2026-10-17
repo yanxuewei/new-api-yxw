@@ -6,7 +6,7 @@
   "alwaysUpdateLinks": true,
   "showUnsupportedFiles": true,
   "promptDelete": false,
-  "foldHeading": true,
+  "foldHeading": false,
   "spellcheck": false,
   "pdfExportSettings": {
     "includeName": false,

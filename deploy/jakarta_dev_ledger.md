@@ -2,6 +2,8 @@
 
 > 建台账口径与 `eip_ledger.md`、`nodepool_ledger_sg.md` 一致：只记录**实测回读值**，不记录计划值。
 > 依据 `deploy/docs/任务45环境隔离修订_2026-09-29.md` §5.3 / §7。执行时间 2026-09-30（UTC+0），操作身份 `ram-user yanxuewei`，账号 `5108890064395960`，全程 WSL Ubuntu。
+> **2026-10-17 增补 §11.2.1**：dev 节点池漂移更正——实测 `auto_scaling.enable=false + desired_size=4`（固定 4 台在计费，非上文所记 2 台）、单节点 Pod 上限 15 的机型 ENI 来历、以及 `Account.Arrearage` 导致 9 次扩容静默失败。取证脚本 `deploy/scripts/jkt-dev-recon.sh`，整改脚本 `deploy/scripts/jkt-dev-remediate.sh`。同日追加两项优化的核实结论（降 requests 的前提不成立、定时伸缩只能用 ACK `desired_size`），**均为结论、未执行写操作**，见该文档 §七。
+> **同日 18:0x 再增补 §11.2.2**：负责人已重建节点池为 `np-jkt-dev-x4c`（单一 `ecs.g9i.xlarge`、`min=max=2`、按量）⇒ **§11.2.1 与文档 §七 的整改项全部作废**，只留作取证过程。新增「按量 vs 包年包月 vs 抢占式」的 `DescribePrice` 实测对比（1 年包每台 95.83 USD/月，**省 39%**，2 台年省约 1,473 USD）与官方转换约束。**同样未执行任何写操作。**
 
 ## 1. Phase 1 —— 零成本网络层（已建成，实测回读）
 
@@ -50,7 +52,7 @@ aliyun rds DescribeDBInstanceIPArrayList --DBInstanceId pgm-5tstdhko64x2c01w  ->
 |---|---|---|
 | 雅加达可用区 | `ap-southeast-5a / 5b / 5c` | 三区均可用 |
 | 企业级 vCPU 配额（postpay） | **total=512 / used=0** | ⚠ **更正**：修订文档 E7 记的「50」有误，实际 512，dev 落雅加达配额完全不构成约束 |
-| `ecs.g9i.large` + 40G ESSD 包月 | **66.41 USD/月**（Original=Trade，USD） | 与文档 §6 一致 |
+| `ecs.g9i.large` + 40G ESSD **包月（预付）** | **66.41 USD/月**（Original=Trade，USD） | 与文档 §6 一致。⚠ **这是包年包月预付价，不是按量单价**：2026-10-17 复算 `DescribePrice --PriceUnit Hour` = **0.112728 USD/h ⇒ 82.29 USD/月**（×730h）。本节下文与 11.2.1 用 66.41 估「按量在计费」的节点月费，一律低估 **19.4%** |
 | RDS PG **17.0** `pg.n2.2c.1m` / 20G essd | **43.38 USD/月**（`OrderLines.0.depreciateInfo.listPrice`） | 与 PG 15 同价；5b/5c 在售（`DescribeAvailableClasses` 含该类） |
 | RDS 创建预检 | `CreateDBInstance --DryRun=true` → **`DryRunResult: true`**（对齐后已用新偏移重跑一次，仍通过） | 权限、库存、网段、白名单参数全部可用；白名单填 `10.2.16.0/20,10.2.32.0/20,10.2.80.0/20`，`--VSwitchId` 用 data-5a `vsw-k1a9u8pkwwkc6z0x6g0kc` |
 | NAT 网关 / EIP 单价 | `GetPayAsYouGoPrice`/`DescribePricingModule` → 空；`AllocateEipAddress --estimate-cost` → `no OpenAPI quotable` | **CLI 无法报价**，需控制台核实；不在本次可省项 |
@@ -68,6 +70,7 @@ aliyun rds DescribeDBInstanceIPArrayList --DBInstanceId pgm-5tstdhko64x2c01w  ->
 ```
 2a  dev 专用 NAT 网关 + 独立 EIP         单价 CLI 报不出，需确认
 2c  ACK dev 集群（基础版）+ 节点池        min=1 g9i.large = 66.41/月  + max=3
+                                          ← 计划值，已过时：实测固定 4 台 ≈265.64/月，见 11.2.1
 2b  RDS PG 17.0 pg.n2.2c.1m 20G          43.38/月（已 DryRun 通过）
 2d  newapi-dev 工作负载 + 三库冒烟        复用 2a/2b/2c
 3   隔离验收 V1-V11 实测 + 本台账收口      免费
@@ -278,20 +281,115 @@ accept UDP 53/53     0.0.0.0/0          prio 20  DNS 兜底
 | vSwitch | 节点 = Pod = app 三段 `vsw-k1agmhxtf974bmzbjlnkp` / `vsw-k1aoupd0er378rku728d3` / `vsw-k1an7x32b5qjtsmklelkt`（`pod_vswitch_ids` 与 `vswitch_ids` 同值，与马尼拉 `PodVswitchId` 元数据结构一致） |
 | Service CIDR | **172.23.0.0/20**（马尼拉 172.21.0.0/20、新加坡 172.22.0.0/20 顺延，保持三站点同构，便于运维记忆） |
 | 其它 | `proxy_mode=ipvs` / `ip_stack=ipv4` / `snat_entry=false`（复用 11.1 已建 NAT，避免重复计费） / **`endpoint_public_access=false`（API Server 仅内网）** / `deletion_protection=true` / `resource_group=rg-nonprod` / 标签 `env=dev,project=new-api,isolation=structural-vpc` |
-| 节点池 | `np-jkt-dev-app` / `npd3cc9d7f0503472f85420d30436269b5` / ESS `asg-k1a59qtckc246wh9r3ay` |
-| 伸缩 | `min=1 / max=3`、`multi_az_policy=BALANCE`、机型 `ecs.g9i.large` / `g8ine.large` / `g9ae.large`、系统盘 `cloud_essd 40G`、`PostPaid`、`internet_max_bandwidth_out=0`（节点无公网 IP，出网走 NAT）、无 SSH 密钥（运维入口用云助手，见 11.5） |
-| 稳态节点 | **2 台**：`i-k1afy1aqgdl8rwa9gxvf` `g9i.large` 5a `10.2.25.174`；`i-k1ab0p31qirf7ejgdsg9` `g9ae.large` 5b `10.2.36.199` |
+| 节点池 | `np-jkt-dev-app` / `npd3cc9d7f0503472f85420d30436269b5` / ESS `asg-k1a59qtckc246wh9r3ay` —— **⚠ 2026-10-17 18:0x WIB 复看：该池已不存在（`ErrorNodePoolNotFound`），现池见 11.2.2 `np-jkt-dev-x4c`** |
+| 伸缩 | **⚠ 2026-10-17 实测：`auto_scaling.enable=false` + `scaling_group.desired_size=4` ⇒ 固定 4 台常驻，`min/max` 已不生效。** 建池参数为 `min=1 / max=3`（仓库 `ack_jkt_dev_nodepool.json` 至今仍写这组值，属漂移）、`multi_az_policy=BALANCE`、机型 `ecs.g9i.large` / `g8ine.large` / `g9ae.large`、系统盘 `cloud_essd 40G`、`PostPaid`、`internet_max_bandwidth_out=0`（节点无公网 IP，出网走 NAT）、无 SSH 密钥（运维入口用云助手，见 11.5）。另注：`desired_size=4 > max_instances=3` 本身自相矛盾，只有固定容量模式才允许这么写，说明这条池子被控制台改过而未回填 |
+| 稳态节点 | **2026-10-17 实测 4 台**（原记「2 台」已过期，见 11.2.1）：`i-k1afy1aqgdl8rwa9gxvf` `g9i.large` 5a `10.2.25.174`；`i-k1ab0p31qirf7ejgdsg9` `g9ae.large` 5b `10.2.36.199`；`i-k1ahsgvna3udifwksje5` `g9i.large` 5c `10.2.90.153`（10-14 09:29Z）；`i-k1afs8wedv35k7z56g1g` `g9i.large` 5c `10.2.90.163`（10-17 00:37Z） |
 
-**必须记账的费用偏差（本轮最重要的一条）**：原估「稳态 ≈110 USD/月」按 **1 台节点** 计。实测伸缩链路为 `0→1`（min 兜底，10:12:49）→ `1→2→3`（autoscaler 因 pending 的 `coredns` 跨可用区打散，10:13:22 同一秒内连加两台，顶到 max）→ `3→2`（10:24:19 autoscaler 回收唯一那台「只有 DaemonSet」的空节点）。**稳态是 2 台，不是 1 台**：
+**必须记账的费用偏差（建池当日，2026-09-30）**：原估「稳态 ≈110 USD/月」按 **1 台节点** 计。实测伸缩链路为 `0→1`（min 兜底，10:12:49）→ `1→2→3`（autoscaler 因 pending 的 `coredns` 跨可用区打散，10:13:22 同一秒内连加两台，顶到 max）→ `3→2`（10:24:19 autoscaler 回收唯一那台「只有 DaemonSet」的空节点）。**建池当日稳态是 2 台，不是 1 台**（该结论已被 11.2.1 推翻，现为 4 台）：
 
 ```
 节点：2 × 66.41 ≈ 132.82 USD/月（原估 66.41）
+      ⚠ 2026-10-17 复算更正：节点是 PostPaid，按量单价 0.112728 USD/h ⇒ 82.29/台/月
+        ⇒ 按量实际 2 × 82.29 ≈ 164.6 USD/月；66.41 是包月预付价，只适用于「已转包年包月」之后
 RDS ：43.38 USD/月
 NAT + EIP：按量，CLI 无法报价（CU + 出向流量），保守另计
 ⇒ 稳态 ≈ 176 USD/月 + NAT/EIP，比授权口径高约 66 USD/月
 ```
 
-要把节点压回 1 台，只有两条路（都需你定）：① 节点池 `vswitch_ids` 收到单可用区（牺牲 AZ 冗余，coredns 打散约束自然满足）；② 保留 2 台但接受预算上修。**当前状态是 2 台在计费。**
+要把节点压回 1 台，当时给出两条路：① 节点池 `vswitch_ids` 收到单可用区（牺牲 AZ 冗余，coredns 打散约束自然满足）；② 保留 2 台但接受预算上修。**⚠ 这条「当前状态是 2 台在计费」已过时——2026-10-17 实测为 4 台在计费，见 11.2.1。**
+
+#### 11.2.1 2026-10-17 漂移更正：固定 4 台 / 单节点 Pod 上限 15 / 欠费导致扩容静默失败
+
+触发：看 ACK 控制台发现 4 台 2C8G 节点物理 CPU 仅 3.95%~4.95%、内存 14.9%~18.5%，而每台 Allocatable Pod 固定 15，调度器内存 Request 已 ~~83%~~（**16:0x 带口径复看更正：节点池大盘「内存 request 利用」实为 47.5%／CPU 45.9%，真实使用率 2.9%；83% 口径不明，见该文档 §7.2**）（实际使用 4.27%）。全程 `Describe*` 只读取证，脚本见 [deploy/scripts/jkt-dev-recon.sh](scripts/jkt-dev-recon.sh)，整改脚本见 [deploy/scripts/jkt-dev-remediate.sh](scripts/jkt-dev-remediate.sh)，完整报告见 [docs/雅加达dev集群空转与Pod上限_取证与整改_2026-10-17.md](docs/雅加达dev集群空转与Pod上限_取证与整改_2026-10-17.md)。
+
+**⚠ 16:0x 控制台复看（D 级目视，待 OpenAPI 复算）**：**期望节点数 3／集群实际 2 台／按量 2 台**（本节上文 API 实测是 `desired_size=4`／4 台）。⇒ 期望值在两小时窗口内被改过、节点在掉，且**余额恢复后 ESS 会再弹一台回 3**（§11.2.1 那 9 次失败的同机制）。这是当前比任何 request 调整都优先的一条。
+
+三条更正（均以 OpenAPI 现值为准，覆盖本节上文）：
+
+| 项 | 上文原记 | 2026-10-17 实测 |
+|---|---|---|
+| 伸缩方式 | 弹性伸缩 `min=1/max=3` | **`auto_scaling.enable=false` + `desired_size=4`，固定 4 台**；min/max 是死字段 |
+| 节点数 | 稳态 2 台（10-14 又加 1 台） | **4 台**：两台有 `k8s.io/cluster-autoscaler` 标签（建池期 autoscaler 产物），两台无（期望容量补货产物） |
+| 节点月费 | ≈132.82 USD | **4 × 66.41 ≈ 265.64 USD/月**（按量口径应为 4 × 82.29 ≈ 329.2，见 §11.2 复算更正） |
+
+**Pod 上限 15 的来历（不是配额，是机型 ENI 硬限）**：本集群为 Terway 共享 ENI 模式（11.2 已记 `addons=[terway-eniip]`、无 overlay `container_cidr`），每个 Pod 占一个 ENI 辅助私网 IP，官方限额公式：
+
+```
+单节点最大 Pod 数 = (EniQuantity − 1) × EniPrivateIpAddressQuantity + hostNetwork Pod 数
+ecs.g9i.large / g9ae.large = (3 − 1) × 6 + 3 = 15      ← 与控制台一致
+```
+
+- 改 kubelet `maxPods` **提不上去**：官方明确「使用节点 ENI 的 Pod 限额由节点规格决定，maxPods 只影响 hostNetwork Pod」。
+- Terway 要求单节点 Pod 限额 >11 才能入集群 ⇒ 2C8G 的 `large` 档本身就贴着下限，是选型问题而非配置问题。
+- 实测四台节点**辅助 IP 全为 0**，即 Pod 数远未接近 15 ⇒ **Pod 上限不是当前瓶颈**，不要为提高它而扩容。
+- 三条 vSwitch（app 三段 `/20`）可用 IP 各 4074~4081 ⇒ 排除子网枯竭。
+
+**最重要的一条：欠费会让扩容在 K8s 侧完全静默。** 伸缩活动记录显示 `2026-10-16T15:35Z → 23:37Z` **连续 9 次** `Add "1" ECS instance` 失败，错误码一律 `Account.Arrearage`（"Your account has an outstanding payment."），到 `2026-10-17T00:37Z` 余额恢复到 2,429.77 USD 后第 10 次才成功——这台就是控制台调度图 ~08:30（雅加达本地 08:37）台阶的来源。K8s 侧没有 Event、没有 Pending 报警，只能从 `ess DescribeScalingActivities` 看到。**余额预警必须独立成一条告警，不能依赖集群侧监控。**
+
+**提高 Pod 上限的可行机型（含库存核实）**：
+
+```
+ecs.g8ine.large   2C8G  3 ENI × 10 IP ⇒ 23 Pod   5a NO_DATA / 5b Available / 5c NO_DATA  ✗ 不可用
+ecs.g9i.xlarge    4C16G 4 ENI × 15 IP ⇒ 48 Pod   5a/5b/5c 全 Available                    ✓ 推荐
+ecs.g9ae.xlarge   4C16G ——                      ⇒ 5c NO_DATA                              ✗
+```
+
+⇒ 与马尼拉「g8i 全系未上架」同类：**候选机型必须先跑 `DescribeAvailableResource` 再进 BALANCE 列表**，否则无货可用区会持续扩容失败。推荐路径是「4 台 `large` → 2 台 `g9i.xlarge`」：总算力持平（8C32G）、月费基本不变，但单节点 Pod 上限 15→48、节点数减半、DaemonSet 与节点预留开销减半。
+
+**尚未做、需本人拍板**：① 固定几台 / 是否恢复弹性伸缩（恢复会重新引入上文的 coredns 跨 AZ 顶 max 问题）；② 是否换 `g9i.xlarge`（需滚动替换时间窗）；③ 余额告警接云监控站点监控还是邮件闸门。`deploy/ack_jkt_dev_nodepool.json` 的 `auto_scaling` 段仍是建池值，**本轮未回填**。
+
+**2026-10-17 追加两条官方核实（A 级，尚未执行任何写操作）**：
+
+- **定时伸缩与弹性伸缩互斥，且 ESS 侧那条路是官方高危**。官方《使用须知及高危风险操作说明》列「修改 ESS 伸缩组的最大或最小实例数」为「可能导致扩缩容异常」、「对开启自动伸缩的节点池进行手动扩容或缩容」为「结果与期望不符、**不可恢复**」；《手动扩缩容节点池》/《节点与节点池 FAQ》均要求「请勿直接操作节点池相关的伸缩组」。⇒ 节点池级定时伸缩只能用 ACK 自己的 `ModifyClusterNodePool scaling_group.desired_size`（该字段官方语义：「节点池应该维持的总节点数量……建议至少配置 2 个节点，以确保集群组件正常运行」），**夜间缩到 1 台属官方不推荐档**；ACK 无节点池级原生 cron（定时类方案 CronHPA/AHPA 都在 Pod 层）。上文 ① 因此变为二选一。
+- **「按 P95 下调 requests 消除假扩容」不成立，两条理由**（原文见 [docs/…取证与整改_2026-10-17.md](docs/雅加达dev集群空转与Pod上限_取证与整改_2026-10-17.md) §7.2）：① 实测 `auto_scaling.enable=false` ⇒ autoscaler 不在场，request 占比不会触发任何扩容；② 带口径的大盘复看显示**内存 request 利用实为 47.5%**（不是 83%），本来就低于 50% 目标；而 ACK 自己的资源画像给出的**推荐值 5.39 GiB 反而高于当前申请 3.6 GiB**，方向存疑。⇒ 在按 §7.6 复算口径之前不动 request。request 里另有约 3~3.4 GiB 是 kube-system 组件、每台付一份、不可压缩 ⇒ 省钱主线是换 `g9i.xlarge` 让节点减半，不是调 request。
+
+#### 11.2.2 2026-10-17 18:0x WIB（11:08 UTC）复看：节点池已被重建 + 计费方式单价实测
+
+负责人直接重建了节点池并换机型 ⇒ 上一条（11.2.1）的整改项与配套文档 §七 的 P0–P6 **全部作废**，保留作过程记录。本节只记两件事：新池的实测回读，和「按量转包年包月能省多少」的官方报价实测。**全程 `Describe*` 只读，未执行任何写操作。**
+
+**节点池实况（C 级：`cs DescribeClusterNodePools` + `cs DescribeClusterNodes` + `ecs DescribeInstances`）**
+
+| 项 | 值 |
+|---|---|
+| 节点池 | `np-jkt-dev-x4c` / `np72446b422a6441c0bc96762a796aed26`（`type=ess`） |
+| 旧池 | `np-jkt-dev-app` / `npd3cc9d…6269b5` → **`ErrorNodePoolNotFound`**；伸缩组 `asg-k1a59qtckc246wh9r3ay` 随之失效 |
+| 伸缩组/配置 | `asg-k1adh3qjtrpnr4gnzfs1`（`LifecycleState=Active`、`DesiredCapacity=null`、`Min=Max=2`、`Total=Active=2`）/ 伸缩配置 `asc-k1ahcn6v6rivopmjugy6`（`InstanceType=[ecs.g9i.xlarge]`、`SpotStrategy=NoSpot`、系统盘 `cloud_essd`） |
+| 机型 | **单一 `ecs.g9i.xlarge`**（4C16G）⇒ 换到了 Pod 上限 48 那一档；「掺回 large 规格会掉到 15 Pod/台」的风险随单机型消失 |
+| 伸缩 | `auto_scaling.enable=true`、**`min_instances=2` / `max_instances=2`** ⇒ 等效钉死 2 台。`desired_size=null`（走自动模式），11.2.1 那条「期望 3 / 实际 2、余额恢复即弹回」的漂移**不再存在** |
+| 付费类型 | `instance_charge_type=PostPaid`；两台实例 `ExpiredTime=2099-12-31T15:59Z`、`SpotStrategy=NoSpot` 互证确为按量 |
+| 系统盘 | `cloud_essd` 40G（与旧池一致） |
+| 节点 | `i-k1afs8wedv35rai4pmx2`（5a）、`i-k1aen3t7wrqv5j66uzj8`（5c），均 `Running`，AZ 冗余保住 |
+| 余额 | `bssopenapi QueryAccountBalance` → **AvailableAmount 2,413.11 USD**（10-16 的 `Account.Arrearage` 已解除） |
+| 仓库 JSON | ✅ **已回填且与 OpenAPI 一致**：[deploy/ops/jkt_nodepool_x4c.json](ops/jkt_nodepool_x4c.json) 与现池 **12/12 字段比对全一致**（`instance_types=[ecs.g9i.xlarge]`、`instance_charge_type=PostPaid`、`system_disk_category/size=cloud_essd/40`、`multi_az_policy=BALANCE`、`image_type=AliyunLinux3ContainerOptimized`、`internet_max_bandwidth_out=0`、三段 `vswitch_ids`、`auto_scaling.enable/min/max/type = true/2/2/cpu`）。⇒ 本轮三源漂移**已闭合**（台账＋仓库 JSON＋OpenAPI 同向）。旧的 `deploy/ack_jkt_dev_nodepool.json` 描述的是**已删除的旧池**（`min=1/max=3`＋三机型），属死引用，别再拿它做漂移对比 |
+
+**计费方式单价实测（C 级：`ecs DescribePrice --RegionId ap-southeast-5 --ResourceType instance --InstanceType ecs.g9i.xlarge --SystemDisk.Category cloud_essd --SystemDisk.Size 40 --InternetChargeType PayByTraffic`）**
+
+按量单价 **0.215328 USD/h**（实例 0.2052 ＋ 系统盘 0.010128）⇒ 月化 ×730h = **157.19 USD/台**，年化 ×8760h = 1,886.27 USD/台。
+
+| 方案 | API 报价/台 | 折月/台 | 每台月省 vs 按量 | 2 台月费 | 2 台年省 | 一次性预付 |
+|---|---|---|---|---|---|---|
+| 按量（现状） | 0.215328/h | 157.19 | — | 314.38 | — | 无 |
+| 包月 1 个月 | 126.73 | 126.73 | 30.46（19.4%） | 253.46 | 731 | 253.46 |
+| 包月 3 / 6 个月 | 380.19 / 760.38 | 126.73 | 19.4%（**折月完全相同 ⇒ 中期包无叠加折扣**） | 253.46 | 731 | 760.38 / 1,520.76 |
+| **包年 1 年** | 1,149.94（折 370.82） | **95.83** | 61.36（**39.0%**） | **191.65** | **1,472.7** | **2,299.88 ＝ 余额的 95%** |
+| 包年 2 年 | 1,848.04 | 77.00 | 80.19（51.0%） | 154.00 | 1,924.6 | 3,696.08（需充值） |
+| 包年 3 年 | 2,172.38 | 60.34 | 96.85（61.6%） | 120.68 | 2,324.4 | 4,344.76（需充值） |
+| （参考）抢占式 | 0.051168/h | 37.35 | 119.84（**76.2%**） | 74.70 | 2,876 | 无，但会被回收 |
+
+> 对照：11.2 的 66.41 是 `g9i.large` 的**包月预付价**，其按量单价为 0.112728 USD/h ⇒ 82.29 USD/月。此前按 66.41 估的按量月费（132.82 / 265.64）**一律低估 19.4%**。
+
+**break-even（比折扣更该看）**：包年包月只在「真 7×24 常驻」时才划算。用按量小时价 0.215328 除过去 ⇒ 1 年包需每月跑 **≥445 h（占全月 61%）** 才比按量便宜，3 年包 ≥280 h。当前 `min=max=2` 属常驻，条件成立；若日后回到「夜间关机 / 缩到 1 台」，包月会把那部分收益直接抵消，且已付的钱退不回来。
+
+**转换前必须认的官方约束（A 级）**
+
+1. 「**修改节点池的付费类型仅对扩容的新节点生效，不会改变节点池内已有节点的付费类型**」⇒ 要真正省钱得走两条腿：节点池改 `PrePaid` ＋ 购买时长/自动续费，**存量 2 台另需在 ECS 控制台批量「按量付费转包年包月」**（ACK《接入云上 ECS 算力》《创建与管理节点池》）。
+2. 「将 ECS 实例从按量付费转为包年包月时，**请勿勾选「转为包年包月磁盘」**。包年包月云盘无法支持容器应用重启，可能会影响业务运行」（ACK《计费 FAQ》《云产品资源费用》）⇒ 只转实例，系统盘保持按量。
+3. 「（包年包月实例）到期前，**需要将实例转换为按量付费实例后才能释放**」＋「到期后未在指定时间内续费，实例将自动释放」（ECS《计费方式概述》、ACK 费用文档）⇒ dev 的换机型/缩台/重建自由度会明显下降；刚做过一次换机型，这条要重点权衡。
+4. 「为保证节点池统一，**不支持将按量付费、包年包月节点池修改为抢占式实例节点池，反之亦然**」⇒ 抢占式那条路只能新建池。
+5. 集群管理费不受影响（本集群 `ack.standard` 基础版为 0）；CLB 自 2024-12-01 起不再支持按量转包月。
+6. 当前 `min=max=2`，「包月妨碍自动缩容」这条暂不成立；但一旦放开 `min<max`，包月节点已付过钱、缩容不退款。
+
+**结论（未执行）**：能确定这 2 台至少用一年、机型不再动 ⇒ 转 **1 年包**，2 台 191.65 USD/月、**年省约 1,473 USD（39%）**，但需一次预付 2,299.88（余额的 95%）。若还要保留折腾空间 ⇒ 维持按量，另用**节省计划**抵扣（官方推荐组合，不绑机型规格；本账号折扣报价未取得，需在费用中心测算页看）。3 年包年省 2,324（61.6%）但锁死且要充值，不建议给 dev。
 
 ### 11.3 2b —— dev RDS PostgreSQL（实测回读）
 
