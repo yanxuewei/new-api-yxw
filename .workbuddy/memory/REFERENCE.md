@@ -155,6 +155,17 @@
 - ★ **删池竞态**：`Min/Max/Desired=0` 是**异步**的，实例先进 `Removing:Wait`，**实测 ~6–7 min** 才释放；ACK 删除流程已跑完 → 报 `ScalingGroup's instances not empty` → 池变 `delete_failed`。**必须轮询 `TotalCapacity==0` 再删**（+ `GroupDeletionProtection false`）。
 - 回写工具 `deploy/patch_task11_nodepool.py` · `patch_task11_ledger.py` · `patch_task11_verify.py` · `patch_task24_nodepool.py`（均幂等，`--check`/`--apply` + 自动备份）。
 
+### ★ 缩到目标台数的可靠姿势（2026-10-17 实测，MNL 4→2 / SG 2→1 复用）
+
+1. **`ModifyClusterNodePool --body '{"auto_scaling":{"enable":true,"min_instances":N,"max_instances":N}}'`** —— 唯一可靠的规模控制口。`ScaleClusterNodePool --body '{"count":N}'` 是**增量**语义（`count:3` 把 2 台变 5 台），**禁用**。
+2. 先 `min=N` 再摘节点，否则 `RemoveNodePoolNodes` 报 `InvalidRemovingNodes.Autoscale.LessThanMinSize`（**即使移除后恰好等于 min 也报**）。
+3. MNL 那次 `min=2` 下调后**节点被自动缩容回收，`RemoveNodePoolNodes` 反而报 `InvalidNodes.NotFound`** —— 说明节点已不在池内。**判据看 `DescribeClusterNodePools` 的 `status.total_nodes` 与 `kubectl get nodes` 标签 `alibabacloud.com/nodepool-id`**，不要以 RemoveNodePoolNodes 的返回为准。
+4. 摘节点前必须处理**单副本/非 DaemonSet 的常驻 Pod**（本次是 `gatekeeper`）：`kubectl cordon <节点名>` → 删掉该 Pod 让它重建到别处 → 再缩池。`kubectl drain` 会被 DaemonSet 挡住（未加 `--ignore-daemonsets`），且 drain 出 Pending 会触发 CA 扩容。
+5. **CA 会把缩容吃掉**：DaemonSet 滚动或 drain 期间出 Pending → cluster-autoscaler 立刻补节点。**必须先锁 `max=N`** 再操作。
+6. ★ **API 参数大小写**：`DescribeClusterNodePoolDetail` 是 `--NodepoolId`（小写 p），`Create/Modify/DeleteClusterNodePool` 用的是 `ClusterNodePool`（大写 P）。写错 CLI 会给 `did_you_mean`。
+7. ★ **节点池 ID ≠ 名字**：`--NodepoolId np-mnl-app` 报 `ErrorNodePoolNotFound`，必须用 `npaad418131aa84c899be022b5463d13bf` 这类 ID；ID 从 `DescribeClusterNodePools` 取。
+8. 回收后**必须验证实例真释放**：`aliyun ecs DescribeInstances --RegionId <r> --InstanceIds '["i-xxx"]'` 返回空（`null`）即为已释放。
+
 ## 安全组（5 个已落地 · 早于任务 22 排期）
 
 `sg-mnl-alb`=`sg-5tsj1epvcjjv6jkg3zks`｜`sg-mnl-app`=`sg-5tsil3ca5dfkqefks1g9`｜`sg-mnl-db`=`sg-5tsawhljdqzwo2t0n4ut`｜`sg-sg-alb`=`sg-t4nbgfbh2cidnve88avf`｜`sg-sg-app`=`sg-t4n0qnhy8mxq9g733r67`。台账 `deploy/sg_ledger.md` · 幂等脚本 `deploy/task22_sg_bootstrap.sh`（`--verify`/`--dry-run`）。
@@ -397,6 +408,9 @@ RuleActions[]    : { Order, Type: "ForwardGroup", ForwardGroupConfig: { ServerGr
 
 - **`base64` 不是可移植的**：GNU 支持 `base64 -w0 <file>`；**BSD/macOS 只认 `base64 -i <file>`（无 `-w`）** → 在 macOS 上 `base64 -w0 file` 报 `invalid argument` 并**静默产出空 Body**（远端只回 `BODY START/END` 而无内容，极易误判为"远端没输出"）。已统一改 **python3 编码 + 空值校验**（`ack_remote.sh` / `task19_alb_mnl.sh` 的 `run_cloud_assistant`；`task46_jumphost.sh`、`task11_nodepool_mnl.sh` 的 `base64 -w0` 若要跑在 macOS 宿主需同样处理）。
 - `ack_remote.sh <site> <body.sh> [node_id] [loops]`；kubeconfig 缓存在 `/tmp/ackctl-<site>/`（已缓存则不再签发，切集群须清缓存）；输出靠轮询 `DescribeInvocationResults`，长任务把 `loops` 调大（500s 级用 100+）。
+- ★ **body 内有隐式执行时长上限（2026-10-17 实测）**：`for i in $(seq 1 20); do sleep 6; done`（合计 120s）会让**本地这一侧**在 ~100s 被 SIGTERM 杀掉（退出码 137），远端其实还在跑。**探针里 `sleep` 总和控制在 60s 以内**，需要等就用「分多次探测」而不是一次长 sleep。
+- ★ **先判 OS 再选通道（2026-10-18 修正定稿）**：`uname -s` → `Darwin` = **macOS 直跑**（`aliyun` 3.5.1 + `kubectl` + python3 齐备，凭据在 `ALIBABA_CLOUD_ACCESS_KEY_ID/SECRET`，`bash deploy/lib/ack_remote.sh …` 开箱可用，**不加 `wsl` 前缀**）；Windows = **先 WSL 进 Ubuntu 再执行**（`wsl -d Ubuntu -u root -- bash -c "…"`）。
+- ⚠ 2026-10-17 曾出现 `wsl` 报 `SYSTEM TOOL DISABLED`（安全策略禁「系统级工具」）—— 那是**策略临时收紧，不是环境变更**，不可据此把「默认走 macOS」写死；Windows 宿主需到安全中心放开「系统级工具」。产品名是 **`cs`** 不是 `ack`（`aliyun ack …` 报 `"ack" is not a valid command or product`）。
 
 ## 日志库 DSN 注入口径（任务 17 · 2026-10-05 复核）
 
