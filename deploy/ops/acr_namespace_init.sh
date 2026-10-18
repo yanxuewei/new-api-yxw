@@ -164,5 +164,5 @@ case "$MODE" in
   apply)  do_apply ;;
   verify) do_verify ;;
   all)    do_check && echo "---" >&2 && do_apply && echo "---" >&2 && do_verify ;;
-  *)      die "未知模式：$MODE（可用 check|apply|verify|all）" ;;
+  *)      die "未知模式：${MODE}（可用 check|apply|verify|all）" ;;
 esac

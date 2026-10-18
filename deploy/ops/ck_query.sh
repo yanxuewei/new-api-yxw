@@ -206,7 +206,7 @@ if [[ "$PRINT_BODY" = "1" ]]; then
   exit 0
 fi
 
-[[ -x "$ACK" || -f "$ACK" ]] || { echo "缺 $ACK（本脚本依赖它下发到集群节点）"; exit 2; }
+[[ -x "$ACK" || -f "$ACK" ]] || { echo "缺 ${ACK}（本脚本依赖它下发到集群节点）"; exit 2; }
 
 # deploy/lib/ack_remote.sh 的缓存目录 /tmp/ackctl-<site> 可能被历史 root 运行创建成 root:root，
 # 当前用户写不进去（写 body 时 PermissionError）⇒ 自动降级到用户自有目录并提示修复。

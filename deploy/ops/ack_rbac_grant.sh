@@ -102,7 +102,7 @@ do_check() {
   say "=== RAM 用户 UID=$RAM_UID_V —— 当前集群 RBAC ==="
   cur_json
   say ""
-  say "=== 拟发布 body（role=$ROLE；集群取自现状，保留全部）==="
+  say "=== 拟发布 body（role=${ROLE}；集群取自现状，保留全部）==="
   local b; b="$(build_body)"
   if [ -z "$b" ] || [ "$b" = "[]" ]; then
     say "  (现状为空)"
@@ -145,7 +145,7 @@ do_apply() {
     return 1
   fi
 
-  say "=== GrantPermissions（全量覆盖；保留现状全部集群，role=$ROLE）==="
+  say "=== GrantPermissions（全量覆盖；保留现状全部集群，role=${ROLE}）==="
   # ★ cs REST POST 必须带 Content-Type: application/json，否则 415 Unsupported Media Type
   local out; out=$("$ALIYUN" cs GrantPermissions --uid "$RAM_UID_V" --region "$MNL_REGION" \
     --header "Content-Type=application/json" --body "$b" 2>&1)
@@ -158,7 +158,7 @@ do_apply() {
 }
 
 do_verify() {
-  say "=== 复核（期望：全部集群 role_type=$ROLE）==="
+  say "=== 复核（期望：全部集群 role_type=${ROLE}）==="
   cur_json
   local bad; bad="$(cur_raw | "$PY" -c "
 import sys,json
@@ -167,7 +167,7 @@ try: d=json.load(sys.stdin)
 except Exception: d=[]
 print(sum(1 for x in d if x.get('role_type')!=ROLE))")"
   say ""
-  if [ "${bad:-1}" = "0" ]; then say "  VERIFY=PASS（全部为 $ROLE）"; return 0; fi
+  if [ "${bad:-1}" = "0" ]; then say "  VERIFY=PASS（全部为 ${ROLE}）"; return 0; fi
   say "  VERIFY=FAIL（$bad 条与目标不符）"; return 1
 }
 

@@ -69,7 +69,7 @@ collect_sg() {
   esac
   # SG Tair 连接串（2026-10-09 起 sg 写该键）：来源 deploy/.env 的 REDIS_CONN_STRING_SG
   REDIS_SG="$(grep '^REDIS_CONN_STRING_SG=' "$ENVFILE" | head -1 | cut -d= -f2- | tr -d '\r\n')"
-  [ -n "$REDIS_SG" ] || die "缺 REDIS_CONN_STRING_SG（$ENVFILE）—— SG Tair 已于 2026-10-09 建成（任务 29），该键必须注入"
+  [ -n "$REDIS_SG" ] || die "缺 REDIS_CONN_STRING_SG（${ENVFILE}）—— SG Tair 已于 2026-10-09 建成（任务 29），该键必须注入"
   case "$REDIS_SG" in
     *'#'*) die "REDIS_CONN_STRING_SG 含未转义的 '#'：go-redis 会把 # 当 fragment 起点 ⇒ 口令必须写成 %23（任务 29 坑 10）" ;;
   esac
@@ -144,9 +144,9 @@ case "$MODE" in
   --apply)
     case "$SITE" in
       mnl|sg|both) : ;;
-      *) die "SITE 必须是 mnl|sg|both（给了：$SITE）" ;;
+      *) die "SITE 必须是 mnl|sg|both（给了：${SITE}）" ;;
     esac
-    say "STEP apply | 注入 new-api-secrets + ConfigMap TTL（site=$SITE）"
+    say "STEP apply | 注入 new-api-secrets + ConfigMap TTL（site=${SITE}）"
     if [ "$SITE" = "sg" ]; then
       say "  ⚠ 单站模式：只写 sg，**不碰 mnl**（整键覆盖写，两站实况可能已分叉；见核心更新总结 §5-⑧）"
     fi
@@ -159,8 +159,8 @@ case "$MODE" in
       bash "$HERE/../../lib/ack_remote.sh" sg /tmp/t17_secret_body.sh >&3 2>&3 || die "新加坡注入失败"
     fi
     shred -u /tmp/t17_secret_body.sh 2>/dev/null || rm -f /tmp/t17_secret_body.sh
-    ok "注入完成（site=$SITE，含密码的 body 已销毁）"
+    ok "注入完成（site=${SITE}，含密码的 body 已销毁）"
     say "待补：PAYMENT_PRIVATE_KEY（支付私钥）、TLS_WILDCARD（G5 证书）；SG REDIS_CONN_STRING 自 2026-10-09 起已由本脚本写入（值取 deploy/.env 的 REDIS_CONN_STRING_SG）"
     ;;
-  *) die "未知参数：$MODE（--check | --apply [mnl|sg|both]）" ;;
+  *) die "未知参数：${MODE}（--check | --apply [mnl|sg|both]）" ;;
 esac

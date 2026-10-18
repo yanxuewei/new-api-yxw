@@ -227,7 +227,7 @@ fi
 # ---- 1. 建池（手动模式：固定 desired 台，保证跨区均匀） ----------------------
 # ⚠ 数据盘 size=300 由 ACK diskinit 自动挂给 containerd；此处刻意不写 disk_init（2026-10-14 裁定，见文件头）
 if [[ -z "$NPID" ]]; then
-  step "1. 渲染建池 body（手动模式，desired_size=$DESIRED）"
+  step "1. 渲染建池 body（手动模式，desired_size=${DESIRED}）"
   [[ -f "$USERDATA_SRC" ]] || { fail "缺 user_data 源文件：$USERDATA_SRC"; exit 1; }
   UD_B64=$(tr -d '\r' < "$USERDATA_SRC" | python3 -c "import base64,sys;sys.stdout.write(base64.b64encode(sys.stdin.buffer.read()).decode())")
   jq -n --arg name "$NODEPOOL_NAME" --arg rg "$RESOURCE_GROUP_ID" \
@@ -288,7 +288,7 @@ for i in $(seq 1 50); do
   case "$ST" in failed|deleting) fail "节点池状态异常：$ST"; exit 1;; esac
   sleep 30
 done
-[[ "$READY" == "1" ]] && ok "节点数=desired=$DESIRED（最长等待 $(printf '%s' "$((i*30))")s）" \
+[[ "$READY" == "1" ]] && ok "节点数=desired=${DESIRED}（最长等待 $(printf '%s' "$((i*30))")s）" \
                       || warn "等待超时，继续终验取证"
 
 # ---- 4. 终验 -----------------------------------------------------------------

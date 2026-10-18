@@ -117,7 +117,7 @@ for i in $(seq 1 30); do
   [[ "$ST" == "Available" ]] && break
   sleep 10
 done
-[[ "$ST" == "Available" ]] || say "!! 仍非 Available（Status=$ST），后续步骤可能失败"
+[[ "$ST" == "Available" ]] || say "!! 仍非 Available（Status=${ST}），后续步骤可能失败"
 
 # ---- 2. EIP ×4 -------------------------------------------------------------
 step "2. 分配 4 个 EIP（PayByTraffic / 峰值 100Mbps / RG=${RG}）"
@@ -160,7 +160,7 @@ for aid in "${ALLOC_IDS[@]}"; do
   cur=$(apiget aliyun vpc DescribeEipAddresses --RegionId "$REGION" --AllocationId "$aid" \
         | jq -r '.EipAddresses.EipAddress[0]|"\(.Status)|\(.InstanceType // "-")|\(.InstanceId // "-")"' | tr -d '\r')
   if [[ "$cur" == InUse*"${NAT_ID}"* ]]; then
-    say "  ${aid}: 已绑定且指向本 NAT，跳过（$cur）"
+    say "  ${aid}: 已绑定且指向本 NAT，跳过（${cur}）"
     continue
   fi
   api "$OUTDIR/03-assoc-${aid}.json" aliyun vpc AssociateEipAddress --RegionId "$REGION" \
@@ -190,7 +190,7 @@ done
 # 复核：SNAT 条目数必须 = 4（4 个交换机）
 api "$OUTDIR/04-snat-after.json" aliyun vpc DescribeSnatTableEntries --RegionId "$REGION" --SnatTableId "$SNAT_TABLE" --PageSize 50
 n_snat=$(jq -r '[.SnatTableEntries.SnatTableEntry[]?]|length' "$OUTDIR/04-snat-after.json" 2>/dev/null | tr -d '\r')
-say "SNAT 条目数=$n_snat（期望 4）"
+say "SNAT 条目数=${n_snat}（期望 4）"
 [[ "${n_snat:-0}" == "4" ]] || say "!! SNAT 条目数不符，需人工复核"
 
 # ---- 5. 路由表 0.0.0.0/0 → NAT（系统自动创建；此处仅校验） -----------------

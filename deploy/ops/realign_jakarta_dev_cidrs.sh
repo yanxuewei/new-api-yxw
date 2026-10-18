@@ -43,7 +43,7 @@ for V in "${CURRENT[@]}"; do
     | jq -r '.VSwitches.VSwitch[0] | [.AvailableIpAddressCount, .CidrBlock] | @tsv')"
   FULL=$(python3 -c "import ipaddress,sys;print(ipaddress.ip_network(sys.argv[1]).num_addresses - 4)" "$CIDR")
   if [ "$AVAIL" != "$FULL" ]; then
-    echo "ABORT: $V ($CIDR) 已被占用（avail=$AVAIL / full=$FULL），先迁走资源再重排"; exit 1
+    echo "ABORT: $V ($CIDR) 已被占用（avail=$AVAIL / full=${FULL}），先迁走资源再重排"; exit 1
   fi
   echo "  free  $V $CIDR ($AVAIL/$FULL)"
 done

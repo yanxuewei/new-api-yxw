@@ -44,7 +44,7 @@ preflight() {
     if [ "$exist" != "0" ]; then
       log "  [$tag] $cidr 已有条目 ⇒ 幂等闸门命中，SKIP"
     else
-      log "  [$tag] $cidr 缺失 ⇒ 待新建（vSwitch $vsw）"
+      log "  [$tag] $cidr 缺失 ⇒ 待新建（vSwitch ${vsw}）"
     fi
   done
 }
@@ -95,7 +95,7 @@ verify() {
   echo "── 判据 ──"
   local n
   n=$(jq -r '[.SnatTableEntries.SnatTableEntry[]?] | length' "$OUTDIR/snat_after.json")
-  [ "$n" = "6" ] && log "OK 条目数 = 6（原 4 + 新 2）" || log "WARN 条目数 = $n（期望 6）"
+  [ "$n" = "6" ] && log "OK 条目数 = 6（原 4 + 新 2）" || log "WARN 条目数 = ${n}（期望 6）"
   for c in 10.1.80.0/20 10.1.96.0/20; do
     jq -e --arg c "$c" --arg ip "$EIPS" '.SnatTableEntries.SnatTableEntry[]? | select(.SourceCIDR==$c and .SnatIp==$ip and .Status=="Available")' \
       "$OUTDIR/snat_after.json" >/dev/null && log "OK $c → 4 个 EIP，Available" || log "WARN $c 未达期望"

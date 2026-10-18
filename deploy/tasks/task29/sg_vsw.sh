@@ -69,7 +69,7 @@ verify() {
     IFS=: read -r name zone cidr <<<"$spec"
     case $(plan_status "$name" "$cidr") in
       exists) log "SKIP $name 已存在（幂等闸门命中，不重复建）" ;;
-      free) log "TODO $name $zone $cidr（无同名、无网段交叠）" ;;
+      free) log "TODO $name $zone ${cidr}（无同名、无网段交叠）" ;;
     esac
   done
 }
@@ -80,14 +80,14 @@ move_to_rg() {
   cur=$(aliyun vpc DescribeVSwitchAttributes --RegionId "$REGION" --VSwitchId "$id" |
     jq -r '.ResourceGroupId // empty')
   if [[ "$cur" == "$RG" ]]; then
-    log "资源组已正确（$cur），无需 move"
+    log "资源组已正确（${cur}），无需 move"
     return
   fi
-  log "资源组 = ${cur:-默认} ≠ $RG，执行 MoveResourceGroup"
+  log "资源组 = ${cur:-默认} ≠ ${RG}，执行 MoveResourceGroup"
   aliyun vpc MoveResourceGroup --RegionId "$REGION" --ResourceId "$id" \
     --ResourceType VSwitch --NewResourceGroupId "$RG" \
     >"$OUTDIR/move_${id}.json" \
-    || die "MoveResourceGroup 失败：请改用 aliyun resourcemanager MoveResources（$id → $RG）"
+    || die "MoveResourceGroup 失败：请改用 aliyun resourcemanager MoveResources（$id → ${RG}）"
 }
 
 create() {

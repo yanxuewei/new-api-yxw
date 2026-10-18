@@ -148,7 +148,7 @@ MP=$(jq -r '.RunningParameters.Parameter[]?|select(.ParameterName=="maxmemory-po
 DC=$(jq -r '.RunningParameters.Parameter[]?|select(.ParameterName=="#no_loose_disabled-commands")|.ParameterValue' \
      "$OUTDIR/05b-params.json" 2>/dev/null | tr -d '\r')
 say "    maxmemory-policy = $MP  |  disabled-commands = $DC" >&3
-[[ "$MP" == "allkeys-lru" ]] && ok "maxmemory-policy=allkeys-lru ✅" || warn "maxmemory-policy 未生效（当前 $MP）"
+[[ "$MP" == "allkeys-lru" ]] && ok "maxmemory-policy=allkeys-lru ✅" || warn "maxmemory-policy 未生效（当前 ${MP}）"
 
 # 5c. 白名单复核
 api "$OUTDIR/05c-ips.json" aliyun r-kvstore DescribeSecurityIps --InstanceId "$TAIR_ID"
@@ -162,7 +162,7 @@ SAZ=$(jq -r '.Instances.DBInstanceAttribute[0].SecondaryZoneId // empty' "$OUTDI
 
 # ---- 6. 写凭证（gitignored） -------------------------------------------------
 if [[ "$DRY_RUN" != "1" && -n "$TAIR_PW" ]]; then
-  step "6. 写凭证到 $ENVFILE（.env 已被 .gitignore 覆盖）"
+  step "6. 写凭证到 ${ENVFILE}（.env 已被 .gitignore 覆盖）"
   {
     echo ""
     echo "# --- 任务7 Tair (马尼拉) · $TS ---"

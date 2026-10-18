@@ -573,5 +573,5 @@ case "$MODE" in
   --verify)   say "STEP verify   | 第 2 次冷启动 + 幂等比对 + 卡片验收"; build_and_run verify ;;
   --status)   say "STEP status   | 只读"; build_and_run status ;;
   --cleanup)  say "STEP cleanup  | 删 master Deployment 与本卡临时 Pod"; build_and_run cleanup ;;
-  *) die "未知参数：$MODE（--precheck|--apply|--verify|--status|--cleanup）" ;;
+  *) die "未知参数：${MODE}（--precheck|--apply|--verify|--status|--cleanup）" ;;
 esac

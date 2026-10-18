@@ -208,7 +208,7 @@ SCOPE="${2:-prod}"
 case "$SCOPE" in
   prod) TARGETS=("$NS_PROD") ;;
   all)  TARGETS=("${NS_ALL[@]}") ;;
-  *)    die "未知范围：$SCOPE（可用 prod|all）" ;;
+  *)    die "未知范围：${SCOPE}（可用 prod|all）" ;;
 esac
 
 case "$MODE" in
@@ -216,5 +216,5 @@ case "$MODE" in
   apply)  do_apply ;;
   verify) do_verify ;;
   all)    do_check && echo "---" >&2 && do_apply && echo "---" >&2 && do_verify ;;
-  *)      die "未知模式：$MODE（可用 check|apply|verify|all）" ;;
+  *)      die "未知模式：${MODE}（可用 check|apply|verify|all）" ;;
 esac

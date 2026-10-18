@@ -126,7 +126,7 @@ Q_TOTAL=$(jq -r '.Quotas[]?|select(.QuotaActionCode=="q_ecs_enterprise_postpay_c
 Q_USED=$(jq -r '.Quotas[]?|select(.QuotaActionCode=="q_ecs_enterprise_postpay_c")|.TotalUsage' "$OUTDIR/00-quota.json" | tr -d '\r')
 if [[ -n "$Q_TOTAL" && -n "$Q_USED" ]]; then
   NEED=2
-  if (( Q_USED + NEED <= Q_TOTAL )); then pass "配额充足（$Q_USED+$NEED ≤ $Q_TOTAL）"; else fail "vCPU 配额不足"; fi
+  if (( Q_USED + NEED <= Q_TOTAL )); then pass "配额充足（$Q_USED+$NEED ≤ ${Q_TOTAL}）"; else fail "vCPU 配额不足"; fi
 fi
 
 api "$OUTDIR/00-keypair.json" aliyun ecs DescribeKeyPairs --RegionId "$REGION"
@@ -146,7 +146,7 @@ if [[ "${ENABLE_SSH_ALLOWLIST:-0}" == "1" ]]; then
   fi
   case "$OFFICE_CIDR" in
     *0.0.0.0/0*) fail "OFFICE_CIDR 含 0.0.0.0/0 —— 拒绝执行" ;;
-    *) pass "ENABLE_SSH_ALLOWLIST=1，OFFICE_CIDR=$OFFICE_CIDR（格式校验通过）" ;;
+    *) pass "ENABLE_SSH_ALLOWLIST=1，OFFICE_CIDR=${OFFICE_CIDR}（格式校验通过）" ;;
   esac
 else
   warn "ENABLE_SSH_ALLOWLIST!=1 → 不建固定 IP 白名单（应对动态出口）；入口走 ECS 会话管理（零入向端口）"
@@ -160,7 +160,7 @@ api "$OUTDIR/02-sg-list.json" aliyun ecs DescribeSecurityGroups --RegionId "$REG
 EDGE_SG=$(jq -r --arg n "$EDGE_SG_NAME" '[.SecurityGroups.SecurityGroup[]?|select(.SecurityGroupName==$n)][0].SecurityGroupId // empty' \
           "$OUTDIR/02-sg-list.json" | tr -d '\r')
 if [[ -n "$EDGE_SG" ]]; then
-  pass "安全组已存在：$EDGE_SG（复用）"
+  pass "安全组已存在：${EDGE_SG}（复用）"
 elif [[ "$DRY_RUN" == "1" || "$VERIFY_ONLY" == "1" ]]; then
   warn "将创建安全组 ${EDGE_SG_NAME}（当前未创建）"
 else
@@ -201,7 +201,7 @@ if [[ "${ENABLE_SSH_ALLOWLIST:-0}" == "1" && -n "$EDGE_SG" && -n "$OFFICE_CIDR" 
   if [[ "$RULE_FAIL" -eq 0 && "$RULE_OK" -gt 0 ]]; then
     pass "入向 22/443 已收敛到 OFFICE_CIDR（$RULE_OK 条，无 0.0.0.0/0）"
   else
-    fail "入向规则未全部落地（成功 $RULE_OK / 失败 $RULE_FAIL）—— 跳板机将不可 SSH，务必修复后复跑"
+    fail "入向规则未全部落地（成功 $RULE_OK / 失败 ${RULE_FAIL}）—— 跳板机将不可 SSH，务必修复后复跑"
   fi
   say "  注：出向沿用安全组默认（放行），跳板机需访问 dl.k8s.io 与 API Server；如需收口见 §8.1"
 fi
@@ -221,7 +221,7 @@ else
     sleep 5
     api "$OUTDIR/02b-sm-after.json" aliyun ecs DescribeCloudAssistantSettings --RegionId "$REGION" --SettingType.1 SessionManagerConfig
     SM2=$(jq -r '.SessionManagerConfig.SessionManagerEnabled // false' "$OUTDIR/02b-sm-after.json" 2>/dev/null | tr -d '\r')
-    [[ "$SM2" == "true" ]] && pass "会话管理已启用（本次开启）" || fail "会话管理启用失败（SessionManagerEnabled=$SM2）"
+    [[ "$SM2" == "true" ]] && pass "会话管理已启用（本次开启）" || fail "会话管理启用失败（SessionManagerEnabled=${SM2}）"
   fi
 
   api "$OUTDIR/02b-del-before.json" aliyun ecs DescribeCloudAssistantSettings --RegionId "$REGION" --SettingType.1 SessionManagerDelivery
@@ -236,7 +236,7 @@ else
     api "$OUTDIR/02b-del-after.json" aliyun ecs DescribeCloudAssistantSettings --RegionId "$REGION" --SettingType.1 SessionManagerDelivery
     B2=$(jq -r '.OssDeliveryConfigs.OssDeliveryConfig[0].BucketName // ""' "$OUTDIR/02b-del-after.json" 2>/dev/null | tr -d '\r')
     [[ "$B2" == "$OSS_BUCKET" ]] && pass "会话录制已投递到 oss://$OSS_BUCKET/$OSS_PREFIX" \
-      || fail "录制投递配置失败（BucketName=$B2）"
+      || fail "录制投递配置失败（BucketName=${B2}）"
   fi
   say "  注：Bucket 必须与 ECS 同地域（否则报 InvalidOssBucketName.InOtherRegion）；本卡用 $REGION"
 fi
@@ -322,7 +322,7 @@ if [[ -n "$JUMP_ID" ]]; then
     [[ "$ST" == "Running" ]] && break
     sleep 10
   done
-  [[ "$ST" == "Running" ]] && pass "跳板机 Running（pub=$JUMP_PUB prv=$JUMP_PRV）" || fail "跳板机未 Running（$ST）"
+  [[ "$ST" == "Running" ]] && pass "跳板机 Running（pub=$JUMP_PUB prv=${JUMP_PRV}）" || fail "跳板机未 Running（${ST}）"
 fi
 
 # ---------------------------------------------------------------------------
@@ -435,7 +435,7 @@ kubectl create clusterrolebinding newapi-ops-jumphost-cluster-admin \
   --clusterrole=cluster-admin --user=$ROLE_ID --dry-run=client -o yaml | kubectl apply -f -
 kubectl get clusterrolebinding newapi-ops-jumphost-cluster-admin -o wide
 rm -rf /tmp/rbac; umask \$um" \
-        && pass "已绑定 cluster-admin（主体 $ROLE_ID，⚠ 见下方硬化说明）" || fail "RBAC 绑定失败"
+        && pass "已绑定 cluster-admin（主体 ${ROLE_ID}，⚠ 见下方硬化说明）" || fail "RBAC 绑定失败"
       rm -f "$OUTDIR/adminkube.yaml"
     else
       fail "管理员 kubeconfig 签发失败，无法完成 RBAC 绑定"
@@ -462,7 +462,7 @@ if [[ -n "$EDGE_SG" && "$DRY_RUN" != "1" && "$VERIFY_ONLY" != "1" ]]; then
   api "$OUTDIR/09-sg-final.json" aliyun ecs DescribeSecurityGroupAttribute --RegionId "$REGION" --SecurityGroupId "$EDGE_SG"
   N_ING=$(jq -r '[.Permissions.Permission[]?|select(.Direction=="ingress")]|length' "$OUTDIR/09-sg-final.json" | tr -d '\r')
   N_OPEN=$(jq -r '[.Permissions.Permission[]?|select(.Direction=="ingress" and .SourceCidrIp=="0.0.0.0/0")]|length' "$OUTDIR/09-sg-final.json" | tr -d '\r')
-  say "入向规则数=$N_ING（期望 ≥2×CIDR 数）  0.0.0.0/0 条数=$N_OPEN（期望 0）"
+  say "入向规则数=${N_ING}（期望 ≥2×CIDR 数）  0.0.0.0/0 条数=${N_OPEN}（期望 0）"
   jq -r '.Permissions.Permission[]?|select(.Direction=="ingress")|"  \(.IpProtocol) \(.PortRange) ← \(.SourceCidrIp)  [\(.Description // "-")]"' \
     "$OUTDIR/09-sg-final.json" >&3
   if [[ "${ENABLE_SSH_ALLOWLIST:-0}" == "1" ]]; then

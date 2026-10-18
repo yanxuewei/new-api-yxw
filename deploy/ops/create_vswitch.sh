@@ -45,7 +45,7 @@ for v in d['Vpcs']['Vpc']:
     cur_rg=$("$ALIYUN" vpc DescribeVpcs --RegionId "$region" --VpcId "$vid" \
              | "$PY" -c "import sys,json;print(json.load(sys.stdin)['Vpcs']['Vpc'][0].get('ResourceGroupId',''))" 2>/dev/null)
     if [ "$cur_rg" != "$rgid" ]; then
-      log "  [MOVE] VPC 资源组 $cur_rg → $rgid（级联 vSwitch）"
+      log "  [MOVE] VPC 资源组 $cur_rg → ${rgid}（级联 vSwitch）"
       "$ALIYUN" vpc MoveResourceGroup --RegionId "$region" --ResourceType vpc \
         --ResourceId "$vid" --NewResourceGroupId "$rgid" >/dev/null 2>&1 \
         && log "  [OK]   迁移完成" || log "  [FAIL] 迁移失败"

@@ -76,7 +76,7 @@ apply() {
     done < "$VALUES_FILE"
   else
     for k in "${SECRETS[@]}"; do
-      read -r -p "输入 $k（输入不回显）: " -s v; echo
+      read -r -p "输入 ${k}（输入不回显）: " -s v; echo
       printf '%s' "$v" > "$tmpdir/$k"
     done
   fi

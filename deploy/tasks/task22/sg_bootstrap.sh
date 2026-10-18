@@ -85,7 +85,7 @@ ensure_sg() {       # <region> <vpc> <rg> <name> <desc>  → stdout: sg-xxx
     printf '%s' "$id"; return 0
   fi
   if [[ $DRY -eq 1 ]]; then
-    log "[dry-run] 建组 $n（$r / $v）"
+    log "[dry-run] 建组 ${n}（$r / ${v}）"
     printf 'sg-dryrun-%s' "$n"; return 0
   fi
   out=$(aliyun ecs CreateSecurityGroup --RegionId "$r" --VpcId "$v" --ResourceGroupId "$rg" \
@@ -130,7 +130,7 @@ exec_rule() {       # <api> <label> <region> <sgid> <key> <Permissions.N.* 参�
     log "  = 已存在  $label"; SKIPPED=$((SKIPPED + 1)); RULE_SET["$key"]=1; return 0
   fi
   if printf '%s' "$out" | grep -qE '"Code"|ErrorCode|^ERROR'; then
-    log "$out"; fail "规则 $label（$api）"; return 0
+    log "$out"; fail "规则 ${label}（${api}）"; return 0
   fi
   log "  + 已添加  $label"; ADDED=$((ADDED + 1)); RULE_SET["$key"]=1
 }
@@ -214,7 +214,7 @@ out_cidr "$REGION_SG" "$SG_SG_APP" 443/443   "to-upstream-api-via-nat" 0.0.0.0/0
 
 # --- 可选：运维入口（需企业办公出口 IP 段） ---
 if [[ -n "$OFFICE_CIDR" ]]; then
-  log "--- 运维入口 SG（办公出口 $OFFICE_CIDR） ---"
+  log "--- 运维入口 SG（办公出口 ${OFFICE_CIDR}） ---"
   SG_MNL_EDGE=$(ensure_sg "$REGION_MNL" "$VPC_MNL" "$RG_MNL" sg-mnl-alb-edge "Ops bastion / jump host (mnl)")
   SG_MNL_ACK=$(ensure_sg  "$REGION_MNL" "$VPC_MNL" "$RG_MNL" sg-mnl-ack-api  "ACK API server endpoint (mnl)")
   if [[ -n "$SG_MNL_EDGE" ]]; then

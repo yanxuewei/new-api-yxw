@@ -100,7 +100,7 @@ c1_identity() {
   if [[ "$v" == "$EXPECT_ACCOUNT" ]]; then
     ok "AccountId = $v   (RAM: $(jqget c1_sts '.Arn' || echo '?'))"; rec pass
   else
-    bad "AccountId = $v（期望 $EXPECT_ACCOUNT）"; rec fail
+    bad "AccountId = ${v}（期望 ${EXPECT_ACCOUNT}）"; rec fail
   fi
 }
 
@@ -127,7 +127,7 @@ c2_vpc() {
   # 按期望 ID 定位，不再硬取 .Vpcs.Vpc[0]：多于 1 个 VPC 时下标可能命中非目标对象
   f='.Vpcs.Vpc[]|select(.VpcId=="'"$EXPECT_VPC_ID"'")'
   if ! id="$(jqget c2_vpc "$f|.VpcId")"; then
-    bad "未找到期望 VPC $EXPECT_VPC_ID（见上方实测清单）"; rec fail; return
+    bad "未找到期望 VPC ${EXPECT_VPC_ID}（见上方实测清单）"; rec fail; return
   fi
   cidr="$(jqget c2_vpc "$f|.CidrBlock" || echo '?')"
   name="$(jqget c2_vpc "$f|.VpcName"   || echo '?')"
@@ -167,7 +167,7 @@ c3_vswitch() {
   if [[ "$n" -eq "$EXPECT_VSW_COUNT" && -z "$missing" ]]; then
     ok "共 $n 个，网段与 §2.2 完全一致"; rec pass
   else
-    bad "共 $n 个（期望 $EXPECT_VSW_COUNT）；网段缺失:${missing:-无}"; rec fail
+    bad "共 $n 个（期望 ${EXPECT_VSW_COUNT}）；网段缺失:${missing:-无}"; rec fail
   fi
 }
 
@@ -224,7 +224,7 @@ c5_clickhouse() {
     info "        建成后本项转 PASS；Day 1 出口（M1）需要 d1/ck-instance.txt"
     rec warn; return
   fi
-  echo "       TotalCount = $n（实例已创建）："
+  echo "       TotalCount = ${n}（实例已创建）："
   jq -r '.Data.DBInstances[]|[.DBInstanceId,(.Status//"-"),(.ZoneId//"-"),(.ChargeType//"-")]|@tsv' \
     "$OUTDIR/c5_ck.json" 2>/dev/null | awk -F'\t' '{printf "       %-28s %-12s %-18s %s\n", $1, $2, $3, $4}'
   info "        注：企业版就绪态字面值是 ACTIVATION（不是社区版的 Running）；状态字段名是 .Status，非 .DBInstanceStatus —— 2026-09-30 实测"
@@ -316,7 +316,7 @@ c6_quota_apps() {
   if [[ $hit64 -eq 1 && $hit96 -eq 1 && $notagree -eq 0 ]]; then
     ok "$total 条全部 Agree，含 64（马尼拉）与 96（新加坡） · G2 / G10 闭环"; rec pass
   else
-    bad "64=${hit64} 96=${hit96} 非 Agree 条数=$notagree（共 $total 条）"; rec fail
+    bad "64=${hit64} 96=${hit96} 非 Agree 条数=${notagree}（共 $total 条）"; rec fail
   fi
 }
 
@@ -335,7 +335,7 @@ c7_vcpu_quota() {
   if [[ "$v" == "$EXPECT_VCPU" ]]; then
     ok "$EXPECT_VCPU_QUOTA_CODE = $v"; rec pass
   else
-    bad "$EXPECT_VCPU_QUOTA_CODE = ${v:-空}（期望 $EXPECT_VCPU）"
+    bad "$EXPECT_VCPU_QUOTA_CODE = ${v:-空}（期望 ${EXPECT_VCPU}）"
     info "        实得清单：$(jq -r '.Quotas[]|[.QuotaActionCode,(.TotalQuota|tostring)]|@tsv' "$OUTDIR/c7_q.json" 2>/dev/null | head -3 | tr '\n' ' ')"
     rec fail
   fi

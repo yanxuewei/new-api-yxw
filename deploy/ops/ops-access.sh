@@ -99,7 +99,7 @@ gc_rules() {
            --IpProtocol tcp --PortRange "$port" --SourceCidrIp "$src" >/dev/null 2>&1; then
         say "  [GC] 已撤销过期规则 TCP $port ← $src"; n=$((n+1))
       else
-        say "  [GC] !! 撤销失败 TCP $port ← $src（检查权限/参数）"
+        say "  [GC] !! 撤销失败 TCP ${port} ← ${src}（检查权限/参数）"
       fi
     fi
   done < <(printf '%s' "$j" | jq -r '.Permissions.Permission[]?|select(.Direction=="ingress")|[.PortRange,.SourceCidrIp,(.Description//"")]|@tsv' 2>/dev/null)
@@ -108,7 +108,7 @@ gc_rules() {
 
 case "$ACTION" in
   status)
-    say "=== 1. 安全组入向（sg-mnl-alb-edge=$EDGE_SG，期望零入向）==="
+    say "=== 1. 安全组入向（sg-mnl-alb-edge=${EDGE_SG}，期望零入向）==="
     j=$(ingress_json)
     cnt=$(printf '%s' "$j" | jq -r '[.Permissions.Permission[]?|select(.Direction=="ingress")]|length' 2>/dev/null)
     if [[ "${cnt:-0}" == "0" ]]; then say "  零入向端口 ✅（入口完全由身份认证承担）"; else
@@ -122,7 +122,7 @@ case "$ACTION" in
         | jq -c '.SessionManagerConfig' 2>/dev/null || echo "查询失败"
     done
 
-    say "=== 3. 会话录制投递（期望 OSS $OSS_BUCKET/$OSS_PREFIX）==="
+    say "=== 3. 会话录制投递（期望 OSS ${OSS_BUCKET}/${OSS_PREFIX}）==="
     aliyun ecs DescribeCloudAssistantSettings --RegionId "$REGION" --SettingType.1 SessionManagerDelivery 2>/dev/null \
       | jq -c '.OssDeliveryConfigs.OssDeliveryConfig[0]' 2>/dev/null || echo "  查询失败"
 
@@ -155,7 +155,7 @@ case "$ACTION" in
       mapfile -t IPS < <(printf '%s\n' "${IPS[@]}" | sort -u)
     fi
     (( ${#IPS[@]} )) || { say "!! 未取到任何出口 IP，可用 --ip <addr> 手动指定"; exit 1; }
-    say "将放行 TCP 22 ← ${IPS[*]}，有效期 ${TTL_MIN} 分钟（到期 $EXP）"
+    say "将放行 TCP 22 ← ${IPS[*]}，有效期 ${TTL_MIN} 分钟（到期 ${EXP}）"
     gc_rules
     ok=0
     for IP in "${IPS[@]}"; do

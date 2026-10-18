@@ -92,7 +92,7 @@ for site in mnl sg; do
   { readonly_block; [ "$MODE" = "--apply" ] && write_block "$site"; verify_block; } > "$b"
   chmod 600 "$b"
   tag=$([ "$MODE" = "--apply" ] && echo apply || echo check)
-  echo "########## $site （$MODE） ##########"
+  echo "########## $site （${MODE}） ##########"
   bash "$HERE/../../lib/ack_remote.sh" "$site" "$b" > "$LOGDIR/${site}_${tag}.out" 2>&1
   sed -n '/BODY START/,$p' "$LOGDIR/${site}_${tag}.out"
   grep -qiE 'error|forbidden|panic|exit code' "$LOGDIR/${site}_${tag}.out" \

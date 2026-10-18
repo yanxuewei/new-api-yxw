@@ -263,5 +263,5 @@ case "$MODE" in
   apply)    do_apply ;;
   verify)   do_verify ;;
   rollback) do_rollback "${2:-v1}" ;;
-  *)        die "未知模式：$MODE（可用 check|dry|apply|verify|rollback）" ;;
+  *)        die "未知模式：${MODE}（可用 check|dry|apply|verify|rollback）" ;;
 esac

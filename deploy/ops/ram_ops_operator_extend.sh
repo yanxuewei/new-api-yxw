@@ -59,7 +59,7 @@ except Exception as e:
 }
 
 do_check() {
-  say "=== 策略 $POLICY（Custom）现有版本 ==="
+  say "=== 策略 ${POLICY}（Custom）现有版本 ==="
   list_versions
   say ""
   say "=== 本文件拟发布的差异 ==="

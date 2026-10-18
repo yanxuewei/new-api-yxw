@@ -39,7 +39,7 @@ set -uo pipefail
 export KUBECONFIG=${KUBECONFIG:-/tmp/k8s/kubeconfig}
 : "${SITE:?}"; : "${RUN_ID:?}"; : "${SENTINEL:?}"; : "${NS:=new-api}"; : "${PROBE:=t53-pg}"
 : "${WRITE_ROLE:=no}"; : "${LEAD:=75}"; : "${HOLD:=150}"; : "${WINDOW:=360}"
-[ "$PROBE" = "t53-pg" ] || { echo "  [XX] 探针名必须与 manifest 固定名 t53-pg 一致（给了：$PROBE）"; exit 1; }
+[ "$PROBE" = "t53-pg" ] || { echo "  [XX] 探针名必须与 manifest 固定名 t53-pg 一致（给了：${PROBE}）"; exit 1; }
 
 echo "== SITE=$SITE RUN_ID=$RUN_ID UTC=$(date -u '+%F %T') local=$(date '+%F %T %Z') =="
 echo "   时钟: $(timedatectl 2>/dev/null | awk -F': ' '/synchronized/{printf "synced=%s ", $2}')$(timedatectl 2>/dev/null | awk -F': ' '/NTP service/{printf "ntp=%s", $2}')"

@@ -69,7 +69,7 @@ PY
 POLICY_NAME=new-api-kms-readonly
 POLICY_FILE="$LOGDIR/policy.json"
 make_policy "$POLICY_FILE"
-say "[i] KMS 策略已生成：$POLICY_FILE（$(python3 -c "import json;print(len(json.load(open('$POLICY_FILE'))['Statement'][0]['Resource']),'个 ARN')")）"
+say "[i] KMS 策略已生成：${POLICY_FILE}（$(python3 -c "import json;print(len(json.load(open('$POLICY_FILE'))['Statement'][0]['Resource']),'个 ARN')")）"
 
 if [ "$MODE" = "--apply" ]; then
   say "== 建/更新策略 $POLICY_NAME =="
@@ -95,7 +95,7 @@ for pair in "mnl ap-southeast-6 cd57e40ce9a634c1698c2f5c5e09bd93c new-api-rrsa-k
   TRUST="$LOGDIR/trust_$SITE.json"; make_trust "$OIDC_ARN" "$ISSUER" "$TRUST"
 
   if [ "$MODE" != "--apply" ]; then
-    say "  (dry-run) 将创建角色 $ROLE，信任策略："
+    say "  (dry-run) 将创建角色 ${ROLE}，信任策略："
     say "  $(cat "$TRUST")"
     continue
   fi

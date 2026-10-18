@@ -151,7 +151,7 @@ case "$EXEC_MODE" in
     pass "应急执行目标已指定（跳板机实例）"
     ;;
   *)
-    fail "未知 EXEC_MODE=$EXEC_MODE（合法值：ssh | cloud-assistant）"
+    fail "未知 EXEC_MODE=${EXEC_MODE}（合法值：ssh | cloud-assistant）"
     ;;
 esac
 [[ "$FAIL" -eq 0 ]] || { say "!! 前置失败，终止"; exit 1; }
@@ -191,7 +191,7 @@ exec_sh() {
       bash "$ACK_REMOTE" mnl "$bodyf" "" 100 > "$OUTDIR/$name.out" 2>&1
         rc=$?
         [[ $rc -eq 0 ]] && break
-        say "  第 ${try} 次退出码=$rc，3s 后重试"
+        say "  第 ${try} 次退出码=${rc}，3s 后重试"
         sleep 3
       done
       say "  ack-remote 执行退出码=$rc"
@@ -262,7 +262,7 @@ $(kubectl_epilogue)"
 
 # SELFTEST=1：只验证「云助手 + 临时 kubeconfig」执行通道（全部只读），不碰任何资源
 if [[ "${SELFTEST:-0}" == "1" ]]; then
-  step "selftest：验证执行通道（EXEC_MODE=$EXEC_MODE）+ 临时 kubeconfig（只读）"
+  step "selftest：验证执行通道（EXEC_MODE=${EXEC_MODE}）+ 临时 kubeconfig（只读）"
   node_k8s "selftest" 'kubectl version
 kubectl auth whoami
 kubectl get ns
@@ -282,7 +282,7 @@ done
 
 api "$OUTDIR/02-addons.json" aliyun cs ListClusterAddonInstances --cluster_id "$CLUSTER_ID"
 albstate=$(jq -r '[.addons[]?|select(.name=="alb-ingress-controller")][0]|"\(.state):\(.version)"' "$OUTDIR/02-addons.json" 2>/dev/null | tr -d '\r')
-if [[ "$albstate" == active:* ]]; then pass "alb-ingress-controller $albstate（指南步骤 1 已完成，仅复核）"; else fail "alb-ingress-controller 未就绪（$albstate）"; fi
+if [[ "$albstate" == active:* ]]; then pass "alb-ingress-controller ${albstate}（指南步骤 1 已完成，仅复核）"; else fail "alb-ingress-controller 未就绪（${albstate}）"; fi
 
 api "$OUTDIR/02-slr.json" aliyun ram GetRole --RoleName AliyunServiceRoleForAlb
 if jq -e '.Role.RoleName' "$OUTDIR/02-slr.json" >/dev/null 2>&1; then
@@ -298,7 +298,7 @@ else
 fi
 
 if [[ -n "$CERT_ID_ALB" ]]; then
-  pass "CERT_ID_ALB=$CERT_ID_ALB（将创建 80 + 443 双监听）"
+  pass "CERT_ID_ALB=${CERT_ID_ALB}（将创建 80 + 443 双监听）"
 elif [[ "$WITHOUT_TLS" == "1" ]]; then
   warn "未提供 CERT_ID_ALB 且显式 --without-tls：将**只创建 80 监听**（无 TLS，仅内部验证用，任务 40 补齐）"
 else
@@ -383,7 +383,7 @@ if [[ -n "$ALB_ID" ]]; then pass "V1 ALB 已创建 ${ALB_ID} dns=${ALB_DNS}"; el
 if [[ -n "$ALB_ID" ]]; then
   api "$OUTDIR/05-alb-attr.json" aliyun alb GetLoadBalancerAttribute --LoadBalancerId "$ALB_ID"
   zones=$(jq -r '[.ZoneMappings[]?.ZoneId]|join(",")' "$OUTDIR/05-alb-attr.json" 2>/dev/null | tr -d '\r')
-  say "  ZoneMappings=$zones（期望含 ap-southeast-6a 与 6b）"
+  say "  ZoneMappings=${zones}（期望含 ap-southeast-6a 与 6b）"
   [[ "$zones" == *6a* && "$zones" == *6b* ]] && pass "V1b 双可用区绑定" || fail "V1b 未跨 2 AZ"
   api "$OUTDIR/05-listeners.json" aliyun alb ListListeners --LoadBalancerIds.1 "$ALB_ID"
   jq -r '.Listeners[]?|"  listener \(.ListenerPort)/\(.ListenerProtocol)  idle=\(.IdleTimeout // "-")  req=\(.RequestTimeout // "-")  cert=\(.Certificates[0].CertificateId // "-")"' "$OUTDIR/05-listeners.json" >&3

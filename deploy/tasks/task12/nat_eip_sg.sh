@@ -91,7 +91,7 @@ api "$OUTDIR/00b-vsw.json" aliyun vpc DescribeVSwitches --RegionId "$REGION" --V
 jq -r '.VSwitches.VSwitch[]?|"VSW \(.VSwitchId)  \(.VSwitchName)  \(.ZoneId)  \(.CidrBlock)  free=\(.AvailableIpAddressCount)  \(.Status)"' \
   "$OUTDIR/00b-vsw.json" 2>/dev/null
 n_vsw=$(jq -r '[.VSwitches.VSwitch[]?]|length' "$OUTDIR/00b-vsw.json" 2>/dev/null | tr -d '\r')
-say "vSwitch 数=$n_vsw（期望 4）"
+say "vSwitch 数=${n_vsw}（期望 4）"
 [[ "${n_vsw:-0}" == "4" ]] || say "!! vSwitch 数不是 4，请先补齐（CreateVSwitch 参数同任务 5）"
 
 # ---- 1. NAT 网关 -----------------------------------------------------------
@@ -131,7 +131,7 @@ for i in $(seq 1 30); do
   [[ "$ST" == "Available" ]] && break
   sleep 10
 done
-[[ "$ST" == "Available" ]] || say "!! 仍非 Available（Status=$ST），后续步骤可能失败"
+[[ "$ST" == "Available" ]] || say "!! 仍非 Available（Status=${ST}），后续步骤可能失败"
 
 # ---- 2. EIP ×4 -------------------------------------------------------------
 step "2. 分配 4 个 EIP（PayByTraffic / 峰值 100Mbps / RG=${RG}）"
@@ -174,7 +174,7 @@ for aid in "${ALLOC_IDS[@]}"; do
   cur=$(apiget aliyun vpc DescribeEipAddresses --RegionId "$REGION" --AllocationId "$aid" \
         | jq -r '.EipAddresses.EipAddress[0]|"\(.Status)|\(.InstanceType // "-")|\(.InstanceId // "-")"' | tr -d '\r')
   if [[ "$cur" == InUse*"${NAT_ID}"* ]]; then
-    say "  ${aid}: 已绑定且指向本 NAT，跳过（$cur）"
+    say "  ${aid}: 已绑定且指向本 NAT，跳过（${cur}）"
     continue
   fi
   api "$OUTDIR/03-assoc-${aid}.json" aliyun vpc AssociateEipAddress --RegionId "$REGION" \
@@ -204,7 +204,7 @@ done
 # 复核：SNAT 条目数必须 = 4（4 个交换机）
 api "$OUTDIR/04-snat-after.json" aliyun vpc DescribeSnatTableEntries --RegionId "$REGION" --SnatTableId "$SNAT_TABLE" --PageSize 50
 n_snat=$(jq -r '[.SnatTableEntries.SnatTableEntry[]?]|length' "$OUTDIR/04-snat-after.json" 2>/dev/null | tr -d '\r')
-say "SNAT 条目数=$n_snat（期望 4）"
+say "SNAT 条目数=${n_snat}（期望 4）"
 [[ "${n_snat:-0}" == "4" ]] || say "!! SNAT 条目数不符，需人工复核"
 
 # ---- 5. 路由表 0.0.0.0/0 → NAT（系统自动创建；此处仅校验） -----------------
@@ -247,9 +247,9 @@ for idx in "${!ALLOC_IDS[@]}"; do
 done
 
 if [[ ! -f "$LEDGER" ]]; then
-  say "!! 台账不存在：$LEDGER（跳过更新，sg 行已存 $SG_ROWS）"
+  say "!! 台账不存在：${LEDGER}（跳过更新，sg 行已存 ${SG_ROWS}）"
 elif ! grep -q '^| 5 | eip-sg-upstream-01' "$LEDGER"; then
-  say "!! 台账中未找到 sg 行锚点（跳过更新，sg 行已存 $SG_ROWS）"
+  say "!! 台账中未找到 sg 行锚点（跳过更新，sg 行已存 ${SG_ROWS}）"
 else
   awk -v rowsfile="$SG_ROWS" '
     BEGIN { while ((getline line < rowsfile) > 0) rows = rows line "\n" }

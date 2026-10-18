@@ -80,7 +80,7 @@ print("    displayName=%s" % d["displayName"])
 case "$MODE" in
   --probe)
     TO=$(date +%s); FROM=$(( TO - 86400 ))
-    say "[i] 窗口=最近 24h（$FROM→$TO） project=$P logstore=$LS region=$R"
+    say "[i] 窗口=最近 24h（${FROM}→${TO}） project=$P logstore=$LS region=$R"
     say "[i] 分桶查询（与告警同口径，但按组拆开看）"
     aliyun sls GetLogsV2 --region "$R" --project "$P" --logstore "$LS" \
       --body "{\"from\":$FROM,\"to\":$TO,\"line\":20,\"offset\":0,\"query\":\"* | select slb_pool_name, count(*) as n, sum(case when status >= 500 then 1 else 0 end) as e5xx from log group by slb_pool_name order by n desc limit 20\"}" \
@@ -170,7 +170,7 @@ apply_one() {
   local n="$1" exists
   exists=$(aliyun sls ListAlerts --region "$R" --project "$P" --size 100 2>/dev/null \
     | python3 -c 'import json,sys; print("yes" if sys.argv[1] in [a.get("name") for a in (json.load(sys.stdin).get("results") or [])] else "no")' "$n")
-  say "[i] $n 现存在=$exists（存在性闸门：缺才 Create，避免 JobAlreadyExist 伪装成失败）"
+  say "[i] $n 现存在=${exists}（存在性闸门：缺才 Create，避免 JobAlreadyExist 伪装成失败）"
   if [[ "${DRY:-}" = 1 ]]; then
     say "[i] DRY=1 ⇒ 只渲染 body（下面两行分别是 CreateAlert 与 UpdateAlert 的 body）"
     [[ "$exists" = no ]] && { echo "  min : $(body_min "$n")"; }
@@ -196,7 +196,7 @@ case "$MODE" in
     ;;
   --set-state)
     need_confirm "--set-state 会改告警启停"
-    say "[i] 当前 $ALERT："
+    say "[i] 当前 ${ALERT}："
     get_alert "$ALERT" | readable
     case "$ARG2" in
       on)  say "[i] EnableAlert $ALERT";  aliyun sls EnableAlert  --region "$R" --project "$P" --alertName "$ALERT" 2>&1 | mask | tail -3 ;;

@@ -70,7 +70,7 @@ for f in $UPS; do
   case "$f" in
     *contract*|*drop_table*|*drop_column*)
       if head -10 "$MIG/$f" | grep -q "不可逆"; then ok "不可逆迁移已标注: $f"
-      else bad "不可逆迁移（$f）缺「不可逆」标注（卡片要求显式标注并过评审）"; fi
+      else bad "不可逆迁移（${f}）缺「不可逆」标注（卡片要求显式标注并过评审）"; fi
       ;;
   esac
 done

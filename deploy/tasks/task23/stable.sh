@@ -658,7 +658,7 @@ for it in d.get("items") or []:
 N=$(kubectl -n $NS get ingress new-api-verify -o jsonpath='{.spec.rules}' 2>/dev/null | python3 -c 'import json,sys; print(len(json.loads(sys.stdin.read() or "[]")))')
 PATHS=$(kubectl -n $NS get ingress new-api-verify -o jsonpath='{.spec.rules[0].http.paths}' 2>/dev/null | python3 -c 'import json,sys; print(len(json.loads(sys.stdin.read() or "[]")))')
 if [ "${N:-0}" != "1" ] || [ "${PATHS:-0}" != "1" ]; then
-  echo "  [XX] new-api-verify 不是「1 rule / 1 path」结构（rule=$N path=$PATHS），JSON Patch 下标会打偏 ⇒ 中止"
+  echo "  [XX] new-api-verify 不是「1 rule / 1 path」结构（rule=$N path=${PATHS}），JSON Patch 下标会打偏 ⇒ 中止"
   exit 1
 fi
 if [ "$TARGET" = "new-api-stable" ]; then
@@ -793,5 +793,5 @@ case "$MODE" in
   --status)   say "STEP status   | 只读"; build_and_run status ;;
   --wire-alb) say "STEP wire-alb | ⚠ 改 Ingress 后端指向（可逆：TARGET_SVC=new-api-master）"; build_and_run wire-alb ;;
   --cleanup)  say "STEP cleanup  | 删本卡 deploy/svc/hpa（保留既有 PDB）"; build_and_run cleanup ;;
-  *) die "未知参数：$MODE（--precheck|--dryrun|--apply|--verify|--status|--wire-alb|--cleanup）" ;;
+  *) die "未知参数：${MODE}（--precheck|--dryrun|--apply|--verify|--status|--wire-alb|--cleanup）" ;;
 esac

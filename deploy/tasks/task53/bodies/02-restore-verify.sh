@@ -68,7 +68,7 @@ if [ "$DO_DELETE" = "yes" ] && [ "${FOOTER_CNT:-0}" = "1" ] && [ "${FOOTER_LEN:-
 elif [ "$DO_DELETE" = "yes" ]; then
   echo "    [XX] 复核条件不满足（行数/值长度不符）⇒ 不动手，交人工判读"
 else
-  echo "    （本轮 DO_DELETE=$DO_DELETE，纯取证）"
+  echo "    （本轮 DO_DELETE=${DO_DELETE}，纯取证）"
 fi
 
 echo "-- 副本侧 /api/status footer 三态判读（HTTP码｜字段存在性｜值形态）--"

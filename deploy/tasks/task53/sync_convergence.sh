@@ -53,18 +53,18 @@ die() { printf '  [XX] %s\n' "$*" >&2; exit 1; }
 [[ -f "$BODY_SRC" ]] || die "缺 $BODY_SRC"
 mkdir -p "$LOGDIR"
 
-case "$MODE" in --precheck|--probe|--status|--cleanup) : ;; *) die "MODE 必须 --precheck|--probe|--status|--cleanup（给了：$MODE）" ;; esac
+case "$MODE" in --precheck|--probe|--status|--cleanup) : ;; *) die "MODE 必须 --precheck|--probe|--status|--cleanup（给了：${MODE}）" ;; esac
 
 say "[i] 模式   = $MODE"
 say "[i] RUN_ID = $RUN_ID"
-say "[i] 哨兵   = $SENTINEL（本卡专用标记串，不含凭据）"
+say "[i] 哨兵   = ${SENTINEL}（本卡专用标记串，不含凭据）"
 say "[i] 日志   = $LOGDIR"
 
 render() { # $1=site $2=write_role $3=window $4=lead $5=hold
   local site="$1" wr="$2" win="$3" lead="$4" hold="$5" out="$LOGDIR/body-$1.sh"
   {
     echo "#!/usr/bin/env bash"
-    echo "# 由 task53/sync_convergence.sh 渲染（$MODE · site=$site · $RUN_ID）"
+    echo "# 由 task53/sync_convergence.sh 渲染（$MODE · site=$site · ${RUN_ID}）"
     printf 'SITE=%s\nRUN_ID=%s\nSENTINEL=%s\nNS=%s\nPROBE=%s\nWRITE_ROLE=%s\nWINDOW=%s\nLEAD=%s\nHOLD=%s\nexport SITE RUN_ID SENTINEL NS PROBE WRITE_ROLE WINDOW LEAD HOLD\n' \
       "$site" "$RUN_ID" "$SENTINEL" "$NS" "$PROBE" "$wr" "$win" "$lead" "$hold"
     cat "$BODY_SRC"
@@ -96,10 +96,10 @@ case "$MODE" in
     sleep 8
     bash "$ACK" sg "$bs" "" 150 > "$LOGDIR/sg.out" 2>&1 &
     SPID=$!
-    say "[i] 已并发下发（mnl pid=$MPID / sg pid=$SPID），等待执行完成…"
+    say "[i] 已并发下发（mnl pid=$MPID / sg pid=${SPID}），等待执行完成…"
     wait "$MPID"; mrc=$?
     wait "$SPID"; src=$?
-    say "[i] 通道 rc：mnl=$mrc sg=$src（非 0 也必须先看输出再判）"
+    say "[i] 通道 rc：mnl=$mrc sg=${src}（非 0 也必须先看输出再判）"
     for f in mnl sg; do
       echo "===================== $f ====================="
       cat "$LOGDIR/$f.out"

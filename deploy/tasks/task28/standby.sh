@@ -161,7 +161,7 @@ rm -f /tmp/t28_q.json
 echo "===== P4 AZ 可放置性（topologySpread DoNotSchedule + $T28_REP 副本 ⇒ 需 ≥2 个可调度 AZ）====="
 kubectl get nodes -o custom-columns='NAME:.metadata.name,ZONE:.metadata.labels.topology\.kubernetes\.io/zone,TYPE:.metadata.labels.node\.kubernetes\.io/instance-type,CPU_alloc:.status.allocatable.cpu,MEM_alloc:.status.allocatable.memory,UNSCHED:.spec.unschedulable'
 ZC=$(kubectl get nodes -o jsonpath='{.items[*].metadata.labels.topology\.kubernetes\.io/zone}' | tr ' ' '\n' | sort -u | wc -l | tr -d ' ')
-echo "   可用区去重数 = $ZC（≥2 才能让 2 副本各占一区；=1 则第二个 Pod 必 Pending）"
+echo "   可用区去重数 = ${ZC}（≥2 才能让 2 副本各占一区；=1 则第二个 Pod 必 Pending）"
 echo "   每节点已请求（Allocated resources）："
 for n in $(kubectl get nodes -o jsonpath='{.items[*].metadata.name}'); do
   printf '   node/%s ' "$n"
@@ -229,7 +229,7 @@ ZC=$(for p in $(kubectl -n "$NS" get pod -l app=new-api -o jsonpath='{.items[*].
        N=$(kubectl -n "$NS" get pod "$p" -o jsonpath='{.spec.nodeName}')
        kubectl get node "$N" -o jsonpath='{.metadata.labels.topology\.kubernetes\.io/zone}{"\n"}'
      done | sort -u | wc -l | tr -d ' ')
-echo "   去重 AZ 数 = $ZC（期望 2）"
+echo "   去重 AZ 数 = ${ZC}（期望 2）"
 
 echo "===== V1b 容器 env 生效值（证明清单 env 覆盖了 ConfigMap；只取白名单键）====="
 kubectl -n "$NS" exec deploy/"$APP" -c new-api -- sh -c \
@@ -377,5 +377,5 @@ case "$MODE" in
   --verify)   say "STEP verify   | V1/V2/V3 + V4 现状判定（建临时探针 Pod，用完即删）"; build_and_run verify ;;
   --status)   say "STEP status   | 只读"; build_and_run status ;;
   --cleanup)  say "STEP cleanup  | ⚠ 破坏性：删本卡 deploy/svc/探针 Pod（需核准）"; build_and_run cleanup ;;
-  *) die "未知参数：$MODE（--precheck | --dryrun | --apply | --verify | --status | --cleanup）" ;;
+  *) die "未知参数：${MODE}（--precheck | --dryrun | --apply | --verify | --status | --cleanup）" ;;
 esac

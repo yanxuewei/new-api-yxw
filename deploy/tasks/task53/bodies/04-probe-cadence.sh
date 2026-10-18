@@ -6,7 +6,7 @@
 #   mnl alb-1riqckb1h8ezm0y7s9：仅 HTTP:80 一个 listener，默认动作 → kube-system-fake-svc
 #         rule pri=1 host=ph-verify.internal.likha.hk → sgp-tqgwt413t19mum8oa9
 #         该组 HealthCheckEnabled=true path=/api/status method=GET interval=6s timeout=3s
-#                    healthy/unhealthy=2/3 Host=$SERVER_IP，ServerCount=4，**type=Eni :3000**
+#                    healthy/unhealthy=2/3 Host=${SERVER_IP}，ServerCount=4，**type=Eni :3000**
 #         组内 4 个 ENI 目标 = Pod ENI 直连（Terway），ALB 探针不经 NodePort
 #   sg  alb-amdwm60xmznh7s1nae：仅 HTTP:80；rule pri=1 host=sg-standby.internal.likha.hk
 #         → sgp-rlxs1mqishcxcfkx7u（Eni :3000 ×2，HC 同上）

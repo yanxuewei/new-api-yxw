@@ -249,7 +249,7 @@ print(' '.join(u['UserName'] for u in ((d.get('Users') or {}).get('User') or [])
     if q ram RemoveUserFromGroup --GroupName "$GROUP" --UserName "$u" | grep -q '"RequestId"'; then
       say "  [OK]   移除成员 $u"
     else
-      say "  [FAIL] 移除成员 $u（组非空则无法删除）"
+      say "  [FAIL] 移除成员 ${u}（组非空则无法删除）"
     fi
   done
   local p
@@ -257,7 +257,7 @@ print(' '.join(u['UserName'] for u in ((d.get('Users') or {}).get('User') or [])
     if q ram DetachPolicyFromGroup --GroupName "$GROUP" --PolicyName "$p" --PolicyType Custom | grep -q '"RequestId"'; then
       say "  [OK]   解绑 $p"
     else
-      say "  [SKIP] $p（未挂或解绑失败）"
+      say "  [SKIP] ${p}（未挂或解绑失败）"
     fi
   done
   if q ram DeleteGroup --GroupName "$GROUP" | grep -q '"RequestId"'; then

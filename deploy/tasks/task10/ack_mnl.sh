@@ -157,7 +157,7 @@ if [[ "$DRY_RUN" != "1" ]]; then
   if [[ "$GOT_RG" == "$RESOURCE_GROUP_ID" ]]; then
     ok "资源组正确: $GOT_RG"
   else
-    fail "资源组不符！期望 $RESOURCE_GROUP_ID，实际 $GOT_RG（ACK 不支持迁移，需重建）"
+    fail "资源组不符！期望 ${RESOURCE_GROUP_ID}，实际 ${GOT_RG}（ACK 不支持迁移，需重建）"
     exit 1
   fi
 fi

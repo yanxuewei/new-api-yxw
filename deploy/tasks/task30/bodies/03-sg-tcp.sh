@@ -18,7 +18,7 @@ hostname
 curl -s --max-time 4 http://100.100.100.200/latest/meta-data/zone-id 2>/dev/null; echo
 curl -s --max-time 4 http://100.100.100.200/latest/meta-data/eipv4 2>/dev/null; echo
 
-echo "== 1) TCP 建连耗时 20 次（$H:$P，含 SYN/ACK 一个 RTT）=="
+echo "== 1) TCP 建连耗时 20 次（$H:${P}，含 SYN/ACK 一个 RTT）=="
 : >/tmp/tcp_ms.txt
 i=0
 while [ "$i" -lt 20 ]; do

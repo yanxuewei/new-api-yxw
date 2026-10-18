@@ -28,7 +28,7 @@ apic() {
     fi
     sleep 3
   done
-  log "FAIL $product/$api（5 次重试后）：$(tr '\n' ' ' <"$OUTDIR/$name.err" | cut -c1-200)"
+  log "FAIL $product/${api}（5 次重试后）：$(tr '\n' ' ' <"$OUTDIR/$name.err" | cut -c1-200)"
   return 1
 }
 
@@ -115,7 +115,7 @@ WLG=$(jq -r '.Items.DBInstanceIPArray[] | select(.DBInstanceIPArrayName=="sg_sta
 if [[ -z "$WLG" ]]; then
   log "  ✘ 白名单里没有 sg_standby_eip 组 ⇒ 备站必然连不上"
 elif [[ ! -s "$OUTDIR/egress_ips.txt" ]]; then
-  log "  ？ 白名单组存在（$WLG），但新加坡无 SNAT 出口可比对"
+  log "  ？ 白名单组存在（${WLG}），但新加坡无 SNAT 出口可比对"
 else
   miss=""
   while read -r ip; do

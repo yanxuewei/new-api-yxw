@@ -84,7 +84,7 @@ print('  [OK]   资源组 %s = %s' % (g.get('Id'), g.get('DisplayName')))
 "
   echo "  ── vSwitch 基线 ──"
   info "app-a $VSW_APP_A (1a) / app-b $VSW_APP_B (1b)"
-  info "Service CIDR 计划：$SERVICE_CIDR（马尼拉为 172.21.0.0/20，故错开）"
+  info "Service CIDR 计划：${SERVICE_CIDR}（马尼拉为 172.21.0.0/20，故错开）"
 }
 
 # ---------- 2. 密钥对 ----------
@@ -103,7 +103,7 @@ for k in (d.get('KeyPairs') or {}).get('KeyPair') or []:
 
   [ -f "$PUB_KEY_FILE" ] || { bad "公钥文件不存在：$PUB_KEY_FILE"; return 1; }
   local body; body="$(cat "$PUB_KEY_FILE")"
-  log "导入公钥 → $KEY_PAIR（来源 $PUB_KEY_FILE）"
+  log "导入公钥 → ${KEY_PAIR}（来源 ${PUB_KEY_FILE}）"
   local raw
   raw="$(aliyun ecs ImportKeyPair --RegionId "$REGION" --region "$REGION" \
         --KeyPairName "$KEY_PAIR" --PublicKeyBody "$body" 2>&1)"

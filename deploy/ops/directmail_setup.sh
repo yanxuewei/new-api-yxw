@@ -196,7 +196,7 @@ case "$cmd" in
       say "发信域名 '$DOMAIN' 尚未创建 —— 先执行: bash $0 apply"
       exit 0
     fi
-    say "== 待写入 DNS 计划（$DOMAIN / zone $ZONE, DomainId=$ID）=="
+    say "== 待写入 DNS 计划（$DOMAIN / zone $ZONE, DomainId=${ID}）=="
     build_plan "$ID" false | tee "$TMPD/plan.tsv" | awk -F'\t' \
       '{printf "  [%s] %-38s -> %s   %s\n",$2,$1,substr($3,1,60),$5}'
     say
@@ -212,9 +212,9 @@ case "$cmd" in
       say "  $out"
       ID="$(get_domain_id)"
       [ -n "$ID" ] || die "域名创建后仍未查询到，请用控制台确认"
-      say "  DomainId=$ID（DNS 生效后需等待校验，通常 4 小时内）"
+      say "  DomainId=${ID}（DNS 生效后需等待校验，通常 4 小时内）"
     else
-      say "== 发信域名已存在 DomainId=$ID，跳过创建 =="
+      say "== 发信域名已存在 DomainId=${ID}，跳过创建 =="
     fi
 
     say "== 拉取权威记录值 =="
@@ -227,7 +227,7 @@ case "$cmd" in
       [ -z "${rr:-}" ] && continue
       rr="$(fix_rr "$rr")"
       if has_record "$rr" "$type" "$value"; then
-        say "  SKIP  [$type] $rr（已存在且值一致）"
+        say "  SKIP  [$type] ${rr}（已存在且值一致）"
         continue
       fi
       if [ "$type" = "MX" ]; then

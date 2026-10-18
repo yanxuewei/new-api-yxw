@@ -77,7 +77,7 @@ do_check() {
   wg_def="$(jq -r '.Data.GroupItems[]|select(.GroupName=="default")|.SecurityIPList' "$LOGDIR/wl_now.json")"
   wg_mnl="$(jq -r '.Data.GroupItems[]|select(.GroupName=="'"$WG_NAME"'")|.SecurityIPList' "$LOGDIR/wl_now.json" 2>/dev/null || true)"
   say "  default 组 = $wg_def"
-  if [ "$wg_mnl" = "$WG_IPS" ]; then ok "白名单组 $WG_NAME = $WG_IPS（已接线）"
+  if [ "$wg_mnl" = "$WG_IPS" ]; then ok "白名单组 $WG_NAME = ${WG_IPS}（已接线）"
   else warn "白名单组 $WG_NAME 缺失或不等（现在=${wg_mnl:-<无>}）→ 需 --apply"; fi
 
   snap_accounts now || die "账号查询失败"
@@ -85,7 +85,7 @@ do_check() {
   n="$(jq -r '.Data.TotalCount' "$LOGDIR/accts_now.json")"
   if [ "$n" -gt 0 ] && jq -e --arg a "$ACCOUNT" '.Data.Accounts[]|select(.Account==$a)' "$LOGDIR/accts_now.json" >/dev/null; then
     ok "账号 $ACCOUNT 已存在"
-  else warn "账号 $ACCOUNT 不存在（TotalCount=$n）→ 需 --apply"; fi
+  else warn "账号 $ACCOUNT 不存在（TotalCount=${n}）→ 需 --apply"; fi
   if jq -e '.Data.Accounts[]?|select(.Account=="ckadmin")' "$LOGDIR/accts_now.json" >/dev/null 2>&1; then
     ok "引导账号 ckadmin 已存在"
   else warn "引导账号 ckadmin 不存在 → 需 --apply"; fi
@@ -102,7 +102,7 @@ do_check() {
   # KMS 凭据（2026-09-30 实测：国际站未购 KMS 实例 ⇒ CreateSecret 一律 UnsupportedOperation，
   # 任务 17 全部 8 个凭据被同一硬阻塞；DSN 已降级存保管目录，上方已核对）
   if aliyun kms DescribeSecret --SecretName "$SECRET_NAME" --region "$REGION" >"$LOGDIR/kms_describe.json" 2>"$LOGDIR/kms_describe.err"; then
-    ok "KMS 凭据 $SECRET_NAME 已存在（region $REGION）"
+    ok "KMS 凭据 $SECRET_NAME 已存在（region ${REGION}）"
   else
     warn "KMS 凭据 $SECRET_NAME 不存在（已知阻塞：账号未购 KMS 实例，国际站凭据管家硬前置）"
     warn "  ⇒ DSN 已降级保管 /root/.deploy_secrets/LOG_SQL_DSN；购买 KMS 实例后迁移"
@@ -113,7 +113,7 @@ do_check() {
   pol_v="$(aliyun ram ListPolicyVersions --PolicyName "$POLICY_NAME" --PolicyType Custom --region ap-southeast-1 2>/dev/null \
     | jq -r '.PolicyVersions.PolicyVersion[]?|select(.IsDefaultVersion==true)|.PolicyDocument' | head -1 || true)"
   if echo "$pol_v" | grep -q "LOG_SQL_DSN"; then
-    ok "策略 $POLICY_NAME（默认版本）已含 LOG_SQL_DSN"
+    ok "策略 ${POLICY_NAME}（默认版本）已含 LOG_SQL_DSN"
   else
     warn "策略 $POLICY_NAME 尚无 LOG_SQL_DSN ARN → 需 --apply"
   fi
@@ -125,7 +125,7 @@ do_apply() {
   hr; say "STEP apply | CK 接线（幂等）：白名单 → 建库 → 账号 → KMS 凭据 → 策略补 ARN"
 
   # ---- 1. 白名单（先快照，防 default 被误覆盖）----
-  say "1) 白名单：新建组 $WG_NAME = $WG_IPS（default 组保持 127.0.0.1）"
+  say "1) 白名单：新建组 $WG_NAME = ${WG_IPS}（default 组保持 127.0.0.1）"
   snap_whitelist before
   local cur
   cur="$(jq -r '.Data.GroupItems[]|select(.GroupName=="'"$WG_NAME"'")|.SecurityIPList' "$LOGDIR/wl_before.json" 2>/dev/null || true)"
@@ -143,7 +143,7 @@ do_apply() {
     m="$(jq -r '.Data.GroupItems[]|select(.GroupName=="'"$WG_NAME"'")|.SecurityIPList' "$LOGDIR/wl_after.json" 2>/dev/null || true)"
     [ "$m" = "$WG_IPS" ] || die "回读：$WG_NAME=$m 不符"
     if [ "$d" != "127.0.0.1" ]; then
-      warn "default 组被误写成 $d，立即回滚为 127.0.0.1"
+      warn "default 组被误写成 ${d}，立即回滚为 127.0.0.1"
       api "$LOGDIR/wl_rollback.json" clickhouse ModifySecurityIPList \
         --RegionId "$REGION" --region "$REGION" --DBInstanceId "$CID" \
         --GroupName default --ModifyMode 0 --SecurityIPList 127.0.0.1 || die "回滚失败"
@@ -168,7 +168,7 @@ do_apply() {
   fi
 
   # ---- 3. 账号 ----
-  say "3) 账号 $ACCOUNT（NormalAccount + DDL/读写 + 仅授权 $DB）"
+  say "3) 账号 ${ACCOUNT}（NormalAccount + DDL/读写 + 仅授权 ${DB}）"
   snap_accounts before
   local need_create=1
   if [ "$FORCE_RECREATE" = "--recreate-account" ]; then
@@ -194,7 +194,7 @@ do_apply() {
           --Account "$ACCOUNT" --AccountType NormalAccount --Password "$PW" \
           --DmlAuthSetting "$dml" \
           --Description "new-api log writer (task9 wiring)"; then
-      ok "CreateAccount 成功（DdlAuthority=true / DmlAuthority=0 / 仅 $DB）"
+      ok "CreateAccount 成功（DdlAuthority=true / DmlAuthority=0 / 仅 ${DB}）"
     else
       # JSON 对象不被接受时退回 dotted 形式
       say "  JSON 形式失败，尝试 dotted 形式…"
@@ -216,7 +216,7 @@ do_apply() {
     [ -s "$LOGDIR/acct_auth.json" ] && jq -c '.Data' "$LOGDIR/acct_auth.json" >&3
 
     # ---- 4. DSN 保管：优先 KMS；无 KMS 实例则降级 WSL root 保管目录 ----
-    say "4) DSN 保管（$SECRET_NAME）"
+    say "4) DSN 保管（${SECRET_NAME}）"
     DSN="clickhouse://${ACCOUNT}:${PW}@${CK_HOST}:9000/${DB}"
     if aliyun kms DescribeSecret --SecretName "$SECRET_NAME" --region "$REGION" >/dev/null 2>&1; then
       warn "KMS 凭据已存在，跳过（如需换值走 PutSecretValue，此处不动）"
@@ -354,5 +354,5 @@ case "$MODE" in
   --check)  do_check ;;
   --apply)  do_apply ;;
   --verify) do_verify ;;
-  *) die "未知参数：$MODE（--check | --apply | --verify）" ;;
+  *) die "未知参数：${MODE}（--check | --apply | --verify）" ;;
 esac

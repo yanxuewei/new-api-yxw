@@ -81,7 +81,7 @@ preflight() {
   fi
   if [[ "$n" != "0" ]]; then
     ids=$(jq -r '[.Instances.KVStoreInstance[]?.InstanceId] | join(",")' "$OUTDIR/preflight_instances.json")
-    die "$REGION 已有其它 Tair 实例（$ids）但无 $NAME ⇒ 停止，人工确认后再动"
+    die "$REGION 已有其它 Tair 实例（${ids}）但无 $NAME ⇒ 停止，人工确认后再动"
   fi
   log "幂等闸门通过：$REGION TotalCount=0（本卡现状应为 1，见实况）"
 }
@@ -100,7 +100,7 @@ create_args() {
 
 create() {
   [[ -s "$IDFILE" ]] && { log "已记录实例 $(cat "$IDFILE")，跳过创建"; return; }
-  [[ "${ALLOW_CREATE:-0}" == "1" ]] || die "实例已由控制台购买（$ACTUAL_ID）⇒ create 已封闸。确需另建请显式 ALLOW_CREATE=1 并先人工复核规格码/落点"
+  [[ "${ALLOW_CREATE:-0}" == "1" ]] || die "实例已由控制台购买（${ACTUAL_ID}）⇒ create 已封闸。确需另建请显式 ALLOW_CREATE=1 并先人工复核规格码/落点"
   local args
   mapfile -t args < <(create_args)
   log "CreateInstance（真实下单，PrePaid Period 1）"
@@ -137,7 +137,7 @@ params() {
 whitelist() {
   local id
   id=$(need_id)
-  log "ModifySecurityIps：组 $WL_GROUP = $WL_IPS（ModifyMode Cover 的作用域是该组，default 不动）"
+  log "ModifySecurityIps：组 $WL_GROUP = ${WL_IPS}（ModifyMode Cover 的作用域是该组，default 不动）"
   aliyun r-kvstore ModifySecurityIps --region "$REGION" --InstanceId "$id" --SecurityIps "$WL_IPS" \
     --ModifyMode Cover --SecurityIpGroupName "$WL_GROUP" \
     >"$OUTDIR/modify_ips.json" 2>&1 || { cat "$OUTDIR/modify_ips.json"; die "ModifySecurityIps 失败"; }
@@ -170,8 +170,8 @@ check() {
   cls=$(jq -r '.Instances.DBInstanceAttribute[0].InstanceClass' "$OUTDIR/check_attr.json")
   [[ "$st" == "Normal" ]] && log "OK InstanceStatus=Normal" || log "WARN InstanceStatus=$st"
   log "容量 ${cap}MB（实购 2048 = 1G×2DB 集群档，与马尼拉 2048 同档；卡片原写 4096 已按 09-30 裁定改口径）"
-  [[ "$sec" == "$SECONDARY_ZONE" ]] && log "OK 备可用区 = $sec（ZoneType 应为 doublezone）" || log "WARN 备可用区 = $sec（期望 $SECONDARY_ZONE）"
-  log "规格码实况 = $cls（≠ 09-30 计划的企业版 amber 码 ⇒ 已按实况回改卡片）"
+  [[ "$sec" == "$SECONDARY_ZONE" ]] && log "OK 备可用区 = ${sec}（ZoneType 应为 doublezone）" || log "WARN 备可用区 = ${sec}（期望 ${SECONDARY_ZONE}）"
+  log "规格码实况 = ${cls}（≠ 09-30 计划的企业版 amber 码 ⇒ 已按实况回改卡片）"
   jq -e --arg g "$WL_GROUP" \
     '.SecurityIpGroups.SecurityIpGroup[] | select(.SecurityIpGroupName==$g) | select(.SecurityIpList | test("10\\.1\\.16\\.0/20") and test("10\\.1\\.32\\.0/20") and test("10\\.1\\.80\\.0/20") and test("10\\.1\\.96\\.0/20"))' \
     "$OUTDIR/check_ips.json" >/dev/null && log "OK 白名单组 $WL_GROUP 四段齐" || log "WARN 白名单组 $WL_GROUP 未达期望（应为 4 个 app 段）"
