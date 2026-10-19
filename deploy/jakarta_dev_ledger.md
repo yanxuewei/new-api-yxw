@@ -1464,3 +1464,69 @@ stdout 路不受影响（纳秒来自 runtime `_time_`）。属既有挂账 G8�
 
 ### 20.6 我自己这轮的第二个小 bug（同类于 §17.5，登记为可读性证据）
 `readback_perf_state.sh` 的 S3 用了一条 jsonpath 把 `labels` 和 `annotations` 写进**同一个字符串字面量**：`{"\n    annotations={.metadata.annotations}"` —— `{` 在字符串里又起了一个 action，解析器报 `unrecognized character in action: U+005C '\'`。前半段（managers/times/created/uid）已正常返回，所以**归因证据没受影响**，labels/annotations 这一项没读到。修法：一个 `-o jsonpath` 只出一个字段组，别在字面量里嵌 `{}`。⚠ 同 §17.5 的规矩：**报错输出不等于对象不存在**，这里我明确写了"这一项没读到"，没有把报错读成"mock 没有标签"。
+
+## 21. 任务 33 的 S2 半边：perf 压测链路打通 + 降档阶梯实测（2026-10-19，**800 档第一读是错的，已纠正**）
+
+负责人本轮裁定三条：① ResourceQuota **「不用动」**（§20.5-1 的缺口保持登记状态，不擅自重建）；② **「按实际资源降回一些并发，如 1500 并发，下降到 800 并发」**；③ 生产日志库 DSN 改写/发布 **「不要动」**。另：会话权限已放宽，允许我直接重试执行。
+
+### 21.1 前置不是"卡片写了就算有"：三件必须先证明的事
+1. **mock 上游的 SSE 契约**（§20.4 留的尾巴）。`bodies/probe_mock_contract.sh` 实测：`POST /v1/chat/completions` 首字 **301 ms**（= `FIRST_TOKEN_DELAY_MS`）、**52 个 `data:` 块**、块间隔 ≈30 ms、末块 `[DONE]`；`/healthz`、`/metrics`、`/v1/models`（`mock-gpt`）都在。⇒ 上游可用**这条以前是推断，现在是实测**。
+   ⚠ 同一支脚本的第一版有个我自己造的假 FAIL：`CPod` 的 jsonpath 尾部多打了一个空格 ⇒ 后续 `curl http://$IP:8080` 全部 `curl: (3) Port number ended with ' '`，我一度据此写"mock 不是 OpenAI 兼容 SSE"，而同一次运行的 M6 段已经返回了正常流式体——**自相矛盾被我读成了结论**。修法：字段逐个 `tr -dc '0-9'` / `tr -d ' \r'` 清洗，别把空格带进 URL。
+2. **执行器根本不存在**：节点上 `command -v k6 hey ab wrk` **四个全空**，可用的是 `python3 3.6.8` + `curl 7.61.1` ⇒ 卡片里 `k6 run -e VUS=1500 …` 在雅加达站**不可直接执行**。驱动改为仓内自带的 selectors 非阻塞 SSE 驱动（`bodies/run_perf_sse_staircase.sh` 内嵌 python）。指南任务 33 已按实测补注（不删原文，加"本站实测修正"段）。
+3. **压测链路是零状态**：`check_perf_load_inputs.sh` 回读 `channels=0 tokens=0 users=0 logs=0`（perf 库是空库），且 `new-api-perf` 已被缩到 **1 副本**（见 21.4）。所以"perf 就绪"不等于"能压"，中间缺的是**管理员 seeding → 渠道 → 令牌**整条链。
+
+### 21.2 建链路上踩的四坑（每个都改了脚本，不是改了口径）
+| 现象 | 真相（代码/实测） | 处置 |
+| --- | --- | --- |
+| `POST /api/token/` 只回 `{"success":true}`，取 `data.id` 为空 | add 接口**不回 id** | 令牌/渠道 id 一律 **SQL 回读**为准；"apply/接口成功"不等于对象存在 |
+| 拿 `POST /api/token/:id/key` 的值当 Bearer ⇒ **401 ×6** | 该接口 `data` 是**对象**不是字符串；我 `jval data` 把 dict 打印成 59 字符脏值 | key 改从 DB 读，**先校验形态**（48 位、连字符数=0）再用；`middleware/auth.go` 的鉴权是 `TrimPrefix("sk-")` → `Split("-")[0]` → `DB.Where("key=?")`，脏值必然 `record not found` |
+| 修好 key 后 **404 `bad_response_status_code` ×6** | `relay/common/relay_utils.go` 的 `GetFullRequestURL = base_url + "/v1/chat/completions"`（只有 cloudflare 前缀才 `TrimPrefix("/v1")`）⇒ 我把渠道 `base_url` 写成 `…/v1` 就拼成 `/v1/v1/…` | `fix_perf_channel_url.sh`：删掉 `base_url like '%/v1'` 的渠道 → 以不带 `/v1` 重加 → 重试 ⇒ **PASS http=200 ttfb=0.345 data=52 done=1，logs 落库 1 条** |
+| 管理员口令丢了（`perfroot` 入库但无人持有口令） | 上一版把"写 Secret"排在取 token id 之后，前一步 exit 就带走了口令 | 恢复：删 `setups`+root+残留行 → `rollout restart` → `/api/setup` 门禁重开（`model/main.go:70 CheckSetup()` 启动时重算 `constant.Setup`；`createRootAccountIfNeed` 在本仓**无调用点**）→ **口令生成后立刻落 Secret**，再往下走 |
+
+### 21.3 S2 阶梯实测（30/100/300/500/800 × 60s，InvokeId `t-ida70hx49bm0sg0`）
+| 并发 | 成功流 | 吞吐 | 首字 P50/P95/P99 | 端到端 P50/P95 | 错误构成 | 网关 restarts |
+| --- | --- | --- | --- | --- | --- | --- |
+| 30 | 960 | 16.0 rps | 342/355/563 ms | 1.84/1.86 s | 30（**全部是在途**，非服务端错误） | 0→0 |
+| 100 | 3099 | 51.6 rps | 346/540/603 | 1.86/2.05 | 100（在途） | 0→0 |
+| 300 | 8281 | 138.0 rps | 718/902/1006 | 2.22/2.41 | 300（在途） | 0→0 |
+| 500 | 12522 | 208.7 rps | 978/1262/1441 | 2.48/2.76 | 500（在途） | 0→0 |
+| 800 | 15729 | 262.1 rps | 1493/2017/2249 | 3.00/3.52 | **11776，其中 `http_403=10976`** ⇒ **本轮该档作废** | 0→0 |
+
+**三条读数纪律**（都是本轮实测逼出来的，不是风格问题）：
+- **"错误=并发数"不是失败率**。驱动按墙钟收口，到点仍在途的连接被我计成"超时中留"，所以每档"错误"恰好等于 CONC；服务端侧 `restarts=0→0`、`phase=Running`、dev 邻居全 Ready。判读只认错误分布里的 `http_5xx`/`connfail_*`/`eof_status`。
+- **驱动不是瓶颈，但也不能不看**。`TIMEFORMAT` 实测：800 档 `real=60.04 user=4.60 sys=3.27` ⇒ 单核只用了 ≈8%，`user < real`（**不是**早期担心的"user≈real 单核到顶"）。所以这一档的数可以当网关侧观测用。
+- **`mock_requests_total` 单 Pod 采样 ≠ 集群合计**。mock 是 6 副本，一次经 ClusterIP 的 `curl /metrics` 只命中一个 Pod 的计数器（800 档读到 9107，而驱动侧成功流 16658）——**不能据此说上游丢请求**。已在输出里固定标注。
+
+### 21.4 800 档那个 42.81% 错误率：**我先读错了，再用一支可证伪的脚本纠正**
+- 我的第一读法："800 并发把网关打出了 403" ⇒ 会写成"容量拐点在 500–800 之间"。
+- 反证路径（`bodies/diag_perf_403.sh`，头注就写了**判据**：若是额度，"现在单发一条"也必须 403；若是限流，"现在重试就通"）：
+  - H1 `users: id=2 quota=-826490 used_quota=100826490 req=41532 status=1`；`tokens: unlimited=true`；`logs=41532`（全部 `type=2` 消费）。
+  - H2 现在单发一条：**http=403**，body 原文 `用户额度不足, 剩余额度: ＄-1.652980 … "code":"insufficient_user_quota"`。
+  - H3 网关日志同一条 `relay error: 用户额度不足` + `403 … 9.46 ms`。
+  - H4 `options` 只有 4 行，**没有任何 limit/quota/rate 配置** ⇒ 限流假设排除。
+- 结论：**那是测试夹具的钱包被压测本身吃光**（`service/billing_session.go:388` → `model.GetUserQuota`），**不是网关容量**。四档累计 40591 条成功流 × 单条 ≈2422 ≈ 1e8，正好等于 `/api/setup` 给 root 的初始 `quota=1e8`。
+- 处置（`bodies/topup_perf_quota.sh`，**只写 perf 库**：先 `select current_database()` 断言 `newapi_perf` 才允许 UPDATE）：`quota` 补到 **1.5e9**。两个顺带的实测收获：① `users.quota` 是 gorm `type:int` ⇒ **PG integer 上限 2147483647**，补额度不能凭感觉给；② **本部署未开 Redis ⇒ `GetUserQuota` 走 DB 直读，改完不重启立刻生效**（T2 单发 `http=200 ttfb=0.346`）。
+- 重测（`bodies/run_perf_sse_800_confirm.sh`，InvokeId `t-ida70hyqkue4kcg`，同参 800×60s + 前后哨兵）：**成功流=16658、吞吐=277.6 rps、首字 P50/P95/P99=1499/1940/2105 ms、端到端 P50/P95=3.00/3.44 s，`http_403=0`，`restarts=0→0`，dev/pre 邻居全 Ready**。哨兵跑前 `200/0.347s`、跑后 `200/2.20s`（跑后那条慢是网关还在排自己最后的连接，不是新故障）。
+- **这一档真正的上限是"并发数"自己给的**：`16658 ÷ 60s ≈ 277`，端到端 P50 3.0s ⇒ **277 ≈ 800 ÷ 3.0（Little 定律）**；而 3.0s ≈ mock 固有流长（300 ms 首字 + 52×30 ms ≈ 1.86 s）+ 排队。⇒ **没有测到系统天花板，只测到"800 并发能跑出 277 rps 且首字劣化到 1.5 s"**。要拿 C（单实例容量）必须固定副本数并继续加档直到 rps 不再随并发上升。
+- **同参第二样本（InvokeId `t-ida70i0bi1td0cg`，轮换 key 之后跑 ⇒ 顺带证明驱动从 Secret 取新 key 端到端可用）**：`成功流=16540、吞吐=275.7 rps、首字 P50/P95/P99=1492/1944/2130 ms、端到端 P50/P95=3.00/3.45 s、`http_403=0`、`restarts=0→0`、邻居全 Ready`。与第一样本差 **0.7%（277.6 → 275.7）** ⇒ 800 档这两个数是**可复现**的，不是单次噪声。
+  ⚠ **一个我没解释掉的观察（不吹成结论）**：mock 侧 `mock_errors_total` 从单 Pod 采样的 **15 → 299**（两次都只命中 6 副本中的 1 个，仍不同量级），而 mock 的 `ERROR_RATE=0`（§20.4 实测 env 形态）。**假设**：该计数在 mock 实现里把"客户端提前断开"也算 error——我们的驱动固定 `Connection: close` 且到点丢弃 800 条在途流 ⇒ 数量级正好对得上。**但这是假设，未验证**：要证必须 ① 按 Pod 逐个抓 `/metrics` 求和，② 读 mock 镜像里该计数器的定义（不在这份 fork 仓库内）。**在这一条闭合前，不许把 `mock_errors_total` 读成"上游故障率"**，也不许用它反推丢包。
+- 归因两侧都不饱和：网关 Pod `requests.cpu=1 / limits.cpu=2`，档位结束即刻采样 **883m / 224Mi**（≈limits 的 44%，且这是 metrics-server 的**衰减窗口**，不是档内峰值，不能当"打满"读）；RDS `pgm-d9j9p421lzx4gw73` 同窗口 **CPU 峰值 47.99%（09:20Z）/ 34.40%（09:34Z）**，基线中位 **0.333%**；**连接使用率峰值 11.72%**（MaxConnections=400 ⇒ ≈47 条）。⇒ **本轮不构成"瓶颈在 DB 规格"**（任务 33 那条判读规则这次不触发）。取数脚本 `deploy/jakarta_pre/poll_rds_cpu_window.sh`（`CpuUsage` + `ConnectionUsage`；`ActiveConnections` 这个指标名不存在，猜名会拿 400 且 body 不是 JSON）。
+
+### 21.5 副本数、凭据与我自己的另外两处错（都留证据，不销毁）
+- **1 副本不是我干的**：`managedFields` 实测 `mgr=OneConsole-App-CS op=Update time=2026-10-19T08:18:25Z`（控制台侧），事件 `Scaled down replica set new-api-perf-648988c6f from 2 to 1`；我这一侧最后一次动作是 `mgr=kubectl-rollout … 08:50:25Z`（恢复 setup 用的 restart）。§20.3 的 `2/2 Running` 与本轮的 `1/1` 都是真的，只是**分母变了**——所以跨轮比 rps 必须带副本数一起写。我没有把副本改回 2：**控制台里有人正在操作同一套夹具，抢改别人的显式决定风险高于收益**，列为待负责人裁定（见 21.7-①）。
+- **§18.7 我自己破了一次规**：`diag_perf_token.sh` 的 D0 为了判形态，把 `left(key,4)` 的**明文 4 个字符**打进了输出。规矩的存在理由恰恰是"任何取子串再打码的路径都会漏"。处置 = **轮换该令牌**（`bodies/rotate_perf_token.sh`：删旧 → 服务端生成新 key → 形态只用**计数**校验（`len=48 连字符=0 sk-前缀命中数=0`）→ 回写 Secret → 单发 SSE `200/0.343s/data=52`）。失效证据（`bodies/confirm_token_softdelete.sh`）：`id=2 alive=false deleted_at=2026-10-19 16:43:56+07`、`id=3 alive=true`、**有效令牌=1**、`Secret token_id=3` ⇒ 旧 key 已被 GORM 软删排除，应用侧查不到。
+  - 顺带两个 schema 事实：**`tokens` 有 `deleted_at` 软删，`channels` 没有该列**（我按直觉给 channels 加了 `deleted_at` 条件 ⇒ `column "deleted_at" does not exist`；`[X3] 只有一条活渠道`这一项**改由 W2 的 `channels=1` + 那一条是 `mock-perf` 直接证**，没有靠这条报错蒙混）。另 `users` 是 `used_quota` 不是 `used`，`tokens` 是 `remain_quota`/`used_quota`。
+  - ⚠ **同一支轮换脚本又给了我一课**：`fp()` 只读 `$1`，我却用 `… | fp` 管道喂 ⇒ `set -u` 报 `$1: unbound variable`，管道里的值被丢掉，算出来的是 **`md5(空串)=d41d8cd98f…`** ⇒ 那一行"指纹已变（d41d8cd98f → 2493e184da）"是**假证据**（比较对象根本是空串）。已把 `fp` 改成参数/管道两用，并**改用软删状态 + 新 key 能跑通 + token id 2→3** 三条实证据替代。教训与 §17.5/§20.6 同源：**函数契约要匹配调用方式，报错出现时先怀疑自己的取数，别把漂亮输出当验证。**
+- 口令/key 的去向：全部只在节点侧生成、直接落 k8s Secret `perf-load-test-credentials`；命令体、台账、会话输出**不含明文值**（只出长度/计数/md5 前 10 位：`admin_password len=24 fp=0411609137`、`token_key len=48 fp=2493e184da`）。**待办**：perf 的 root 口令轮换（口令曾以明文活在会话内过一次 shell 变量，属 §18.7 敏感面）。
+
+### 21.6 本轮新增/停用的脚本（都在 `deploy/jakarta_pre/`）
+新增：`bodies/probe_mock_contract.sh`、`check_perf_load_inputs.sh`、`readback_perf_scale.sh`、`wire_perf_a_setup.sh`、`wire_perf_b_channel.sh`、`diag_perf_token.sh`、`fix_perf_channel_url.sh`、`run_perf_sse_staircase.sh`（7658B，贴着 ECS RunCommand 15000B 门禁的余量：包装层 kubeconfig 就占 ≈7.1KB）、`diag_perf_403.sh`、`topup_perf_quota.sh`、`run_perf_sse_800_confirm.sh`（7664B）、`readback_perf_resources.sh`、`rotate_perf_token.sh`、`readback_perf_final_state.sh`、`confirm_token_softdelete.sh`、`poll_rds_cpu_window.sh`、`find_rds_conn_metric.sh`。
+停用：`bodies/wire_perf_relay.sh`（合并版，16519B 超门禁 + 内含已知错的 `base_url=…/v1`；**只加 SUPERSEDED 头注、不销毁**，正文里两处自曝仍是证据）。
+驱动 bug 登记：第一版 python 驱动在非阻塞 `connect_ex` 刚返回就 `sendall` ⇒ `BlockingIOError`，异常路径不登记连接，外层 `while len(conns) < CONC` **死循环空转**（100 并发即挂；本地 `| tail` 还把输出全缓冲，看起来像"压测卡死"）。修法：connect 后先注册 **EVENT_WRITE**，可写事件里再发；补齐循环改"每 tick 定量、绝不 while 自旋"。挂住的那次用 `aliyun ecs StopInvocation` 收的。
+
+### 21.7 未闭合（按需要负责人口径的程度排序）
+1. **perf 副本数要不要回到 2**（现在 1/1，是控制台侧缩的）⇒ 决定 S2 后续读数的分母；我不抢改。
+2. **1500 并发（原 S2 判据）与 S3 突发仍未测** ⇒ 任务 33 的 S2 在雅加达站记**「未达成」**，不是"通过"；要测 1500 需要先回答 ① 和额度预算（1500×10 min 级 ≈ 需 `quota` 远超 PG integer 上限 ⇒ **必须改用长流/短时长或每轮补额度**，不能靠一次补满）。
+3. **ResourceQuota 保持"不动"**（本轮裁定），因此共池无上限这一事实继续有效：perf 再压更高档位时，**dev/pre 邻居会被一起带走**——本轮 800 档没有（邻居全 Ready），但那是"没到量"而不是"有护栏"。
+4. 任务 45 的 MySQL 列（顺延 T+14）、Prepaid 续费（生产 PG 2026-10-28 / dev RDS 2026-11-12 / 日志 MySQL 2026-11-15）、仓库明文凭据脱敏与口令轮换（负责人 2026-10-19 早前口径「暂时不用管」，此处仅登记不执行）——继续携带。
+

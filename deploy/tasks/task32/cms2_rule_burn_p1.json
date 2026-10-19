@@ -1,0 +1,38 @@
+{
+  "workspace": "default-cms-5108890064395960-ap-southeast-1",
+  "displayName": "[P1] new-api 错误预算急速燃烧（1h >14.4x）",
+  "enabled": true,
+  "contentTemplate": "new-api 自身 5xx 错误率 {{ $value }}%（1h 窗口，>0.72% 即 14.4 倍燃烧）",
+  "labels": {"task": "task32", "slo": "availability", "site": "mnl"},
+  "annotations": {"runbook": "deploy/docs/任务32_SLO与值班_运行手册_2026-10-19.md"},
+  "datasourceConfig": {
+    "type": "SLS",
+    "project": "sls-newapi-mnl",
+    "stores": [{"store": "alb_access"}],
+    "regionId": "ap-southeast-6"
+  },
+  "queryConfig": {
+    "type": "SLS_MULTI_QUERY",
+    "queries": [
+      {
+        "project": "sls-newapi-mnl",
+        "store": "alb_access",
+        "start": "-1h",
+        "end": "now",
+        "query": "host: www.likha.hk | select count(*) as n, round(sum(case when status >= 500 and coalesce(upstream_status, 0) < 500 then 1 else 0 end) * 100.0 / count(*), 4) as own_pct"
+      }
+    ]
+  },
+  "conditionConfig": {
+    "type": "SLS_MULTI_CONDITION",
+    "operator": "GT",
+    "threshold": 0.72,
+    "severity": "CRITICAL",
+    "condition": "own_pct > 0.72"
+  },
+  "notifyConfig": {
+    "type": "NOTIFY_POLICY",
+    "notifyStrategies": ["6ff55b598b914557a018931a17f9eca8"]
+  },
+  "scheduleConfig": {"type": "FIXED", "intervalSecs": 60}
+}

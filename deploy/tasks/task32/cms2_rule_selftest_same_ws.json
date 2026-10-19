@@ -1,0 +1,12 @@
+{
+  "workspace": "default-cms-5108890064395960-ap-southeast-1",
+  "displayName": "[TEST] 策略同区自证（-1 工作区，触发后即删）",
+  "enabled": true,
+  "contentTemplate": "任务32 对照实验：-1 工作区 + 同一策略，验证是否跨工作区导致不投递",
+  "labels": {"task": "task32", "kind": "selftest", "scope": "same-workspace"},
+  "queryConfig": {"type": "PROMETHEUS_SINGLE_QUERY", "expr": "vector(1) > 0"},
+  "conditionConfig": {"type": "PROMETHEUS_SIMPLE_CONDITION", "durationSecs": 60, "severity": "CRITICAL"},
+  "datasourceConfig": {"type": "PROMETHEUS", "instanceId": "ca75829e3492d491d9d434de087913798"},
+  "notifyConfig": {"type": "NOTIFY_POLICY", "notifyStrategies": ["6ff55b598b914557a018931a17f9eca8"]},
+  "scheduleConfig": {"type": "FIXED", "intervalSecs": 60}
+}

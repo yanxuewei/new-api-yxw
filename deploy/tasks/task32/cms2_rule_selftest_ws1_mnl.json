@@ -1,0 +1,12 @@
+{
+  "workspace": "default-cms-5108890064395960-ap-southeast-1",
+  "displayName": "[TEST] 跨区实例+同区策略（触发后即删）",
+  "enabled": true,
+  "contentTemplate": "任务32 实验：-1 工作区策略 + 马尼拉 Prometheus 实例，验证是否可达",
+  "labels": {"task": "task32", "kind": "selftest", "scope": "cross-region-ds"},
+  "queryConfig": {"type": "PROMETHEUS_SINGLE_QUERY", "expr": "vector(1) > 0"},
+  "conditionConfig": {"type": "PROMETHEUS_SIMPLE_CONDITION", "durationSecs": 60, "severity": "CRITICAL"},
+  "datasourceConfig": {"type": "PROMETHEUS", "instanceId": "cd57e40ce9a634c1698c2f5c5e09bd93c"},
+  "notifyConfig": {"type": "NOTIFY_POLICY", "notifyStrategies": ["6ff55b598b914557a018931a17f9eca8"]},
+  "scheduleConfig": {"type": "FIXED", "intervalSecs": 60}
+}

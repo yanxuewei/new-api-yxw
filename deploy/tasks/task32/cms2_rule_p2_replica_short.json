@@ -1,0 +1,25 @@
+{
+  "workspace": "default-cms-5108890064395960-ap-southeast-6",
+  "displayName": "[P2] new-api 副本不足（部分不可用）",
+  "enabled": true,
+  "contentTemplate": "new-api 可用副本数低于期望值，扩容/调度可能受阻",
+  "labels": {"task": "task32", "slo": "availability", "site": "mnl", "severity": "warning"},
+  "queryConfig": {
+    "type": "PROMETHEUS_SINGLE_QUERY",
+    "expr": "sum(kube_deployment_status_replicas_available{namespace=\"new-api\"}) < sum(kube_deployment_spec_replicas{namespace=\"new-api\"})"
+  },
+  "conditionConfig": {
+    "type": "PROMETHEUS_SIMPLE_CONDITION",
+    "durationSecs": 300,
+    "severity": "WARN"
+  },
+  "datasourceConfig": {
+    "type": "PROMETHEUS",
+    "instanceId": "cd57e40ce9a634c1698c2f5c5e09bd93c"
+  },
+  "notifyConfig": {
+    "type": "NOTIFY_POLICY",
+    "notifyStrategies": ["6ff55b598b914557a018931a17f9eca8"]
+  },
+  "scheduleConfig": {"type": "FIXED", "intervalSecs": 60}
+}

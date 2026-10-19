@@ -1,0 +1,26 @@
+{
+  "workspace": "default-cms-5108890064395960-ap-southeast-6",
+  "displayName": "[P1] new-api 生产无可用副本（站点不可用）",
+  "enabled": true,
+  "contentTemplate": "new-api 命名空间（马尼拉生产）可用副本数已为 0，站点不可用；请立即按运行手册 P1 处置",
+  "labels": {"task": "task32", "slo": "availability", "site": "mnl", "severity": "critical"},
+  "annotations": {"runbook": "deploy/docs/任务32_SLO与值班_运行手册_2026-10-19.md"},
+  "queryConfig": {
+    "type": "PROMETHEUS_SINGLE_QUERY",
+    "expr": "sum(kube_deployment_status_replicas_available{namespace=\"new-api\"}) < 1"
+  },
+  "conditionConfig": {
+    "type": "PROMETHEUS_SIMPLE_CONDITION",
+    "durationSecs": 60,
+    "severity": "CRITICAL"
+  },
+  "datasourceConfig": {
+    "type": "PROMETHEUS",
+    "instanceId": "cd57e40ce9a634c1698c2f5c5e09bd93c"
+  },
+  "notifyConfig": {
+    "type": "NOTIFY_POLICY",
+    "notifyStrategies": ["6ff55b598b914557a018931a17f9eca8"]
+  },
+  "scheduleConfig": {"type": "FIXED", "intervalSecs": 60}
+}

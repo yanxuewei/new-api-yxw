@@ -1,0 +1,27 @@
+{
+  "workspace": "default-cms-5108890064395960-ap-southeast-6",
+  "displayName": "[P1] new-api ALB 5xx 急速燃烧（>0.05 次/秒）",
+  "enabled": true,
+  "contentTemplate": "马尼拉 ALB（www.likha.hk）5xx 速率 {{ $value }} 次/秒，超过错误预算阈值",
+  "labels": {"task": "task32", "slo": "availability", "site": "mnl", "kind": "burn", "severity": "critical"},
+  "datasourceConfig": {"type": "CLOUD_MONITORING", "productCategory": "acs_alb"},
+  "queryConfig": {
+    "type": "CLOUD_MONITORING_QUERY",
+    "namespace": "acs_alb",
+    "metric": "AliyunAlb_LoadBalancerHTTPCode5XX",
+    "dimensions": [{"loadBalancerId": "alb-1riqckb1h8ezm0y7s9"}]
+  },
+  "conditionConfig": {
+    "type": "CLOUD_MONITORING_CONDITION",
+    "escalationType": "simple",
+    "simpleEscalation": {
+      "metricName": "AliyunAlb_LoadBalancerHTTPCode5XX",
+      "period": 60,
+      "escalations": [
+        {"severity": "CRITICAL", "threshold": 0.05, "comparisonOperator": "GreaterThanThreshold", "times": 3}
+      ]
+    }
+  },
+  "notifyConfig": {"type": "NOTIFY_POLICY", "notifyStrategies": ["6ff55b598b914557a018931a17f9eca8"]},
+  "scheduleConfig": {"type": "FIXED", "intervalSecs": 60}
+}

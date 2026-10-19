@@ -1,0 +1,25 @@
+{
+  "workspace": "default-cms-5108890064395960-ap-southeast-6",
+  "displayName": "[P3] new-api 容器频繁重启（15m >3 次）",
+  "enabled": true,
+  "contentTemplate": "new-api 命名空间 15 分钟内累计重启 {{ $value }} 次，检查探针/OOM/依赖",
+  "labels": {"task": "task32", "slo": "stability", "site": "mnl", "severity": "info"},
+  "queryConfig": {
+    "type": "PROMETHEUS_SINGLE_QUERY",
+    "expr": "sum(increase(kube_pod_container_status_restarts_total{namespace=\"new-api\"}[15m])) > 3"
+  },
+  "conditionConfig": {
+    "type": "PROMETHEUS_SIMPLE_CONDITION",
+    "durationSecs": 300,
+    "severity": "INFO"
+  },
+  "datasourceConfig": {
+    "type": "PROMETHEUS",
+    "instanceId": "cd57e40ce9a634c1698c2f5c5e09bd93c"
+  },
+  "notifyConfig": {
+    "type": "NOTIFY_POLICY",
+    "notifyStrategies": ["6ff55b598b914557a018931a17f9eca8"]
+  },
+  "scheduleConfig": {"type": "FIXED", "intervalSecs": 60}
+}

@@ -1,0 +1,16 @@
+{
+  "workspace": "default-cms-5108890064395960-ap-southeast-6",
+  "displayName": "[TEST] P1 电话通路自证（触发后即删）",
+  "enabled": true,
+  "contentTemplate": "这是任务 32 的 P1 电话通道自证测试，收到即说明链路通；无需处置",
+  "labels": {"task": "task32", "kind": "selftest", "severity": "critical"},
+  "queryConfig": {"type": "PROMETHEUS_SINGLE_QUERY", "expr": "vector(1) > 0"},
+  "conditionConfig": {"type": "PROMETHEUS_SIMPLE_CONDITION", "durationSecs": 0, "severity": "CRITICAL"},
+  "datasourceConfig": {"type": "PROMETHEUS", "instanceId": "cd57e40ce9a634c1698c2f5c5e09bd93c"},
+  "notifyConfig": {
+    "type": "DIRECT_NOTIFY",
+    "channels": [{"type": "CONTACT", "identifiers": ["ack___ack_5108890064395960_38792304571476465"]}],
+    "silenceTimeSecs": 300
+  },
+  "scheduleConfig": {"type": "FIXED", "intervalSecs": 60}
+}
