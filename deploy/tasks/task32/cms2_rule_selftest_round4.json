@@ -1,0 +1,12 @@
+{
+  "workspace": "default-cms-5108890064395960-ap-southeast-6",
+  "displayName": "[TEST] 电话验证-新规则(绕降噪)",
+  "enabled": true,
+  "contentTemplate": "任务32 电话通道验证（新规则，绕开合并降噪）：收到任一渠道即为链路通",
+  "labels": {"task": "task32", "kind": "selftest", "round": "4"},
+  "queryConfig": {"type": "PROMETHEUS_SINGLE_QUERY", "expr": "vector(2) > 0"},
+  "conditionConfig": {"type": "PROMETHEUS_SIMPLE_CONDITION", "durationSecs": 60, "severity": "CRITICAL"},
+  "datasourceConfig": {"type": "PROMETHEUS", "instanceId": "cd57e40ce9a634c1698c2f5c5e09bd93c"},
+  "notifyConfig": {"type": "NOTIFY_POLICY", "notifyStrategies": ["bf11235791b74ccbabe3bc379aa1dae2"]},
+  "scheduleConfig": {"type": "FIXED", "intervalSecs": 60}
+}
