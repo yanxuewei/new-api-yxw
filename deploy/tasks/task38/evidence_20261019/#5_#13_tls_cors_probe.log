@@ -1,0 +1,131 @@
+################ www.likha.hk 2026-10-19T05:29:16Z
+--- resolved A/AAAA ---
+  A: 8.212.161.49,8.212.183.7
+  AAAA: ERR gaierror
+--- TLS version negotiation (expect 1.0/1.1 REJECT, 1.2/1.3 ACCEPT) ---
+  tls1: REJECT (no protocols available)
+  tls1_1: REJECT (no protocols available)
+  tls1_2: ACCEPT Cipher    : ECDHE-RSA-AES128-GCM-SHA256 Protocol  : TLSv1.2
+  tls1_3: ACCEPT  
+--- weak suite attempts (expect all REJECT) ---
+  NULL-SHA: reject
+  EXP-RC4-MD5: reject
+  RC4-SHA: reject
+  DES-CBC3-SHA: reject
+  AES128-SHA: reject
+  AES256-SHA: reject
+--- cert identity + expiry + chain ---
+  chain_blocks=3
+  subject=CN = *.likha.hk
+  issuer=C = CN, O = "Aliyun Computing Co, Ltd.", CN = Aliyun RSA TLS DV G1
+  Verify return code: 0 (ok)
+--- response headers (HSTS + security headers) over HTTPS ---
+  HTTP/2 200 
+--- #13 CORS: cross-origin preflight/simple ---
+  HTTP/2 200 
+  HTTP/2 204 
+  access-control-allow-credentials: true
+  access-control-allow-headers: *
+  access-control-allow-methods: GET,POST,PUT,DELETE,OPTIONS
+  access-control-allow-origin: *
+  access-control-max-age: 43200
+--- plain HTTP: expect redirect to HTTPS (or documented bare-IP accept) ---
+  HTTP/1.1 301 Moved Permanently
+  Location: https://www.likha.hk/api/status
+
+################ sg.likha.hk 2026-10-19T05:29:33Z
+--- resolved A/AAAA ---
+  A: 43.98.186.238,47.237.68.142
+  AAAA: ERR gaierror
+--- TLS version negotiation (expect 1.0/1.1 REJECT, 1.2/1.3 ACCEPT) ---
+  tls1: REJECT (no protocols available)
+  tls1_1: REJECT (no protocols available)
+  tls1_2: ACCEPT Cipher    : ECDHE-RSA-AES128-GCM-SHA256 Protocol  : TLSv1.2
+  tls1_3: ACCEPT  
+--- weak suite attempts (expect all REJECT) ---
+  NULL-SHA: reject
+  EXP-RC4-MD5: reject
+  RC4-SHA: reject
+  DES-CBC3-SHA: reject
+  AES128-SHA: reject
+  AES256-SHA: reject
+--- cert identity + expiry + chain ---
+  chain_blocks=3
+  subject=CN = *.likha.hk
+  issuer=C = CN, O = "Aliyun Computing Co, Ltd.", CN = Aliyun RSA TLS DV G1
+  Verify return code: 0 (ok)
+--- response headers (HSTS + security headers) over HTTPS ---
+  HTTP/2 200 
+--- #13 CORS: cross-origin preflight/simple ---
+  HTTP/2 200 
+  HTTP/2 204 
+  access-control-allow-credentials: true
+  access-control-allow-headers: *
+  access-control-allow-methods: GET,POST,PUT,DELETE,OPTIONS
+  access-control-allow-origin: *
+  access-control-max-age: 43200
+--- plain HTTP: expect redirect to HTTPS (or documented bare-IP accept) ---
+  HTTP/1.1 200 OK
+
+################ likha.hk 2026-10-19T05:29:43Z
+--- resolved A/AAAA ---
+  A: 8.212.161.49,8.212.183.7
+  AAAA: ERR gaierror
+--- TLS version negotiation (expect 1.0/1.1 REJECT, 1.2/1.3 ACCEPT) ---
+  tls1: REJECT (no protocols available)
+  tls1_1: REJECT (no protocols available)
+  tls1_2: ACCEPT Cipher    : ECDHE-RSA-AES128-GCM-SHA256 Protocol  : TLSv1.2
+  tls1_3: ACCEPT  
+--- weak suite attempts (expect all REJECT) ---
+  NULL-SHA: reject
+  EXP-RC4-MD5: reject
+  RC4-SHA: reject
+  DES-CBC3-SHA: reject
+  AES128-SHA: reject
+  AES256-SHA: reject
+--- cert identity + expiry + chain ---
+  chain_blocks=3
+  subject=CN = *.likha.hk
+  issuer=C = CN, O = "Aliyun Computing Co, Ltd.", CN = Aliyun RSA TLS DV G1
+  Verify return code: 0 (ok)
+--- response headers (HSTS + security headers) over HTTPS ---
+  HTTP/2 308 
+--- #13 CORS: cross-origin preflight/simple ---
+  HTTP/2 308 
+  HTTP/2 308 
+--- plain HTTP: expect redirect to HTTPS (or documented bare-IP accept) ---
+  HTTP/1.1 301 Moved Permanently
+  Location: https://www.likha.hk/api/status
+
+################ img.likha.hk 2026-10-19T05:30:09Z
+--- resolved A/AAAA ---
+  A: 8.212.139.178
+  AAAA: ERR gaierror
+--- TLS version negotiation (expect 1.0/1.1 REJECT, 1.2/1.3 ACCEPT) ---
+  tls1: REJECT (no protocols available)
+  tls1_1: REJECT (no protocols available)
+  tls1_2: ACCEPT Cipher    : ECDHE-RSA-AES128-GCM-SHA256 Protocol  : TLSv1.2
+  tls1_3: REJECT (alert protocol version
+alert number )
+--- weak suite attempts (expect all REJECT) ---
+  NULL-SHA: reject
+  EXP-RC4-MD5: reject
+  RC4-SHA: reject
+  DES-CBC3-SHA: reject
+  AES128-SHA: ACCEPT  <-- weak suite live
+  AES256-SHA: ACCEPT  <-- weak suite live
+--- cert identity + expiry + chain ---
+  chain_blocks=3
+  subject=CN = *.likha.hk
+  issuer=C = CN, O = "Aliyun Computing Co, Ltd.", CN = Aliyun RSA TLS DV G1
+      Verify return code: 0 (ok)
+--- response headers (HSTS + security headers) over HTTPS ---
+  HTTP/1.1 404 Not Found
+  Server: AliyunOSS
+--- #13 CORS: cross-origin preflight/simple ---
+  HTTP/1.1 404 Not Found
+  HTTP/1.1 403 Forbidden
+--- plain HTTP: expect redirect to HTTPS (or documented bare-IP accept) ---
+  HTTP/1.1 404 Not Found
+  Server: AliyunOSS
+

@@ -1421,3 +1421,46 @@ stdout 路不受影响（纳秒来自 runtime `_time_`）。属既有挂账 G8�
 
 - **node-exporter**：jkt 的 DS 引用 `acs/node-exporter:v1.9.1-6a53edf`，该 tag 在 ap-southeast-5 镜像仓 **NotFound**（3 天 2 万次 BackOff）；mnl 同 DS 用 **`v0.17.0-slim`**（4 台 2/2 Running 16 天）。修法：节点上 `crictl pull` 先验证 `-5` 仓**确有** `v0.17.0-slim` → `kubectl set image ds/node-exporter node-exporter=…:v0.17.0-slim`（不动已 Ready 的 kube-rbac-proxy）→ 一次滚动 **3/3 全 2/2 Running**，**全集群 Pending 清零**。⚠ DS 由 arms 附加组件管理，升级可能回滚 tag（届时同命令重打）。
 - **第 4 台节点（负责人称已加）实测未建成**：节点池 `desired=4 / actual=3`，ESS 伸缩活动 12:51–12:53 **连续 Failed**（Total Capacity 3→4），余额 **-56.15 USD** 继续走负 ⇒ 与 §17 perf 同款 `Account.Arrearage` 阻断，**充值到账前建不出**；到账后若 ESS 不自动重试，用 `cs ScaleClusterNodePool --count 4` 再触发。
+
+## 20. 任务 45 的 perf 半边落地（2026-10-19，**共池裁定 + 换池副作用**）
+
+### 20.1 裁定变更与其证据
+负责人 2026-10-19：**「账号已经有钱了，原来的节点池已经更换了更强的机型，这两个环境可以复用新的节点池」** ⇒ 一次性作废三件旧口径：
+- **余额到账**：`QueryAccountBalance` = **+2,306.38 USD**（§17/§18 的 -43.81 / -51.97 / -56.15 全部成为历史；`Account.Arrearage` 这个阻断条件自此消失，perf 不必再建池）。
+- **旧池整体替换**：`DescribeClusterNodePools` 只回 **1 个池** —— `np72446b422a6441c0bc96762a796aed26` / **`np-jkt-dev-x4c`**，`types=ecs.g9i.xlarge`、`nodes=2`、PostPaid、`auto_scaling.enable=true`、**taints 为空**、labels `site=jkt-dev,track=dev,env=dev,project=new-api`。旧池 `np-jkt-dev-app`（npd3cc9d7f…）**已不在清单里** ⇒ §19.4 遗留①（容量贴顶）与 §19.5（第 4 台建不出）是被"换更强机型"这条路解决的，不是被加节点解决的。
+- **perf 不再独占机器** ⇒ 原"专用池 + taint + nodeSelector"整套设计作废，`perf_nodepool.json` 就此**作废但保留**（我不替负责人销毁核准证据）。
+
+新池实测容量（K1/K2/S5，只读）：两台节点 allocatable 各 **3920m / 14.0 Gi**（合计 7840m）；perf 上线**后**全集群 requests **4.56 核**，单机分别 2.40 / 2.16 ⇒ 每节点还剩 **1.5–1.76 核**。对照 §17.2-6（旧池 3×1930m 已请求 1.69–1.80 核，pre 被迫降到 100m 才排进去）⇒ pre 的 `resources` 现在是被**低估**而不是被压死的，但那是"要不要重开 pre 口径"的另一个决定，本轮没动它。
+
+### 20.2 换池把我自己的一个隐藏假设打断了（本轮唯一的"我踩的坑"）
+`deploy/lib/ack_remote_jkt_dev.sh` 的默认落点机器是**硬编码**的 `NODE_ARG="${2:-i-k1afy1aqgdl8rwa9gxvf}"`。换池把 ECS 实例一起换掉 ⇒ 这个 id 指向的实例已释放，**所有** `run_body` 调用（含已验收的 pre 链路）都会打在死实例上，报出来的是"云助手命令失败"，看起来像我的脚本坏了。
+- 现网新实例（N2 回读）：`i-k1afs8wedv35rai4pmx2`（10.2.25.190，5a）、`i-k1aen3t7wrqv5j66uzj8`（10.2.90.173，5c）。
+- 修法不是换个新 id（`auto_scaling.enable=true` ⇒ id 会继续变，那只是把定时炸弹往后推）：**改成每次现取** —— `DescribeClusterNodes` 选第一个 `state=running` 的实例，取不到就**当场终止**（不向已释放实例发命令，也不猜 id）。已实测生效：本轮 4 次调用都打出 `动态选定节点=i-k1afs8wedv35rai4pmx2（DescribeClusterNodes 现取，未写死）`。
+- 教训（与 §17.5 同源）：**配置里写死的资源 id，要在它依赖的那个东西会漂移时立刻质疑**——节点池弹性 = 实例 id 会漂移，而弹性开关是别人今天打开的。
+- ⚠ **必须写实名的一点**：这不是新发现。同一份指南里**早有这条坑** —— `deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md:1974` 任务 13 **坑 9**：「用固定实例 ID 跑跨时长的节点验证：ACK 节点池随时在滚……此前登记的 ID 下一轮 `RunCommand` 就 `InvalidInstance.NotFound`。**改进**：**在同一个脚本内先取 Running 节点，再立刻 `RunCommand`，不在脚本之间传 ID**」。我的通道脚本恰恰违反了这句已登记的改进（还把 id 写进了脚本默认的 `${2:-...}`，比"脚本之间传 ID"更糟）。⇒ 结论修正：**踩坑的不是"没人提醒"，是我建的脚本没有遵守已经写在主文档里的规则**。落地修法与坑 9 的改进语句逐字一致（同一次调用内现取 Running 实例）。以后新建任何走云助手的脚本，**先按坑 9 自检有没有硬编码实例 id**。
+
+### 20.3 perf 落地全链路（四步，每步都有回读）
+1. `--perf-gen-secret`：`perf_session_secret` 现场生成，**跨环境反证 = `perf 6830c01d0d30` / `dev 734c5af1db1d` / `pre 881a665a44ff`，两两不同**（坑 1 的判据）；两条 DSN 打码后形如 `postgres://newapi:***@pgm-d9j9p421lzx4gw73…:6432/newapi_perf?sslmode=require`，只落保管目录（600）。
+2. `--perf-apply-secret`：`secret/new-api-secrets created`。body 的 K1/K2 只出**键名 + 字节数 + host/port/db/user**，口令不进命令体；K6 顺带回了 dev 的 5 个负载指纹（未扰动）。
+3. `PERF_APPROVAL=shared-pool-approved --perf-apply`：P0/P1 门禁按新口径重写（**载荷里出现 nodeSelector/toleration 直接拒**，因为共池后那是错的；占位符残留检测从"只查 nodepool"改成"查任何 `__X__`"）。结果 `configmap/deployment/service created` → `rollout_rc=0` → **2/2 Running**，两副本分别落 **5a 与 5c**（`topologySpreadConstraints` 生效），SA=`new-api-app`，镜像跨区免密拉取成功。
+4. `--smoke perf`（冒烟 body 参数化后复用 pre 的同一套判据，不是另写一套）：
+   - **V1b PG**：`conn=newapi_migrate@newapi_perf ssl=1`、`tables=42`、`users` 表存在 ⇒ **6432 托管池真的在承载业务**（比 TCP 握手强）。
+   - **V1c 权限链**：`select count(*) from options` ⇒ 2 行可读；`create table` ⇒ **`ERROR: permission denied for schema public`** ⇒ 运行账号收权符合裁定 ①。
+   - **V2 SQLite**：`ready=1（轮询 1 次）`、日志自证 `SQL_DSN not set, using SQLite as database` + `database migration started` + `ready in 242 ms`、`/data/one-api.db` 已建 ⇒ PASS。
+   - **V3④**：`http://new-api-perf.new-api-perf.svc.cluster.local/api/status` 返回正常 JSON（只在本 ns 内可路由，无 Ingress/ALB ⇒ 与生产彻底隔离那条仍然成立）。
+
+### 20.4 意外发现：`new-api-perf` 里有一个**不是我建的** `mock-upstream`
+冒烟 V3③ 的对象清单里冒出 `deployment.apps/mock-upstream 6/6`（svc ClusterIP 80）。按"陌生对象先归因再用"的规矩查了：
+- **时间线**：`created=2026-10-19T05:23:04Z`，`managers=kubectl-client-side-apply + kube-controller-manager` ⇒ 有人 `kubectl apply`，且**早于我 05:26 的 perf apply**，不是我任何 body 的产物。
+- **形状**：镜像 `newapi-dev/mock-upstream:20261019-4788bec2e`（tag 日期=今天），容器口 **8080**（svc 80→8080），`requests 100m/128Mi`、`limits 1C/512Mi`，env 只有 7 个键：`FIRST_TOKEN_DELAY_MS / TOKEN_INTERVAL_MS / TOKENS_PER_RESPONSE / TOKEN_TEXT_BYTES / ERROR_RATE / ERROR_STATUS / EXTRA_LATENCY_MS`（值不外显）。
+- **与指南对得上**：`deploy/阿里云国际站菲律宾部署_详细操作指南-v2.0.md:6181-6187` 任务 33 步骤 2  prescribed 的 mock 正是"6 副本 + 这几个延迟/错误率旋钮 + 期望 `6/6 Running`" ⇒ **现网已按卡片把 mock 建好**，判据达成。
+- **意义**：perf 侧原先"没有可用上游、压测只能靠真实厂商（会被打死并触发风控）"这条阻断（§17.6 的 ③）已由 mock 解除，**任务 33 的前置条件之一提前满足**。
+- **未闭合的一点**：从 perf Pod 里 `wget http://mock-upstream.new-api-perf.svc.cluster.local/` 回的是**空响应体**（`/` 根路径可能就是空 body）。SSE 压测要的是 `/v1/chat/completions`，**这条链路的契约我还没实测**，不能因为 Pod 6/6 Running 就说"压测上游可用"。
+
+### 20.5 本轮登记的三个缺口（都不是"顺手能修"的，需要负责人口径）
+1. **ResourceQuota 三 ns 全空**：K5 实测 `new-api-pre` / `new-api-perf` 都 `No resources found`，与卡片步骤 1 的"配额总账"口径不符。`bodies/create_ns.sh` 里那套配额数字（pre 1C/perf 4C）是按**旧池 + 独立 perf 池**算的，现池与裁定都变了 ⇒ **我没有擅自重建**（别人删掉的东西重建回去，风险高于收益），改在 `apply_pre_app.sh` 的 A7 里如实标 `[缺口]` 并打回读。**待裁定**：共池后要不要给 perf/pre 上限（不给的话 perf 一压起来会把 dev/pre 一起带走）。
+2. **dev 基线已换代**：`newapi-dev` 现在是 **5 个负载**（多了 `new-api-channel-task-dev`、`yxw-new-api-master`、`yxw-new-api-slave`），镜像也分两档（`20261016-dcd62278` 与 `20261015-c62445555`）。旧文档写"三个负载身份指纹"的判据已过期，本轮读数以 S6/A6/K6 的 5 行指纹为新基线（三处互证，全部 0 重启）。
+3. **perf 的档位撑不起任务 33 的 S2**：S2 判据是 **1500 并发 SSE**，perf 现在是 2 副本 × limits 2C（共池余量只剩 1.5–1.76 核/节点）⇒ 真按卡片压会先撞**网关副本**和**共池邻居**，测不到应用容量。这是任务 33 的前置缺口，不是任务 45 的（本轮不动）。
+
+### 20.6 我自己这轮的第二个小 bug（同类于 §17.5，登记为可读性证据）
+`readback_perf_state.sh` 的 S3 用了一条 jsonpath 把 `labels` 和 `annotations` 写进**同一个字符串字面量**：`{"\n    annotations={.metadata.annotations}"` —— `{` 在字符串里又起了一个 action，解析器报 `unrecognized character in action: U+005C '\'`。前半段（managers/times/created/uid）已正常返回，所以**归因证据没受影响**，labels/annotations 这一项没读到。修法：一个 `-o jsonpath` 只出一个字段组，别在字面量里嵌 `{}`。⚠ 同 §17.5 的规矩：**报错输出不等于对象不存在**，这里我明确写了"这一项没读到"，没有把报错读成"mock 没有标签"。

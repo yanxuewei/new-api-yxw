@@ -15,7 +15,17 @@ set -uo pipefail
 REGION=ap-southeast-5
 CID=cb0abf5bc06034f7bbdb991752f6f3e62
 BODY="${1:?body file required}"
-NODE_ARG="${2:-i-k1afy1aqgdl8rwa9gxvf}"
+NODE_ARG="${2:-}"
+# 默认节点**不写死**：2026-10-19 实测节点池 np-jkt-dev-app 已被整体替换为 np-jkt-dev-x4c
+# （2 × ecs.g9i.xlarge，auto_scaling.enable=true）⇒ 原先硬编码的 i-k1afy1aqgdl8rwa9gxvf 随旧实例
+# 一起消失，且开了弹性后实例 id 会继续变。这里每次现取一个 state=running 的实例，
+# 拿不到就直接失败（不猜 id，免得命令打到已释放实例上还报成"应用有问题"）。
+if [ -z "$NODE_ARG" ]; then
+  NODE_ARG=$(aliyun cs DescribeClusterNodes --ClusterId "$CID" --region "$REGION" 2>/dev/null \
+    | jq -r '[.nodes[]? | select(.state=="running") | .instance_id] | first // empty')
+  [ -n "$NODE_ARG" ] || { echo "[!] 集群 $CID 没有 state=running 的节点 ⇒ 终止（不向已释放实例发命令）"; exit 1; }
+  echo "[i] 动态选定节点=$NODE_ARG（DescribeClusterNodes 现取，未写死）"
+fi
 RUN_ID="$(date +%s)-$$-${RANDOM}"
 TMPD="/tmp/ackctl-jkt-dev"
 RW="${TMPD}/remote_body.${RUN_ID}.sh"

@@ -216,18 +216,29 @@ apply_pre_app() {
   run_body apply_pre_app.sh preapp "DOCS_B64=$(pack_dir "$WORK/docs")"
 }
 
-pre_smoke() {
+pre_smoke() {  # --smoke [pre|perf]；不给参数 = pre，历史口径逐字不变
   # 拆两次调用：单条 body + 通道外层包装必须 <15000B（实测合并后 15270B 被 CmdContentExceedLimit 拦）
-  run_body smoke_pre.sh presmoke
-  run_body smoke_sqlite.sh presmokesqlite
+  local t="${1:-pre}" ns track app
+  case "$t" in
+    pre)  ns=new-api-pre;  track=pre;  app=new-api-pre ;;
+    perf) ns=new-api-perf; track=perf; app=new-api-perf ;;
+    *) die "--smoke 只接受 pre|perf（当前='$t'）" ;;
+  esac
+  notice "冒烟目标=$t（ns=$ns 判据与另一轨道完全相同，只是换轨道）"
+  run_body smoke_pre.sh "smoke-$t" "NS=$ns" "TRACK=$track" "APP=$app"
+  run_body smoke_sqlite.sh "smokesqlite-$t" "NS=$ns" "APP=$app" "TRACK=$track"
 }
 diag_pending() { run_body diag_pending.sh diagpending; }
 
-# ---- 步骤 5 的 perf 半边（2026-10-16 补齐产物；**建池是费用操作 ⇒ 一律带门禁**）----
+# ---- 步骤 5 的 perf 半边 ----
+# 2026-10-16 口径：先建专用节点池（新增 ECS 费用）再 apply ⇒ 门禁绑在"池存在 + cost-approved"。
+# **2026-10-19 裁定变更**：原节点池已换成更强机型（np-jkt-dev-x4c，2 × g9i.xlarge），
+# pre 与 perf 都复用这张池 ⇒ 不再建池、不再钉 nodeSelector；门禁改成"共池核准"。
+# 建池载荷 perf_nodepool.json 就此作废，**保留不删**作审计痕迹（我不替负责人销毁核准证据）。
 PERF_MANIFEST="$HERE/new-api-perf.yaml"
 PERF_NS=new-api-perf
 PERF_DB=newapi_perf
-PERF_POOL_NAME=${PERF_POOL_NAME:-np-jkt-perf}
+PERF_POOL_NAME=${PERF_POOL_NAME:-np-jkt-perf}   # 仅历史口径；现网实际共用池名 np-jkt-dev-x4c
 
 perf_pool_state() {  # 只读：专用节点池是否存在（存在 = 已核准并产生费用）
   aliyun cs DescribeClusterNodePools --ClusterId "$CID" --region "$REGION" 2>&1 \
@@ -279,21 +290,22 @@ apply_perf_secret() {
   rm -rf "$WORK/sec"
 }
 
-render_perf() {  # 只渲染，不落集群；节点池不存在 ⇒ 拒绝（占位符不替换就没有 nodeSelector）
+render_perf() {  # 只渲染，不落集群。裁定 2026-10-19：perf 复用 dev 站新池 ⇒ 不再注入 nodepool-id
   [ -f "$PERF_MANIFEST" ] || die "缺清单 $PERF_MANIFEST"
-  local np json
-  json=$(aliyun cs DescribeClusterNodePools --ClusterId "$CID" --region "$REGION" 2>&1)
-  np=$(printf '%s' "$json" | jq -r --arg n "$PERF_POOL_NAME" '[.nodepools[]? | select(.nodepool_info.name==$n) | .nodepool_info.nodepool_id] | first // empty')
-  [ -n "$np" ] || die "P0 门禁：节点池 '$PERF_POOL_NAME' 不存在 ⇒ perf 不许落地。建池 = 新增 ECS 费用（红线），需负责人书面核准；perf 与 dev/pre 共机也已被实测否决（requests 已饱和，台账 §17.2-6）"
-  notice "P0 通过：$PERF_POOL_NAME = $np（已存在 ⇒ 费用已核准）"
+  # P0 门禁（口径已从"专用池必须存在"换成"共池不许再钉机器"）：清单里若还残留
+  # nodeSelector / tolerations / nodepool 占位符，说明有人在换池后把旧设计抄了回来 ⇒ 直接拒。
+  if grep -qE '^[[:space:]]*(nodeSelector|tolerations):|__PERF_NODE' "$PERF_MANIFEST"; then
+    die "P0 门禁：清单仍含 nodeSelector/tolerations 或 nodepool 占位符 ⇒ 与裁定 2026-10-19（pre/perf 共池）冲突"
+  fi
   local cm ck
   cm=$(awk 'BEGIN{RS="\n---\n"} /kind: ConfigMap/ {print}' "$PERF_MANIFEST")
   [ -n "$cm" ] || die "清单里找不到 ConfigMap 文档"
   ck=$(printf '%s' "$cm" | sha256sum | cut -c1-12)
   mkdir -p "$WORK/docs"
-  sed -e "s/__CONFIG_CHECKSUM__/$ck/" -e "s/__PERF_NODEPOOL_ID__/$np/" "$PERF_MANIFEST" > "$WORK/rendered.yaml"
-  grep -q "__PERF_NODE_SELECTOR__" "$WORK/rendered.yaml" && die "P1 门禁：nodeSelector 键名仍是占位符 ⇒ 拒绝 apply"
-  notice "checksum/config=$ck  nodeSelector=ack.alibabacloud.com/nodepool-id=$np"
+  sed -e "s/__CONFIG_CHECKSUM__/$ck/" "$PERF_MANIFEST" > "$WORK/rendered.yaml"
+  # P1 门禁：任何未替换的 __X__ 占位符都不许进集群（configmap 名里合法不含下划线对，误写立即暴露）
+  grep -qE '__[A-Z][A-Z_]+__' "$WORK/rendered.yaml" && die "P1 门禁：仍有未替换占位符 ⇒ 拒绝 apply"
+  notice "P0/P1 通过：共池（无 nodeSelector/toleration）  checksum/config=$ck"
   python3 - "$WORK" <<'PY'
 import re, os, sys
 W = sys.argv[1]
@@ -308,13 +320,16 @@ PY
 }
 
 apply_perf_app() {
-  # 双保险：既要求池真实存在（render_perf 的 P0），也要求显式核准标记，避免"顺手 apply"
-  [ "${PERF_APPROVAL:-}" = "cost-approved" ] || die "P-1 门禁：perf apply 需要 PERF_APPROVAL=cost-approved（建池费用已书面核准）"
+  # 门禁换了理由：2026-10-19 起 perf 不再新建节点池 ⇒ 不是"新增 ECS 费用"的核准，
+  # 而是"往 dev/pre 在用的池里加 2 核压测负载"的核准（共池会挤邻居，仍需书面确认）。
+  [ "${PERF_APPROVAL:-}" = "shared-pool-approved" ] \
+    || die "P-1 门禁：perf apply 需要 PERF_APPROVAL=shared-pool-approved（负责人 2026-10-19 裁定共池；确认新池余量够压测负载）"
   render_perf
   run_body apply_pre_app.sh perfapp "DOCS_B64=$(pack_dir "$WORK/docs")" "NS=$PERF_NS" "APP=new-api-perf" "TRACK=perf"
 }
 
-perf_plan() {  # 纯只读：现有节点池清单 + 机型报价，供负责人一次性核准
+perf_plan() {  # 纯只读：现网池清单 +（历史口径）机型报价。2026-10-19 起 perf 不建池，报价段仅作账目留档
+  notice "P-R0 口径：裁定 2026-10-19 ⇒ perf 复用现网池，**不新建节点池**；下面的报价段是历史核准材料，不是本次要花的钱"
   notice "P-R1 现网节点池（只读）"; perf_pool_state | sed 's/^/    /'
   notice "P-R2 机型可售性与报价（DescribeAvailableResource / DescribePrice，只读）"
   for z in ap-southeast-5a ap-southeast-5b ap-southeast-5c; do
@@ -344,7 +359,7 @@ case "$A" in
   --gen-secret)  gen_pre_secret ;;
   --apply-secret) apply_pre_secret ;;
   --apply-app)   apply_pre_app ;;
-  --smoke)       pre_smoke ;;
+  --smoke)       pre_smoke "$TGT" ;;
   --diag)        diag_pending ;;
   --diag-nodes)  run_body diag_nodes.sh diagnost ;;
   --diag-mem)    run_body diag_mem.sh diagmem ;;
@@ -354,5 +369,5 @@ case "$A" in
   --perf-gen-secret) gen_perf_secret ;;
   --perf-apply-secret) apply_perf_secret ;;
   --perf-apply)  apply_perf_app ;;
-  *) die "未知子命令：$A（--ns-base / --addon-verify / --pull-check <ns> / --db-ports / --db-state / --create-db / --apply-grants / --dev-baseline / --gen-secret / --apply-secret / --apply-app / --smoke / --perf-pool / --perf-plan / --perf-gen-secret / --perf-apply-secret / --perf-apply[需 PERF_APPROVAL=cost-approved]）" ;;
+  *) die "未知子命令：$A（--ns-base / --addon-verify / --pull-check <ns> / --db-ports / --db-state / --create-db / --apply-grants / --dev-baseline / --gen-secret / --apply-secret / --apply-app / --smoke / --perf-pool 只读列池 / --perf-plan 只读报价 / --perf-gen-secret / --perf-apply-secret / --perf-apply[需 PERF_APPROVAL=shared-pool-approved]）" ;;
 esac

@@ -1471,3 +1471,12 @@ aliyun actiontrail LookupEvents --LookupAttribute.1.Key EventName --LookupAttrib
   ② 失败检测兜 `^ERROR:`（SDK.ServerError 统一前缀，防误判 [OK]）；③ 新增 `CLUSTERS=all|<id…>`
   首授模式（现状为空时旧行为会拒绝）。现状口径：xiangdong/zhangzijun 均 **ops×3**（17:25:39，
   负责人改）；daimingming **空**（10-10 自授 admin×3 已被清）。
+
+## 任务 32（SLO / 错误预算 / 告警值班）落地口径 · 2026-10-19
+
+- **★ 国际站云监控没有电话与短信**：`cms PutContact` 元数据 `intl` 分支只允许「邮箱 / 钉钉机器人」（`china` 才有 phone/SMS），参数表里也没有 `Channels.SMS`。⇒ 「P1 电话」只能走**第三方 on-call**（webhook → 语音呼叫）或自建中转；别再按"控制台勾电话通道"设计。实测同批：联系人 **0** / 组 **0** / 指标规则 **0**（卡片前置不成立）。
+- **SLO 口径落点**：可用性 99.95%/月（预算 **21.6 min**）→ 外部拨测（云监控站点监控 `likha-hk-newapi-status`）；请求成功率 → **SLS `sls-newapi-mnl/alb_access`**（`host`/`status`/`upstream_status`），**ALB 日志不含健康检查 ⇒ 分母=真实流量**；延迟 P95 需 `/metrics`（G8，缺口）；上游 5xx 单列 `up_pct`，**不计入自身 SLO**。
+- **多窗口燃烧率（1h/6h/3d ⇒ 14.4×/6×/1×）**：判据 `own_pct > 0.72 / 0.30 / 0.05`，规则名 `newapi-slo-burn-{rapid-p1,mid-p2,slow-p3}`，sev 8/6/6。IaC `deploy/tasks/task32/burn_alerts.sh`（`--status|--dump|--apply`，幂等）。
+- **两条实现坑**：① SLS SQL `coalesce(upstream_status,'0')` → `All COALESCE operands must be the same type: bigint` ⇒ 用 `coalesce(upstream_status, 0)`；② `CreateAlert` **成功时无输出**，判失败必须「输出里 grep 到 ERROR」，不能用 `grep -qv ERROR`（空输出会被判失败）；③ VPC 端点抖动时 `GetAlert` 会返回假 404 ⇒ 复核用 `ListAlerts`。
+- **Grafana**：看板 `newapi-slo`（uid）9 面板（`deploy/tasks/task32/slo_dashboard.py`）；**5xx/预算面板故意不建**，避免与 SLS 真源打架。代理白名单不含 `/api/ds/query` ⇒ 面板数值**无法脚本比对**（V3 只能人工目测）。
+- **值班/冻结**：P1 5min / P2 30min / P3 次工作日；预算 >25% 仅修复类变更、>50% 冻结需签字；解冻 = 连续 7 天燃烧率 <1× 且 RCA 关闭。详见 `deploy/docs/任务32_SLO与值班_运行手册_2026-10-19.md`。

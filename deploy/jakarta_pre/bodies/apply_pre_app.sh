@@ -31,11 +31,14 @@ for k in doc_ConfigMap doc_Deployment doc_Service; do
   printf '    %-16s ns=%s image=%s\n' "$k" "$ns" "${img:-n/a}"
 done
 
-echo "=== A1b 节点池门禁：$APP 必须落在 dedicated=perf 池（若无此标签的 PodSpec 说明 taint 未配）"
-sel=$(grep -A3 -m1 "nodeSelector:" "$T/payload/doc_Deployment.yaml" 2>/dev/null | tr '\n' ' ')
-printf '    nodeSelector: %s\n' "${sel:-（无 ⇒ 只可能是 pre 的共机口径，perf 必须有）}"
-grep -q "effect: NoSchedule" "$T/payload/doc_Deployment.yaml" 2>/dev/null \
-  && echo "    tolerations 含 NoSchedule ⇒ 专用池口径成立" || echo "    无 NoSchedule toleration（pre 预期如此）"
+echo "=== A1b 共池门禁（裁定 2026-10-19：pre 与 perf 都复用 dev 站新池，谁都不许钉机器）"
+if grep -qE '^[[:space:]]*(nodeSelector|tolerations):' "$T/payload/doc_Deployment.yaml" 2>/dev/null; then
+  echo "    [XX] 载荷里仍有 nodeSelector/tolerations ⇒ 换池前的旧设计，拒绝 apply（台账 §19）"
+  exit 1
+fi
+echo "    载荷无 nodeSelector/toleration（符合共池）"
+printf '    节点实况：%s\n' "$(kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}{" taints="}{.spec.taints}{" | "}{end}' 2>&1)"
+printf '    池标签实况：%s\n' "$(kubectl get nodes -o jsonpath='{.items[0].metadata.labels.ack\.alibabacloud\.com/nodepool-id}{" track="}{.items[0].metadata.labels.track}' 2>&1)"
 
 for k in doc_ConfigMap doc_Deployment doc_Service; do
   f="$T/payload/$k.yaml"; [ -s "$f" ] || continue
@@ -64,5 +67,12 @@ fi
 
 echo "=== A6 反证：newapi-dev 的三个负载身份指纹必须与 --dev-baseline 一致（pre 上线不该动 dev）"
 kubectl -n newapi-dev get pod -o jsonpath='{range .items[*]}{.metadata.name}{"|"}{.metadata.labels.pod-template-hash}{"|"}{range .status.containerStatuses[*]}{.restartCount}{end}{"\n"}{end}' 2>&1 | sort | sed 's/^/    /'
-echo "=== A7 反证：配额账目（pre 与 dev 共机，用量必须落在本 ns 配额内）"
-kubectl -n "$NS" get quota 2>&1 | sed 's/^/    /'
+echo "=== A7 反证：配额账目（实况优先，不粉饰）"
+Q=$(kubectl -n "$NS" get resourcequota -o custom-columns='NAME:.metadata.name,HARD:.spec.hard,USED:.status.used' --no-headers 2>&1)
+if grep -qi "No resources found" <<<"$Q"; then
+  # 2026-10-19 实测：换池后 dev/pre/perf 三个 ns 的 ResourceQuota 都已不存在（操作者删的）。
+  # 我不擅自重建（覆盖别人有意的动作风险更高），但共池又没了上限 ⇒ 如实标成缺口，进台账待裁定。
+  echo "    [缺口] $NS 没有 ResourceQuota ⇒ 共池下本 ns 用量无上限，与卡片步骤 1 的配额总账不符（待负责人定）"
+else
+  printf '%s\n' "$Q" | sed 's/^/    /'
+fi
