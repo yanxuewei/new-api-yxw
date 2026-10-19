@@ -934,6 +934,57 @@ X4  ready=1/1  updated=1
 - 产物：`dev_deploy.sh` 新增 `--pg-port-probe`（零凭据 body `bodies/pg_port_probe.sh`，pg_isready 双格预检）。
 - dev 池参数随马尼拉联动：马尼拉侧任何 `pgbouncer.*` 变更后，dev 需同轮重发（本卡只做了一次性对齐，未建自动同步）。
 
+## 17. dev OSS Bucket（`oss-newapi-jkt-dev`，镜像马尼拉、无 CRR）（2026-10-16）
+
+> 参照任务 8（马尼拉 `oss-newapi-mnl`）逐项镜像；**用户要求不配跨区域复制**。证据：`deploy/logs/oss_jkt_dev_20261016/`。
+
+| 项 | 实测值（全部 API 回读，非返回码） |
+|---|---|
+| 桶 | `oss-newapi-jkt-dev` / ap-southeast-5 / `rg-nonprod` / Standard / **ZRS** / ACL=private |
+| 版本控制 | `Enabled` |
+| 阻止公共访问 | `BlockPublicAccess=true` |
+| 生命周期 | `newapi-version-cleanup`（删标记 + 非当前版本 30 天 + 分片 7 天；无降冷规则） |
+| Bucket Policy | Allow 4 主体（admin/ops/cicd-push/iac-terraform）× `rds-backup/*`、`app-assets/*`（ListObjects 带 Prefix 条件）；**Python 生成，修正了马尼拉策略里 `$5108890064395960` 的 zsh 拼接残留** |
+| CRR | **未配置**（`get-bucket-replication` ⇒ 404 `NoSuchReplicationConfiguration`） |
+| 标签 | `env=dev` `project=new-api` `isolation=structural-vpc` |
+
+验证：读写删冒烟全通（公网入口，AK）；dev Pod 内 `oss-ap-southeast-5-internal.aliyuncs.com` → **403**（TCP+TLS+HTTP 全通、匿名被拒=预期）；`ossutil` 在本机 `/usr/local/bin/ossutil`（2.2.1，凭据走 aliyun CLI 配置链，**不需要** `~/.aliyun/ossutilconfig`）。
+
+两点与马尼拉的地域差异（记档防误判）：① 雅加达多可用区 ⇒ ZRS 桶允许降冷（马尼拉不允许）；本桶无降冷规则，属配置选择。② ZRS/LRS 创建后不可变更，若未来 dev 要省成本需删桶重建为 LRS（注意桶名删除后短窗口被占的 `BucketAlreadyExists` 教训）。
+
+## 18. dev 图片桶 `dev-img-likha` + `dev-img.likha.hk`（2026-10-16）
+
+> 镜像生产 `img-likha`/`img.likha.hk`（`deploy/docs/OSS静态资源域名img.likha.hk_配置与证书续期_2026-10-13.md`）。证据：`deploy/logs/oss_dev_img_20261016/`。
+
+| 项 | 实测值 |
+|---|---|
+| 桶 | `dev-img-likha` / ap-southeast-5 / **public-read** / ZRS / Standard / **BPA=false**（显式关，坑 4.2）/ 标签 dev 三件套 |
+| 自定义域名 | `dev-img.likha.hk`，Status=Enabled；CNAME → `dev-img-likha.oss-ap-southeast-5.aliyuncs.com`（RecordId 2111004321323668480）；归属 TXT `_dnsauth.dev-img`（RecordId 2111004166729911296，保留勿删） |
+| HTTPS | `CertificateConfiguration.CertId=606823-ap-southeast-1`（`*.likha.hk` 通配符覆盖），list-cname 回读 Certificate 段齐全（Fingerprint 与生产绑定逐字一致，2027-04-28） |
+| 端到端 | DNS 权威/公共递归一致；匿名 HTTPS 读 200 + 内容一致；不存在对象 404；匿名列举 403 ✅ |
+
+**证书续签连带（已登记）**：`dev-img.likha.hk` 是 `606823` 证书的第 4 个落点——`deploy/cert/targets.yaml` 的 oss 目标 sites 扩为 2 个（image-static + dev-image-static），renew_action / R1 note / oss_note 同步改为双桶重绑；换新 CertId 时两桶都动，漏一个对应域名旧证到期当晚即失效。
+
+与生产的差异：dev 桶无版本控制/生命周期/Bucket Policy（生产 img-likha 也没有这三项）；多打了成本标签。使用纪律同生产口径：**桶是公共读，不放敏感文件；只绑专用子域，绝不绑主域名**。
+
+## 19. dev 个人域名 dev-yxw / dev-zzj / dev-xd（2026-10-16）
+
+> 负责人需求：新增 3 个开发域名，DNS 参考 `dev` 记录；路由经确认按人指负载（`dev-yxw → yxw-new-api-slave`，`dev-zzj/dev-xd → new-api-dev-slave` 过渡）。证据：`deploy/logs/oss_dev_img_20261016/`（10-dns-*、11-routes-e2e.txt）。
+
+**DNS**（likha.hk zone，alidns，与 `dev` 记录同值同 TTL）：
+`dev-yxw` / `dev-zzj` / `dev-xd` 三条 CNAME → `alb-4okmogghe7hbv5fwm6.ap-southeast-5.alb.aliyuncsslbintl.com`（dev ALB `alb-newapi-jkt-dev`），RecordId `2111042095309275136` / `2111042099759426560` / `2111042103756663808`。
+
+**路由**（dev ALB 443 监听 `lsn-22gsroti342rp3dvo4` 默认证 = 606823 `*.likha.hk` ⇒ 新子域 HTTPS 免换绑）：清单 SSOT = `deploy/jakarta_dev/dev_routes.yaml`（1 Service + 6 Ingress，apply 回读 created ×7）——
+
+| 域名 | 80 | 443 后端 | 实测 |
+|---|---|---|---|
+| dev-yxw.likha.hk | 301 → 自身 https | `svc/yxw-new-api-slave`（新补 Service；该 deploy **replicas=0**） | https 503（无端点，扩副本即恢复） |
+| dev-zzj.likha.hk | 301 → 自身 https | `svc/new-api-dev-slave`（过渡，等各自负载建好再切） | https **200** ssl=0 ✅ |
+| dev-xd.likha.hk | 301 → 自身 https | `svc/new-api-dev-slave`（同上） | https **200** ssl=0 ✅ |
+| dev.likha.hk（回归） | 301 | new-api-dev-slave | 200 未受影响 ✅ |
+
+要点：① `fanyan-new-api-*` 已被控制台改名 **`yxw-new-api-master` / `yxw-new-api-slave`**（replicas=0、无 Service）⇒ 本卡补了 `svc/yxw-new-api-slave`（selector `app=yxw-new-api-slave`，port 80→targetPort http/3000）；dev-yxw 要通就把该 deploy 扩副本（其 SA=default，helper 已圈 default ⇒ 拉镜像通）。② redirect Ingress 的 `RedirectConfig.host` 是**硬编码**值 ⇒ 每个域名必须有自己的 redirect 件（不能共用 dev 那条，否则 301 会打到 dev.likha.hk）；order 用 2/3/4 与 51/52/53 与 dev 的 1/50 错开。
+
 
 ## 15. 四项裁定落地：DSN 收权 + dev.likha.hk 对外入口（2026-10-15，**已执行**）
 
