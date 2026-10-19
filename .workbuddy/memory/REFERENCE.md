@@ -1474,9 +1474,31 @@ aliyun actiontrail LookupEvents --LookupAttribute.1.Key EventName --LookupAttrib
 
 ## 任务 32（SLO / 错误预算 / 告警值班）落地口径 · 2026-10-19
 
-- **★ 国际站云监控没有电话与短信**：`cms PutContact` 元数据 `intl` 分支只允许「邮箱 / 钉钉机器人」（`china` 才有 phone/SMS），参数表里也没有 `Channels.SMS`。⇒ 「P1 电话」只能走**第三方 on-call**（webhook → 语音呼叫）或自建中转；别再按"控制台勾电话通道"设计。实测同批：联系人 **0** / 组 **0** / 指标规则 **0**（卡片前置不成立）。
+- **★ 云监控有 1.0 / 2.0 两套互不相通的存储（2026-10-19 踩坑）**：控制台「告警中心 → 通知对象」属 **`cms2`（云监控2.0，API 2024-03-30）**，经典 `aliyun cms DescribeContactList`（2019-01-01）**永远查不到**（三地域全 0）。正确命令 `aliyun cms2 notification-channel contact list --region <r> -o json`。实测：3 联系人（xiangdong/zhangzijun/yanxuewei）手机号全部 `phoneVerify=true`，均在 `ack_Default Contact Group`；工作区 `default-cms-5108890064395960-ap-southeast-1` 内已有 **29 条 ACK addon 告警规则**（默认 disabled）。
+- **★ 国际站电话/短信是支持的**（推翻我 10-19 午前的错误结论）：官方《通知对象》—— 联系人支持 **电话/短信/邮件**；「最终走哪几种方式由**通知策略**决定」，邮件免费、电话/短信超额度按量计费。`cms PutContact` 的 `intl` props 只描述 **1.0 创建接口**，不能用来判断 2.0 能力。
+- **P1 电话落地路径**：`cms2 alert rule`（支持 `datasourceConfig.type=SLS` + `queryConfig.type=SLS_MULTI_QUERY`，可搬燃烧率）→ `notifyConfig.notifyStrategies=[策略ID]`；**通知策略只能在控制台建（CLI 无命令）**。1.0 站点监控的电话语音是默认集成，前提＝联系人组 + Critical。
 - **SLO 口径落点**：可用性 99.95%/月（预算 **21.6 min**）→ 外部拨测（云监控站点监控 `likha-hk-newapi-status`）；请求成功率 → **SLS `sls-newapi-mnl/alb_access`**（`host`/`status`/`upstream_status`），**ALB 日志不含健康检查 ⇒ 分母=真实流量**；延迟 P95 需 `/metrics`（G8，缺口）；上游 5xx 单列 `up_pct`，**不计入自身 SLO**。
 - **多窗口燃烧率（1h/6h/3d ⇒ 14.4×/6×/1×）**：判据 `own_pct > 0.72 / 0.30 / 0.05`，规则名 `newapi-slo-burn-{rapid-p1,mid-p2,slow-p3}`，sev 8/6/6。IaC `deploy/tasks/task32/burn_alerts.sh`（`--status|--dump|--apply`，幂等）。
 - **两条实现坑**：① SLS SQL `coalesce(upstream_status,'0')` → `All COALESCE operands must be the same type: bigint` ⇒ 用 `coalesce(upstream_status, 0)`；② `CreateAlert` **成功时无输出**，判失败必须「输出里 grep 到 ERROR」，不能用 `grep -qv ERROR`（空输出会被判失败）；③ VPC 端点抖动时 `GetAlert` 会返回假 404 ⇒ 复核用 `ListAlerts`。
 - **Grafana**：看板 `newapi-slo`（uid）9 面板（`deploy/tasks/task32/slo_dashboard.py`）；**5xx/预算面板故意不建**，避免与 SLS 真源打架。代理白名单不含 `/api/ds/query` ⇒ 面板数值**无法脚本比对**（V3 只能人工目测）。
 - **值班/冻结**：P1 5min / P2 30min / P3 次工作日；预算 >25% 仅修复类变更、>50% 冻结需签字；解冻 = 连续 7 天燃烧率 <1× 且 RCA 关闭。详见 `deploy/docs/任务32_SLO与值班_运行手册_2026-10-19.md`。
+
+## cms2（云监控 2.0）告警规则 IaC 要点 · 2026-10-19
+
+**能用的命令**：`aliyun cms2 workspace list | prometheus instance list | notification-channel contact list | alert rule {list,get,create,update,patch,enable,disable} | alert history`（产品 API 2024-03-30；经典 `aliyun cms` 是 2019-01-01，两套数据不通）。`alert rule create --show-example-body / --show-schema / --dry-run` 是最快的结构来源（`--dry-run` 只做本地校验，不校验服务端必填）。
+
+**Prometheus 规则（已验证可用）**：
+```json
+{"workspace":"default-cms-<uid>-<region>","displayName":"...","enabled":true,
+ "queryConfig":{"type":"PROMETHEUS_SINGLE_QUERY","expr":"..."},
+ "conditionConfig":{"type":"PROMETHEUS_SIMPLE_CONDITION","durationSecs":60,"severity":"CRITICAL"},
+ "datasourceConfig":{"type":"PROMETHEUS","instanceId":"<集群id即prom实例id>"},
+ "notifyConfig":{"type":"NOTIFY_POLICY","notifyStrategies":["<策略id>"]},
+ "scheduleConfig":{"type":"FIXED","intervalSecs":60}}
+```
+- ★ **通知策略可跨工作区引用**（策略建在 `-ap-southeast-1`，规则建在 `-ap-southeast-6`，后端接受并回显 `notifyStrategyId`）。
+- ★ **只让 CRITICAL 走电话**：规则 severity 用 CRITICAL/WARN/WARNING/INFO，通道选择由策略内部决定 ⇒ P2/P3 用 WARNING/INFO 即不打电话。
+- ★ 回读 `alert rule list -o json` 是 **双层 data**：`{"data":{"data":{"alertRules":[…]}}}`；`--labels` 必须传 **JSON 字符串**（`'{"task":"task32"}'`，传 `task=task32` 报 InvalidJSON）。
+- 幂等：cms2 无 create-or-update，重复 create 会多一条 ⇒ 先按 displayName 查（`cms2_rules.sh` 已封装）。
+
+**SLS 数据源规则（部分探明，未打通）**：`datasourceConfig.stores[].storeType` 必填 `LOG|METRIC`；`queryConfig.queries[].expr`（不是 `query`）；`start/end` 必须是 **epoch 秒**（`-1h`/`now` 报 `Specified parameter start/end is not valid`）；`conditionConfig(SLS_MULTI_CONDITION).caseList` 服务端结构未知 —— `{condition,severity}`、`{queryIndex,queryResultKey,operator,value,severity}`、`field/operator/threshold` 等 4 种均报 `caseList must not be null or empty`。⇒ 若要电话化 5xx 燃烧率，先在控制台建 1 条 SLS 规则再用 `alert rule get` 反解。
