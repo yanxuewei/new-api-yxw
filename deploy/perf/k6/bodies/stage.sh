@@ -1,12 +1,19 @@
-# bodies/stage.sh —— 单副本阶梯：对 TARGET_SVC 起一个 k6 Job（VUS 恒定 × DUR），采 CPU 峰值并打印摘要
+# bodies/stage.sh —— 单副本阶梯：对 TARGET_SVC 起一个 k6 Job（VUS 恒定 × DUR），采 CPU/内存峰值并打印摘要
 # 依赖 header 注入：K6JS_B64 / TARGET_SVC / VUS / DUR
+# 输出约定：末尾先打 ===RUN_META=== 块（KEY=VALUE，供 report.py 解析），再打 k6 摘要原文
 NS=new-api-perf
 CM=k6-sse
 JOB="k6-stage-${VUS}"
 
-IP=$(kubectl -n $NS get svc "$TARGET_SVC" -o jsonpath='{.spec.clusterIP}' 2>/dev/null)
-[ -n "$IP" ] || { echo "  [XX] 取不到 svc/$TARGET_SVC"; exit 2; }
-echo "=== target=$TARGET_SVC ($IP)  vus=$VUS dur=$DUR"
+# TARGET_SVC：Service 名（集群内直连 ClusterIP）或完整 URL（走公网 ALB 路径）
+case "$TARGET_SVC" in
+  *://*) BASE="$TARGET_SVC"; MODE="public-url" ;;
+  *)
+    IP=$(kubectl -n $NS get svc "$TARGET_SVC" -o jsonpath='{.spec.clusterIP}' 2>/dev/null)
+    [ -n "$IP" ] || { echo "  [XX] 取不到 svc/$TARGET_SVC"; exit 2; }
+    BASE="http://$IP"; MODE="clusterip" ;;
+esac
+echo "=== target=$TARGET_SVC ($MODE, BASE=$BASE)  vus=$VUS dur=$DUR"
 
 echo "$K6JS_B64" | base64 -d > /tmp/sse.js
 kubectl -n $NS create configmap $CM --from-file=sse.js=/tmp/sse.js --dry-run=client -o yaml | kubectl apply -f - >/dev/null
@@ -19,7 +26,7 @@ kind: Job
 metadata: {name: $JOB, namespace: $NS, labels: {app: k6, purpose: perf}}
 spec:
   backoffLimit: 0
-  ttlSecondsAfterFinished: 3600
+  ttlSecondsAfterFinished: 7200
   template:
     spec:
       restartPolicy: Never
@@ -31,7 +38,7 @@ spec:
           env:
             - {name: VUS, value: "$VUS"}
             - {name: DUR, value: "$DUR"}
-            - {name: BASE, value: "http://$IP"}
+            - {name: BASE, value: "$BASE"}
             - name: TOKEN
               valueFrom: {secretKeyRef: {name: perf-load-test-credentials, key: token_key}}
           volumeMounts: [{name: scripts, mountPath: /scripts}]
@@ -41,21 +48,46 @@ spec:
           configMap: {name: $CM}
 YAML
 
-# CPU 峰值采样（每 5s；Job 结束后停）
-: > /tmp/cpu_${VUS}.txt
+# CPU/内存峰值采样（每 5s；Job 结束即停）。URL 模式会经两个副本 ⇒ 逐副本取各自峰值
+# 公网入口 perf.likha.hk 当前只路由到 svc/perf-new-api-slave（1 副本）；内网模式按目标 Service 采样
+if [ "$MODE" = "public-url" ]; then LABELS="perf-new-api-slave"; else LABELS="$TARGET_SVC"; fi
+: > /tmp/cpu_${VUS}.txt; : > /tmp/mem_${VUS}.txt
 ( for i in $(seq 1 120); do
-    T=$(kubectl -n $NS top pod -l app=$TARGET_SVC --no-headers 2>/dev/null | awk '{gsub(/m/,"",$2); print $2+0}')
-    [ -n "$T" ] && echo "$T" >> /tmp/cpu_${VUS}.txt
+    for L in $LABELS; do
+      LINE=$(kubectl -n $NS top pod -l app=$L --no-headers 2>/dev/null | head -1)
+      C=$(printf '%s' "$LINE" | awk '{gsub(/m/,"",$2); print $2+0}')
+      M=$(printf '%s' "$LINE" | awk '{gsub(/Mi/,"",$3); print $3+0}')
+      [ -n "$C" ] && [ "$C" -gt 0 ] && echo "$C" >> /tmp/cpu_${VUS}.txt
+      [ -n "$M" ] && [ "$M" -gt 0 ] && echo "$M" >> /tmp/mem_${VUS}.txt
+    done
     sleep 5
   done ) &
 SAMPLER=$!
 for i in $(seq 1 90); do
   S=$(kubectl -n $NS get job $JOB -o jsonpath='{.status.succeeded}' 2>/dev/null)
+  JFAIL=$(kubectl -n $NS get job $JOB -o jsonpath='{.status.failed}' 2>/dev/null)
   [ "$S" = "1" ] && break
+  [ -n "$JFAIL" ] && [ "$JFAIL" != "0" ] && { echo "  [!!] k6 job failed（阈值破线，k6 退出码非 0）⇒ 仍采集结果"; break; }
   sleep 10
 done
 kill $SAMPLER 2>/dev/null; wait $SAMPLER 2>/dev/null
-PEAK=$(sort -n /tmp/cpu_${VUS}.txt 2>/dev/null | tail -1)
-echo "--- job_succeeded=${S:-?} cpu_peak=${PEAK:-?}m"
-kubectl -n $NS logs job/$JOB 2>&1 | grep -E "http_reqs|http_req_failed|http_req_waiting|\{ type:sse \}|checks|✗" | head -8
-rm -f /tmp/cpu_${VUS}.txt
+CPUM=$(sort -n /tmp/cpu_${VUS}.txt 2>/dev/null | tail -1)
+MEMM=$(sort -n /tmp/mem_${VUS}.txt 2>/dev/null | tail -1)
+REPL=$(echo $LABELS | wc -w)
+IMG=$(kubectl -n $NS get deploy -o jsonpath='{range .items[*]}{.metadata.name}={.spec.template.spec.containers[0].image}{","}{end}' 2>/dev/null | tr ',' '\n' | grep -E "perf-new-api" | head -2 | tr '\n' ';')
+echo "--- job_succeeded=${S:-?} cpu_peak=${CPUM:-?}m mem_peak=${MEMM:-?}Mi"
+echo "===RUN_META==="
+echo "target=$TARGET_SVC"
+echo "base=$BASE"
+echo "mode=$MODE"
+echo "vus=$VUS"
+echo "dur=$DUR"
+echo "cpu_peak_m=${CPUM:-0}"
+echo "mem_peak_mi=${MEMM:-0}"
+echo "replicas=$REPL"
+echo "job=$JOB"
+echo "ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+echo "images=$IMG"
+echo "===END_META==="
+kubectl -n $NS logs job/$JOB 2>&1 | grep -E "http_reqs|http_req_failed|http_req_waiting|\{ type:sse \}|checks|iterations\.\.\.|data_received|vus_max|http_req_duration|✗" | head -12
+rm -f /tmp/cpu_${VUS}.txt /tmp/mem_${VUS}.txt

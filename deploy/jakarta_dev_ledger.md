@@ -1591,3 +1591,13 @@ stdout 路不受影响（纳秒来自 runtime `_time_`）。属既有挂账 G8�
 **压测脚本归档（2026-10-20）**：一次性 /tmp 脚本已整理为 `deploy/perf/k6/`（`run.sh` 本机入口 + `bodies/{stage,dual1500,summary,readback}.sh` 节点侧 + `sse.js` + README）。
 用法：`bash deploy/perf/k6/run.sh stage perf-new-api-slave 300 120s` / `dual1500` / `summary` / `readback`。
 归档后回归实测：50 VU×20s → 550 请求、0% 5xx、P95 501ms、cpu_peak=62m，`summary`/`readback` 两动作输出正常。
+
+**channel 局部更新脚本 + 公网 ALB 压测路径（2026-10-20）**：新增 `deploy/perf/channel_patch.sh`（本机入口）+ `deploy/perf/bodies/channel_patch.sh`（节点侧）。
+根因：`PUT /api/channel/` 的 body 含 `status` 会被 `controller/channel.go:1134` 直接拒（`Invalid parameters`）；后端 `model.Channel.Update()` 是 GORM `Updates(struct)` ⇒ 只改非零字段，天然支持局部 patch；状态走 `POST /api/channel/:id/status`。
+实测：`--show` 回读正常；`base_url` 改值→回改均成功（before/after 打印一致）；`--status 2/1` 禁用再启用成功并回读 `status=1`。
+公网路径：`run.sh stage https://perf.likha.hk 20 20s` → 220 请求、0% 5xx、P95 486ms（k6 在集群内 → NAT → ALB → 网关）；30VU 复跑 330 请求、P95 352ms。`stage` 第一参含 `://` 即按 URL 直用。
+
+**压测报告自动化 + 公网路径瓶颈定位（2026-10-20）**：`run.sh` 每次 stage/dual1500 自动落日志并生成单文件 HTML（`deploy/logs/perf_reports/index.html`，`report.py` 渲染，内联 CSS+SVG，无外网依赖）。
+报告内容：摘要卡（最优通过档 / 单副本拐点 / 1500 所需副本）、明细表（RPS、P50/P95/P99 首字、端到端 P95、错误率、checks、CPU/内存峰值、下行 Mbps、PASS/FAIL）、趋势图、瓶颈判定（事实与推断分开）、理想 QPS/资源效率、完整公式段（Little 定律、每核吞吐、拐点插值、副本数、带宽利用率）。
+**实测发现（重要）**：公网路径 `https://perf.likha.hk` 的瓶颈是 **dev NAT 的 EIP 仅 5 Mbps**（按流量计费）——120 VU 下行已 6.24 Mbps、150 VU 7.38 Mbps，600 VU 时 RPS 塌到 52、错误率 14.4%，而应用侧 0 条 5xx、CPU 仅 0.26 核 ⇒ 链路先饱和，不是网关容量。报告在该情形下**拒绝输出拐点**并提示改用内网直连。
+**路由事实**：`perf.likha.hk` 的 Ingress 只指向 `svc/perf-new-api-slave`（1 副本）；内网 dual1500 才是双副本。

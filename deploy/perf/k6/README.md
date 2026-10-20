@@ -40,3 +40,27 @@ bash deploy/perf/k6/run.sh readback
 - **mock 参数切换**：用 `deploy/perf/mock-upstream/mock_ctl.sh`（全副本广播），不要直接打 Service 的 `/__ctrl`（只命中一个 Pod）。
 - **窗口上限**：单次云助手命令 900s；两档 120s 串跑会踩线，必要时分两次调用。
 - 采集结果同时落台账：`deploy/jakarta_dev_ledger.md` §21/§23、`deploy/logs/perf_task33_20261020/`。
+
+## 公网 ALB 路径与 channel 变更
+
+- **走公网 ALB 压测**：`bash deploy/perf/k6/run.sh stage https://perf.likha.hk 300 120s`（`stage` 第一参含 `://` 即按 URL 直用，否则按 Service 名解析 ClusterIP）。k6 在集群内 → NAT → ALB → 网关，含真实入口开销。
+- **改 channel 用** `deploy/perf/channel_patch.sh`（只提交可变字段）：`--show` / `--base-url` / `--models` / `--weight` / `--priority` / `--status`（独立状态接口）/ `--key-file`。**不要**把网关自己的域名填进 channel 的 API 地址（自环 401，见台账 §23.1）。
+- `cpu_peak` 采样对 ≥60s 的档才可靠；URL 模式会取 master/slave 两侧的最大值。
+
+## 自动 HTML 报告（2026-10-20 起）
+
+每次 `stage` / `dual1500` 跑完，`run.sh` 会自动：
+1. 把远端输出落盘到 `deploy/logs/perf_reports/<时间戳>-<tag>.log`（报告的数据源）；
+2. 调 `report.py` 聚合该目录**全部**日志，生成单文件 `deploy/logs/perf_reports/index.html`（并留快照 `<时间戳>-report.html`）。
+
+报告内容：摘要卡（最优通过档 / 单副本拐点 / 1500 并发所需副本）、每次运行明细表（RPS、P50/P95/P99 首字、端到端 P95、错误率、checks、CPU/内存峰值、下行 Mbps、PASS/FAIL）、两张内联 SVG 趋势图（P95 vs VU、RPS vs VU）、瓶颈判定（事实/推断分开）、理想 QPS 与资源效率、完整公式段。
+
+```bash
+# 手动重生成（例如补了历史日志、或改了 EIP 带宽口径）
+python3 deploy/perf/k6/report.py --log-dir deploy/logs/perf_reports \
+  --out deploy/logs/perf_reports/index.html --eip-mbps 5
+```
+
+**带宽判定**：公网路径（k6→NAT→EIP→ALB）先撞 EIP 带宽时，表现为「RPS 塌陷 + 连接级失败 + 应用侧无 5xx + CPU 很低」。`run.sh` 用 `EIP_MBPS`（默认 5，雅加达 dev 现网实测 5 Mbps）把这条写进报告；此时**首个破线档不参与拐点插值**，卡片明确标注“拐点不可用，改用内网直连档位”。
+
+**已知边界**：2026-10-20 17:22 之前的 3 条日志因抓取过滤漏了 `http_req_duration`，明细表「P95 端到端」显示 0；新日志已含该行。

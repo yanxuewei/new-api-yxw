@@ -9,6 +9,9 @@
 #   bash deploy/perf/k6/run.sh dual1500 [vus-each] [duration]        # 双副本并行，默认 750+750 × 120s（合计 1500）
 #   bash deploy/perf/k6/run.sh summary [job...]                      # 打印最近 Job 的 k6 摘要
 #   bash deploy/perf/k6/run.sh readback                              # 环境/健康/CPU/mock 指标回读（只读）
+#
+# 环境变量：
+#   EIP_MBPS   公网路径的 EIP 标称带宽（默认 5，雅加达 dev 现网实测 5 Mbps），仅用于报告的带宽利用率判定
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../../.." && pwd)"
@@ -33,20 +36,39 @@ HDR
   for kv in "$@"; do printf "export %s='%s'\n" "${kv%%=*}" "${kv#*=}"; done
 }
 
+REPORT_DIR="$ROOT/deploy/logs/perf_reports"
+
 run_body() {
   local body="$1" tag="$2"; shift 2
   [ -s "$BODIES/$body" ] || { echo "[!] 缺 body：$BODIES/$body"; exit 1; }
   local full="/tmp/perf_k6_${tag}.$$.sh"
   { header "$@"; cat "$BODIES/$body"; } > "$full"; chmod 700 "$full"
   echo "[perf-k6] action=$tag payload=$# body=$(wc -c <"$full")B"
-  bash "$REMOTE" "$full"
-  local rc=$?; rm -f "$full"; return $rc
+  # 捕获远端输出：一边打屏，一边落盘（报告的数据源），跑完自动渲染 HTML
+  local out rc log ts
+  out=$(bash "$REMOTE" "$full" 2>&1); rc=$?
+  printf '%s\n' "$out"
+  rm -f "$full"
+  ts=$(date +%Y%m%d-%H%M%S)
+  mkdir -p "$REPORT_DIR"
+  log="$REPORT_DIR/${ts}-${tag}.log"
+  printf '%s\n' "$out" > "$log"
+  echo "[perf-k6] 日志：$log"
+  case "$tag" in
+    stage_*|dual1500)
+      python3 "$HERE/report.py" --log-dir "$REPORT_DIR" --out "$REPORT_DIR/index.html" \
+        --eip-mbps "${EIP_MBPS:-5}" || true
+      cp -f "$REPORT_DIR/index.html" "$REPORT_DIR/${ts}-report.html" 2>/dev/null || true
+      echo "[perf-k6] 报告：$REPORT_DIR/index.html  （快照 ${ts}-report.html）" ;;
+  esac
+  return $rc
 }
 
 case "$ACTION" in
   stage)
-    TGT="${1:?stage 需要 <target-svc>}"; VUS="${2:?stage 需要 <vus>}"; DUR="${3:-120s}"
-    run_body stage.sh "stage_${TGT}_${VUS}" "TARGET_SVC=$TGT" "VUS=$VUS" "DUR=$DUR" ;;
+    # TGT 可为 Service 名（集群内直连）或完整 URL（如 https://perf.likha.hk，走公网 ALB 路径）
+    TGT="${1:?stage 需要 <target-svc|url>}"; VUS="${2:?stage 需要 <vus>}"; DUR="${3:-120s}"
+    run_body stage.sh "stage_${TGT//[^a-zA-Z0-9]/_}_${VUS}" "TARGET_SVC=$TGT" "VUS=$VUS" "DUR=$DUR" ;;
   dual1500)
     EACH="${1:-750}"; DUR="${2:-120s}"
     run_body dual1500.sh dual1500 "VUS_EACH=$EACH" "DUR=$DUR" ;;
