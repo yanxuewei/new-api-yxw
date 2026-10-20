@@ -1,4 +1,18 @@
 #!/bin/bash
+# =============================================================================
+# ⚠ DEPRECATED（2026-10-20 起）—— 本文件内的对象名已失效
+#   pre / perf 的负载已按 pod 名重建（fanyan 2026-10-20 裁定）：
+#     new-api-pre         → pre-new-api-master      （无 Service，不接流量）
+#     new-api-pre-slave   → pre-new-api-slave       （唯一 Service，Ingress 后端）
+#     new-api-perf        → perf-new-api-master     （无 Service，不接流量）
+#     new-api-perf-slave  → perf-new-api-slave      （唯一 Service，Ingress 后端）
+#   ⇒ 凡出现旧名的 kubectl 操作：只读诊断会 NotFound；apply / patch / scale 类会
+#     重新造出旧对象并与新对象抢标签 ⇒ **不要重跑本文件**。
+#   权威 IaC：deploy/jakarta_pre/manifests/pre-master-slave.yaml
+#              deploy/jakarta_perf/manifests/perf-master-slave.yaml
+#   弃用说明与新旧对照：deploy/jakarta_pre/DEPRECATED.md
+#   注意：命名空间 new-api-pre / new-api-perf 本身**未改名**，只读诊断仍可用。
+# =============================================================================
 # bodies/diag_sqlite_and_devroll.sh —— 三件事一次取数：① SQLite 冒烟为什么没就绪 ② /api/status 里版本字段实况
 #   ③ new-api-channel-task-dev 的模板哈希在基线后变了（隔离红线要的反证），必须查清是谁、什么时候、改了什么
 set -uo pipefail

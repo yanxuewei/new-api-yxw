@@ -1,0 +1,297 @@
+# =============================================================================
+# new-api-pre：master + slave 双角色（按 POD 名命名的最终形态）
+# =============================================================================
+# 环境：雅加达 jkt-dev 集群（cb0abf5bc06034f7bbdb991752f6f3e62），命名空间 new-api-pre，
+#       对外 pre.likha.hk（路由见同目录 ../manifests/pre_routes.yaml）。
+# 来源：2026-10-20 由 deploy/jakarta_dev/pre_perf_master_slave.yaml 按环境拆分；
+#       perf 半边见 deploy/jakarta_perf/manifests/perf-master-slave.yaml。
+#
+# 对象（3 个）：
+#   Deployment pre-new-api-master  NODE_TYPE=master —— 只做 DB 迁移 + 后台任务，**无 Service、不接流量**
+#   Deployment pre-new-api-slave   NODE_TYPE=slave  —— 接全部业务流量
+#   Service    pre-new-api-slave   —— 唯一后端，Ingress pre-route 指向它
+#
+# 关键约定：
+#   · selector 单键 `app: <deployment 名>` ⇒ master/slave 天然互斥
+#     （K8s 禁止两个 controller 的 selector 重叠，重叠会互删对方 Pod）
+#   · master 取 secret key `SQL_DSN_MIGRATE`；slave 取 `SQL_DSN`（slave 不做迁移）
+#   · Redis 复用 dev 的 Tair，**pre 用 db /1**（dev=/0、perf=/2，物理隔离限流与渠道缓存）
+#   · 规格：master requests 100m/256Mi · limits 500m/512Mi；slave requests 100m/256Mi · limits 200m/512Mi
+#   · 探针：slave 有 preStop sleep 15 与更大的 initialDelay（优雅摘流）；master 无
+#
+# 角色分工代码依据：
+#   common/init.go:89              IsMasterNode = (NODE_TYPE != "slave")
+#   model/main.go:215 / :262       slave 跳过主库与日志库 migration
+#   system_task / subscription_reset / auth_cleanup / codex_credential_refresh /
+#   authz enforcer                —— 全部只在 master 执行
+#
+# 迁移/改名顺序（关键，反了会 503）：
+#   ① 先建新 slave Deployment + 新 Service（新旧并存，无影响）
+#   ② 等新 slave Ready → 把 Ingress backend 切到新 Service
+#   ③ 实测 200 → 才删旧 slave
+#   ④ 最后删旧 master → 建新 master（不接流量，空窗只影响后台任务）
+#
+# 应用：kubectl apply -f deploy/jakarta_pre/manifests/pre-master-slave.yaml
+#       （经 deploy/lib/ack_remote_jkt_dev.sh 云助手通道，命令体 <19KB）
+# 回滚：git 取回上一版清单 → kubectl apply；并把 Ingress backend 指回旧 Service
+# =============================================================================
+
+# --- master：只做迁移与后台任务，不接流量（无 Service）---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pre-new-api-master
+  namespace: new-api-pre
+  labels:
+    app: pre-new-api-master
+    env: dev
+    project: new-api
+    site: jkt-dev
+    track: pre
+    role: master
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app: pre-new-api-master
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: pre-new-api-master
+        env: dev
+        project: new-api
+        site: jkt-dev
+        track: pre
+        role: master
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "3000"
+        prometheus.io/path: /metrics
+    spec:
+      serviceAccountName: new-api-app
+      terminationGracePeriodSeconds: 30
+      containers:
+      - name: new-api
+        image: acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com/newapi-dev/newapi-master:20261015-c62445555
+        imagePullPolicy: IfNotPresent
+        args:
+        - -log-dir=/data/logs
+        ports:
+        - name: http
+          containerPort: 3000
+          protocol: TCP
+        env:
+        - name: NODE_TYPE
+          value: master
+        - name: GOMAXPROCS
+          value: "1"
+        - name: SQL_SLOW_THRESHOLD_MS
+          value: "1"
+        - name: SQL_DSN
+          valueFrom:
+            secretKeyRef:
+              name: new-api-secrets
+              key: SQL_DSN_MIGRATE
+        envFrom:
+        - configMapRef:
+            name: new-api-config
+        - secretRef:
+            name: new-api-secrets
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        startupProbe:
+          httpGet:
+            path: /api/status
+            port: http
+            scheme: HTTP
+          failureThreshold: 30
+          periodSeconds: 5
+          timeoutSeconds: 1
+          successThreshold: 1
+        livenessProbe:
+          httpGet:
+            path: /api/status
+            port: http
+            scheme: HTTP
+          periodSeconds: 20
+          timeoutSeconds: 5
+          failureThreshold: 5
+          successThreshold: 1
+        readinessProbe:
+          httpGet:
+            path: /api/status
+            port: http
+            scheme: HTTP
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+          successThreshold: 1
+        volumeMounts:
+        - name: app-logs
+          mountPath: /data/logs
+      volumes:
+      - name: app-logs
+        emptyDir:
+          sizeLimit: 512Mi
+      topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: topology.kubernetes.io/zone
+        whenUnsatisfiable: ScheduleAnyway
+        labelSelector:
+          matchLabels:
+            app: pre-new-api-master
+---
+# --- slave：接业务流量，Ingress 后端 ---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pre-new-api-slave
+  namespace: new-api-pre
+  labels:
+    app: pre-new-api-slave
+    env: dev
+    project: new-api
+    site: jkt-dev
+    track: pre
+    role: slave
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app: pre-new-api-slave
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: pre-new-api-slave
+        env: dev
+        project: new-api
+        site: jkt-dev
+        track: pre
+        role: slave
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "3000"
+        prometheus.io/path: /metrics
+    spec:
+      serviceAccountName: new-api-app
+      terminationGracePeriodSeconds: 30
+      containers:
+      - name: new-api
+        image: acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com/newapi-dev/newapi-master:20261015-c62445555
+        imagePullPolicy: IfNotPresent
+        args:
+        - -log-dir=/data/logs
+        ports:
+        - name: http
+          containerPort: 3000
+          protocol: TCP
+        env:
+        - name: NODE_TYPE
+          value: slave
+        - name: GOMAXPROCS
+          value: "1"
+        - name: SQL_SLOW_THRESHOLD_MS
+          value: "1"
+        - name: SQL_DSN
+          valueFrom:
+            secretKeyRef:
+              name: new-api-secrets
+              key: SQL_DSN
+        envFrom:
+        - configMapRef:
+            name: new-api-config
+        - secretRef:
+            name: new-api-secrets
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 200m
+            memory: 512Mi
+        startupProbe:
+          httpGet:
+            path: /api/status
+            port: http
+            scheme: HTTP
+          failureThreshold: 30
+          periodSeconds: 5
+          timeoutSeconds: 1
+          successThreshold: 1
+        livenessProbe:
+          httpGet:
+            path: /api/status
+            port: http
+            scheme: HTTP
+          initialDelaySeconds: 40
+          periodSeconds: 15
+          timeoutSeconds: 5
+          failureThreshold: 5
+          successThreshold: 1
+        readinessProbe:
+          httpGet:
+            path: /api/status
+            port: http
+            scheme: HTTP
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+          successThreshold: 1
+        lifecycle:
+          preStop:
+            exec:
+              command: ["sh", "-c", "sleep 15"]
+        volumeMounts:
+        - name: app-logs
+          mountPath: /data/logs
+      volumes:
+      - name: app-logs
+        emptyDir:
+          sizeLimit: 512Mi
+      topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: topology.kubernetes.io/zone
+        whenUnsatisfiable: ScheduleAnyway
+        labelSelector:
+          matchLabels:
+            app: pre-new-api-slave
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pre-new-api-slave
+  namespace: new-api-pre
+  labels:
+    app: pre-new-api-slave
+    env: dev
+    project: new-api
+    site: jkt-dev
+    track: pre
+    role: slave
+spec:
+  type: ClusterIP
+  selector:
+    app: pre-new-api-slave
+  ports:
+  - name: http
+    port: 80
+    protocol: TCP
+    targetPort: http

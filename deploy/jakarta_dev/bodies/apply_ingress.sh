@@ -1,6 +1,6 @@
 #!/bin/bash
 # bodies/apply_ingress.sh —— apply dev_ingress.yaml（AlbConfig/IngressClass/Service/Ingress）
-# 载荷：INGRESS_B64 = deploy/jakarta_dev/dev_ingress.yaml 的单行 Base64（由 dev_deploy.sh --apply-ingress 打包）
+# 载荷：INGRESS_B64 = deploy/jakarta_dev/manifests/dev_ingress.yaml 的单行 Base64（由 dev_deploy.sh --apply-ingress 打包）
 # 开关：APPLY=0（默认，只 render 校验）/ 1 = 真 apply
 set -e
 

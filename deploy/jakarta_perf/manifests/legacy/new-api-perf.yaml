@@ -1,0 +1,165 @@
+# =============================================================================
+# ⚠ DEPRECATED（2026-10-20 起）—— 本文件内的对象名已失效
+#   pre / perf 的负载已按 pod 名重建（fanyan 2026-10-20 裁定）：
+#     new-api-pre         → pre-new-api-master      （无 Service，不接流量）
+#     new-api-pre-slave   → pre-new-api-slave       （唯一 Service，Ingress 后端）
+#     new-api-perf        → perf-new-api-master     （无 Service，不接流量）
+#     new-api-perf-slave  → perf-new-api-slave      （唯一 Service，Ingress 后端）
+#   ⇒ 凡出现旧名的 kubectl 操作：只读诊断会 NotFound；apply / patch / scale 类会
+#     重新造出旧对象并与新对象抢标签 ⇒ **不要重跑本文件**。
+#   权威 IaC：deploy/jakarta_pre/manifests/pre-master-slave.yaml
+#              deploy/jakarta_perf/manifests/perf-master-slave.yaml
+#   弃用说明与新旧对照：deploy/jakarta_pre/DEPRECATED.md
+#   注意：命名空间 new-api-pre / new-api-perf 本身**未改名**，只读诊断仍可用。
+# =============================================================================
+# 雅加达 perf · new-api-perf 工作负载（任务 45 步骤 5 的 perf 半边）
+#
+# 落点口径（负责人裁定 2026-10-19）：**perf 与 pre 一样复用 dev 站的新节点池，不再新建专用池**。
+# 这条裁定同时作废了两处旧设计：① 本文件原有的 `nodeSelector`（按 nodepool-id 钉专用池）
+# 和 ② `tolerations`（对应专用池的 `dedicated=perf` taint）⇒ **已删除**，因为新池 `np-jkt-dev-x4c`
+# 实测 taints 为空（台账 §19），留着 toleration 只是无害的死配置，留着 nodeSelector 更会把 Pod
+# 钉死在一个不存在的关系上。建池载荷 `perf_nodepool.json` 就此作废，**保留不删**作为审计痕迹。
+#
+# 换池后的实测容量（2026-10-19 只读回读，台账 §19）：
+#   节点 2 × `ecs.g9i.xlarge`（各 4 vCPU / 16 GiB），allocatable 各 **3920m / 14.0 Gi**；
+#   全集群 requests 合计 **1.96 核 / 6.2 Gi**（54 个 Pod）⇒ 剩约 **5.9 核**可排。
+#   对照：旧池 `np-jkt-dev-app` 是 3 × 2C、requests 已近饱和，pre 被迫降到 100m 才排进去。
+#   ⇒ 本文件的 requests 从"贴余量"改为"按压测需要取整档"，这次不是妥协而是有余量。
+#   ⚠ 换池后 **dev/pre/perf 三个 ns 的 ResourceQuota 实测都不存在**（K5 回读 `No resources found`），
+#     与卡片步骤 1 的"配额总账"口径不同 ⇒ 未擅自重建（操作者已删的东西我不覆盖），待负责人定。
+#
+# 形状抄 deploy/jakarta_pre/manifests/legacy/new-api-pre.yaml，三处**有意偏差**：
+#   ① `nodeSelector` / `tolerations` **一律不写**（见上）。共池的反面风险是"压测把 dev 挤爆"，
+#      本文件用 **requests 上界**而不是**机器隔离**来兜：2 副本 × 1 核 = 2 核，占新池 allocatable
+#      7840m 的 25%，即使 dev 那 5 个负载同时满载也留得下 —— 前提是配额缺口先补上（见上一段）。
+#   ② **DSN 与 pre 同走 6432 托管池**（`pgbouncer.pool_mode=session`）：压测的目的就是复现
+#      生产的主链路形状（马尼拉 prod 也是 6432），直连 5432 会绕过被测对象。
+#      连接账目：dev(5 负载) + pre(1×10) + perf(本文件 2×30) 需 < 池的 max_client_conn=2000。
+#   ③ **`NODE_TYPE=master`**（pre 也是 master）：`newapi_perf` 是空库，perf 命名空间里没有别的角色，
+#      首启必须由它自己跑 AutoMigrate 建表。写 slave 的话日志表/业务表都不存在，压测会在
+#      第一个请求上失败，而且失败原因看起来像"应用坏了"而不是"环境没建起来"。
+#
+# 红线核对：无明文密钥（Secret 从保管目录注入）；镜像 tag = 日期+git sha，禁 latest；
+# 只允许 `newapi-dev/*` 仓库，**禁止**引用 `newapi-prod/*`；库名必须是 `newapi_perf`（不是 newapi_pre/newapi）。
+# 镜像 tag 现取 `20261015-c62445555`，与 pre 一致 ⇒ 两个环境的压测结果可直接对照。
+# 注意：dev 站已前进到 `20261016-dcd62278`（K4 回读），要不要让 perf 跟着 dev 的 tag 是另一个决定，
+# 跟着 pre 的理由是"pre/perf 同一档，差异只来自副本数与连接账目"。
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: new-api-config
+  namespace: new-api-perf
+  labels:
+    app: new-api
+    project: new-api
+    site: jkt-dev
+    track: perf
+    env: dev
+data:
+  TZ: "Asia/Jakarta"
+  NODE_TYPE: "master"                   # 偏差③：空库首启自建表；改 slave 会让压测打在无 schema 的库上
+  MEMORY_CACHE_ENABLED: "false"         # 不挂 Redis：跨环境键空间互串（与 pre 偏差③ 同因）
+  SYNC_FREQUENCY: "30"
+  SQL_MAX_OPEN_CONNS: "30"              # 2 副本 × 30 = 60 客户端连接，落在池的 max_client_conn=2000 内
+  SQL_MAX_IDLE_CONNS: "10"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: new-api-perf
+  namespace: new-api-perf
+  labels:
+    app: new-api
+    project: new-api
+    site: jkt-dev
+    track: perf
+    env: dev
+spec:
+  replicas: 2
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxUnavailable: 0, maxSurge: 1}
+  selector:
+    matchLabels: {app: new-api, track: perf}
+  template:
+    metadata:
+      labels:
+        app: new-api
+        project: new-api
+        site: jkt-dev
+        track: perf
+        env: dev
+      annotations:
+        checksum/config: "__CONFIG_CHECKSUM__"
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "3000"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: new-api-app
+      terminationGracePeriodSeconds: 30
+      # 裁定 2026-10-19：与 pre/dev 共池 ⇒ **不写 nodeSelector，也不写 tolerations**。
+      # 新池 np-jkt-dev-x4c 实测 taints 为空；且节点标签是 track=dev（不是 track=perf），
+      # 任何按 track 写的 nodeSelector 都会 0 匹配 ⇒ 永久 Pending。落点只由 requests 约束。
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway   # 两节点若同 AZ，DoNotSchedule 会把第二副本卡死
+          labelSelector:
+            matchLabels: {app: new-api, track: perf}
+      containers:
+        - name: new-api
+          image: acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com/newapi-dev/newapi-master:20261015-c62445555
+          imagePullPolicy: IfNotPresent
+          args: ["-log-dir=/data/logs"]
+          ports:
+            - {name: http, containerPort: 3000}
+          volumeMounts:
+            - {name: app-logs, mountPath: /data/logs}
+          env:
+            - {name: NODE_TYPE, value: "master"}
+            - {name: GOMAXPROCS, value: "2"}  # limits 是 2 核 ⇒ 显式钉住，别让 Go 看见节点的 4 核（生产坑 2 同因）
+            - {name: SQL_SLOW_THRESHOLD_MS, value: "200"}
+            - name: SQL_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: new-api-secrets
+                  key: SQL_DSN_MIGRATE
+          envFrom:
+            - configMapRef: {name: new-api-config}
+            - secretRef: {name: new-api-secrets}
+          startupProbe:
+            httpGet: {path: /api/status, port: http}
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            httpGet: {path: /api/status, port: http}
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: {path: /api/status, port: http}
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 5
+          resources:
+            # 2026-10-19 换池后才敢这么取：新池 allocatable 合计 7840m，实测已请求 1.96 核
+            # ⇒ 2 副本 × 1 核 = 2 核仍在余量内。旧池口径下 pre 只能贴到 100m，那套约束已随池作废。
+            requests: {cpu: "1", memory: 2Gi}
+            limits: {cpu: "2", memory: 4Gi}
+      volumes:
+        - name: app-logs
+          emptyDir: {sizeLimit: 2Gi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: new-api-perf
+  namespace: new-api-perf
+  labels: {app: new-api, track: perf}
+spec:
+  type: ClusterIP
+  selector: {app: new-api, track: perf}
+  ports:
+    - {name: http, port: 80, targetPort: http}

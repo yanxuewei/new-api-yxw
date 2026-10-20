@@ -1,0 +1,61 @@
+# =============================================================================
+# pre 环境对外域名 Ingress（pre.likha.hk）
+# =============================================================================
+# 来源：2026-10-20 由 deploy/jakarta_dev/perf_pre_routes.yaml 按环境拆分。
+#
+# DNS（likha.hk zone / alidns）：pre  CNAME →
+#   alb-4okmogghe7hbv5fwm6.ap-southeast-5.alb.aliyuncsslbintl.com（dev ALB，TTL 600）
+#   RecordId = 2112138172414424064
+#
+# 443 证书：AlbConfig jkt-alb 的默认证书 606823-ap-southeast-1（*.likha.hk 通配符，
+#   实测 SAN = *.likha.hk, likha.hk，有效期至 2027-04-28）⇒ 无需新签、无需换绑。
+#
+# ★ 2026-10-20 修正：backend 由旧 Service `new-api-pre` 改为 **`pre-new-api-slave`**
+#   （旧名为改名前的对象，已删除；集群现状以此为准 —— 若照旧名重跑会 503）
+# order：HTTP→HTTPS 重定向=6，443=55（与 dev 的 1/50、2/51、3/52、4/53 错开；
+#   host 本就互不重叠，order 仅用于消歧义）
+#
+# 应用：kubectl apply -f deploy/jakarta_pre/manifests/pre_routes.yaml（经 deploy/lib/ack_remote_jkt_dev.sh）
+# 回滚：kubectl delete -f deploy/jakarta_pre/manifests/pre_routes.yaml
+# =============================================================================
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: pre-route
+  namespace: new-api-pre
+  labels: {app: new-api-pre, env: pre, project: new-api, site: jkt-dev}
+  annotations:
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/order: "55"
+spec:
+  ingressClassName: alb
+  rules:
+    - host: pre.likha.hk
+      http:
+        paths:
+          - backend:
+              service: {name: pre-new-api-slave, port: {number: 80}}
+            path: /
+            pathType: Prefix
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: pre-route-http-redirect
+  namespace: new-api-pre
+  labels: {app: new-api-pre, env: pre, project: new-api, purpose: http-to-https-redirect, site: jkt-dev}
+  annotations:
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80}]'
+    alb.ingress.kubernetes.io/order: "6"
+    alb.ingress.kubernetes.io/actions.redirect: '[{"type":"Redirect","RedirectConfig":{"host":"pre.likha.hk","path":"${path}","port":"443","protocol":"HTTPS","query":"${query}","httpCode":"301"}}]'
+spec:
+  ingressClassName: alb
+  rules:
+    - host: pre.likha.hk
+      http:
+        paths:
+          - backend:
+              service: {name: redirect, port: {name: use-annotation}}
+            path: /
+            pathType: Prefix

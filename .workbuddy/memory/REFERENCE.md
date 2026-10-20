@@ -1502,3 +1502,116 @@ aliyun actiontrail LookupEvents --LookupAttribute.1.Key EventName --LookupAttrib
 - 幂等：cms2 无 create-or-update，重复 create 会多一条 ⇒ 先按 displayName 查（`cms2_rules.sh` 已封装）。
 
 **SLS 数据源规则（部分探明，未打通）**：`datasourceConfig.stores[].storeType` 必填 `LOG|METRIC`；`queryConfig.queries[].expr`（不是 `query`）；`start/end` 必须是 **epoch 秒**（`-1h`/`now` 报 `Specified parameter start/end is not valid`）；`conditionConfig(SLS_MULTI_CONDITION).caseList` 服务端结构未知 —— `{condition,severity}`、`{queryIndex,queryResultKey,operator,value,severity}`、`field/operator/threshold` 等 4 种均报 `caseList must not be null or empty`。⇒ 若要电话化 5xx 燃烧率，先在控制台建 1 条 SLS 规则再用 `alert rule get` 反解。
+
+---
+
+## ★★ master / slave 双角色（2026-10-20 jkt dev 补齐 pre/perf）
+
+### 代码层语义（唯一判据，别再靠猜）
+
+| 位置 | 逻辑 | 效果 |
+|---|---|---|
+| `common/init.go:89` | `IsMasterNode = os.Getenv("NODE_TYPE") != "slave"` | **只要不是 `slave` 就当主节点**（含空值/拼错） |
+| `model/main.go:215` | `if !common.IsMasterNode { return nil }` | slave **跳过主库迁移** |
+| `model/main.go:262` | 同上（`InitLogDB` 内） | slave **跳过日志库迁移** |
+| `model/main.go:235` | `if common.IsMasterNode { return MigrateAuditLogs() }` | 审计日志迁移仅 master |
+| `service/system_task.go:125` · `service/subscription_reset_task.go:31` · `service/auth_cleanup.go:16` · `service/codex_credential_refresh_task.go:37` · `service/authz/enforcer.go:57` | `if !common.IsMasterNode { return }` | **所有定时/后台任务只在 master 跑** |
+
+⇒ slave 的唯一职责：**接业务流量**。多副本时 DB 迁移与定时任务不会重复执行。
+
+### ★ Redis 不是 slave 的前置条件
+`MEMORY_CACHE_ENABLED=false` 时缓存直接走 DB；无 `REDIS_CONN_STRING` 只会打一行
+`REDIS_CONN_STRING not set, Redis is not enabled`，服务照常启动（jkt perf 实测）。
+影响面：多实例间**缓存/限流/额度不共享**；会话靠各实例 `SESSION_SECRET` 一致来保证可互通。
+
+### master / slave 的四个必改差异（照 `new-api-dev-slave`）
+
+| 项 | master | slave |
+|---|---|---|
+| `NODE_TYPE` | `master` | **`slave`** |
+| `SQL_DSN` 来源 | secret key `SQL_DSN_MIGRATE` | secret key **`SQL_DSN`** |
+| `lifecycle.preStop` | 无 | **`sh -c sleep 15`**（优雅摘流，配合 `terminationGracePeriodSeconds: 30`） |
+| 探针 | liveness 无 initialDelay / period `20`；readiness 无 initialDelay / period `10` | liveness **`initialDelay 40 / period 15`**；readiness **`initialDelay 10 / period 5`** |
+
+其余（`GOMAXPROCS`、`SQL_SLOW_THRESHOLD_MS`、`-log-dir=/data/logs`、app-logs emptyDir、
+三个探针都打 `/api/status`）两边一致，**`GOMAXPROCS`/`SQL_SLOW_THRESHOLD_MS` 按环境定位调**。
+
+### ★ 命名与标签体系（2026-10-20 二次定稿：按 POD 名命名）
+
+**Deployment / Service / Pod 名三者同源，selector 单键 `app=<名字>`**：
+
+| 环境 | master Deployment | slave Deployment + Service | selector |
+|---|---|---|---|
+| pre | `pre-new-api-master` | `pre-new-api-slave` | `app: pre-new-api-master` / `app: pre-new-api-slave` |
+| perf | `perf-new-api-master` | `perf-new-api-slave` | `app: perf-new-api-master` / `app: perf-new-api-slave` |
+
+- master **无 Service**（不接流量，只跑迁移与后台任务）；slave 是 Ingress 唯一后端。
+- 附加标签（`env`/`project`/`site`/`track`/`role`）保留但**不进 selector**。
+- ⚠ 与 dev 命名不同（dev 仍为 `new-api-dev` / `new-api-dev-slave` / `yxw-new-api-*`），**dev 未改**。
+
+为什么按名命名：① pod 名即身份，排查时不用再拼 tag 组合；② 两个 controller 的 selector **天然不重叠**（名字不同），不再需要靠 `role` 撑互斥；③ Deployment / Service / selector 值三者一致，误配面小。
+（上一版是 `app=new-api + track + role` 三键 selector，已被本方案取代；selector 不可变 ⇒ 只能 delete 后重建。）
+
+**迁移顺序（关键，反了会 503）**：
+1. 建新 slave Deployment + 新 Service（旧 slave 继续服务，0 影响）
+2. 等新 slave Ready，核对 `endpoints` 只含新 pod
+3. 切 Ingress backend 到新 Service，**实测 200**
+4. **再**删旧 slave Deployment/Service
+5. 最后删旧 master（无 Service，只影响后台任务与迁移，短暂停摆）→ 建新 master
+
+实测（2026-10-20 本轮）：全程 **0 次 5xx**，切完 Ingress 首轮即 200，无 ALB 同步空窗。
+
+### 各环境现状（2026-10-20 二次修订后实测）
+
+| 项 | `newapi-dev` | `new-api-pre` | `new-api-perf` |
+|---|---|---|---|
+| master / slave | `new-api-dev` + `new-api-dev-slave`；`yxw-new-api-master` + `yxw-new-api-slave` | `pre-new-api-master`（**无 svc**）+ `pre-new-api-slave`（有 svc） | `perf-new-api-master`（**无 svc**）+ `perf-new-api-slave`（有 svc） |
+| secret keys | 5：`SQL_DSN`/`SQL_DSN_MIGRATE`/`SESSION_SECRET`/`REDIS_CONN_STRING`/`LOG_SQL_DSN` | **4**（10-20 补 Redis，仍缺 `LOG_SQL_DSN`） | **4**（同左） |
+| Redis db index | `/0` | **`/1`** | **`/2`** |
+| ResourceQuota | 有 | **空壳**（见下「配额漂移」） | **空壳** |
+| Ingress 后端 | slave | **slave**（`pre.likha.hk`→`pre-new-api-slave`） | **slave**（`perf.likha.hk`→`perf-new-api-slave`） |
+
+**★ 历史 IaC 已整体弃用并加了横幅（2026-10-20，fanyan 批准）**：旧链路 20 个文件（2 份旧清单 + 18 个脚本，含入口 `pre_deploy.sh`、`apply_pre_app.sh`、`smoke_*`、`wire_perf_*`、`readback_perf_*`、`topup_perf_quota.sh` 等）统一在文件头插入 `⚠ DEPRECATED（2026-10-20 起）` 横幅（13 行，含新旧名对照 + 「不要重跑」+ 指向权威 IaC）。索引与判定规则见 `deploy/jakarta_pre/DEPRECATED.md`。⚠ 标记纪律：**只标「涉及旧对象名」的**（`deploy/svc/pod + new-api-pre|new-api-perf`、`app=new-api-pre`、旧清单文件名）；**仅引用命名空间的不标** —— 命名空间未改名，只读诊断仍可用。改动量 = 纯插入 264 行、0 删除，全部 `.sh` 通过 `bash -n`，无 CRLF 污染。（2026-10-20 分类整理后，其中 17 个 perf 专属 body 与 2 份 perf 侧旧物已迁至 `deploy/jakarta_perf/`，横幅随之更新为指向两份新 IaC。）
+
+**★ 配额漂移（2026-10-20 11:0x 复核 → fanyan 裁定「不用恢复」）**：`new-api-pre-quota` / `new-api-perf-quota` **对象仍在，但 `spec` 为 `{}`**；`limitrange/limits` 同样是空壳（`type: Container` 无 default/max）⇒ **pre/perf 实际无任何资源上限，此为既定状态，不是缺陷**。`last-applied-configuration` 里仍留有 hard（perf 原为 `limits.cpu=8 / limits.memory=16Gi / pods=12 / requests.cpu=4 / requests.memory=8Gi`），`managedFields` 只有 `2026-10-15T09:40:52Z` 一条 apply。**非本轮改动引入** —— `deploy/jakarta_perf/manifests/legacy/new-api-perf.yaml` 头部（任务 45，2026-10-19；原路径 `deploy/jakarta_pre/new-api-perf.yaml`）已记载「换池后 dev/pre/perf 三个 ns 的 ResourceQuota 实测都不存在…未擅自重建，待负责人定」。⇒ **不要主动重建配额**；若将来要恢复，perf 用上述原值，pre 需重新定。
+
+**IaC（2026-10-20 起按环境拆成两份，各 3 对象）**：
+- pre → `deploy/jakarta_pre/manifests/pre-master-slave.yaml`（master Deployment + slave Deployment + slave Service）
+- perf → `deploy/jakarta_perf/manifests/perf-master-slave.yaml`（同结构）
+原合并文件 `deploy/jakarta_dev/pre_perf_master_slave.yaml`（566 行 / 6 对象）已删除，历史见 `git log --follow`。
+两份头部均含迁移/改名顺序、角色分工代码依据、规格与 Redis db 说明。
+
+**★ 目录分类整理（2026-10-20，同一轮）**：`deploy/jakarta_{dev,pre,perf}/` 三个环境目录统一为
+`manifests/` + `scripts/` + `sql/` + `bodies/`，旧清单进 `manifests/legacy/`。要点：
+1. **执行器必须从 `scripts/` 里跑**：`dev_deploy.sh` / `pre_deploy.sh` 用
+   `HERE=$(dirname $BASH_SOURCE)`、`ENVDIR="$(cd "$HERE/.." && pwd)"`、`ROOT="$(cd "$HERE/../../.." && pwd)"`
+   定位 `manifests/` `sql/` `bodies/`；拷到别处单跑会找不到清单。
+2. **perf 专属 body 17 个**从 `jakarta_pre/bodies/` 迁到 `jakarta_perf/bodies/`（判据：文件名含 `perf`，
+   外加 `confirm_token_softdelete.sh`、`probe_mock_contract.sh` 两个 `NS=new-api-perf` 的）。
+3. **第二轮（同日）：跨环境 / 环境无关件迁 `deploy/ops/`**，判据 = **同时作用于 pre+perf 两 ns，或根本不绑定 ns**：
+   - `deploy/ops/bodies/`（13 个远端 body，附 `README.md` 说明「不能直接 bash，需调用方拼 header」）：
+     `create_ns` `apply_pre_app` `apply_pre_secret` `apply_pre_grants`（两库）`smoke_pre` `smoke_sqlite`
+     `pull_probe` `verify_addon_scope` + 集群级 `diag_mem` `diag_nodes` `probe_db_ports`
+     `readback_capacity` + 其他环境的 `inspect_ck_gone`（马尼拉 prod 取证）。
+   - `deploy/ops/` 平铺 6 个 jkt 公共工具：`jkt_nodes` `poll_invocation` `secret_scan`
+     `set_addon_scope` `set_rds_pooler` `find_rds_conn_metric`。
+   - **仍留 `jakarta_pre/`**：`scripts/pre_deploy.sh` + `bodies/{diag_pending,diag_sqlite_and_devroll,inspect_dev_baseline}.sh`。
+   - ⚠ `pre_deploy.sh` 的 `run_body()` 加了**回落解析**：先 `$BODIES`（pre 专属）再 `$OPS_BODIES`
+     （`deploy/ops/bodies`），11 个分发 body 实测逐个命中（9 走 ops、2 走 pre），子命令仍可用。
+   - ⚠ `secret_scan.sh` 的默认扫描目标随之改为 `jakarta_dev` / `jakarta_pre` / `jakarta_perf` / `ops` 四目录 + 两份主文档。
+4. **`perf_pre_routes.yaml` 拆分时发现并修正了真隐患**：原文 backend 仍写旧 Service
+   `new-api-pre` / `new-api-perf`（10-20 改名后已删除，集群里是 `pre-new-api-slave` / `perf-new-api-slave`）
+   ⇒ 照原文重跑会 **503**。拆出的 `pre_routes.yaml` / `perf_routes.yaml` 已把 backend 改正，并在头部记明。
+5. 每目录新增 `README.md` 导览；`jakarta_pre/DEPRECATED.md` 增「平铺 → 分类」两轮路径对照表。
+6. 历史台账（`deploy/jakarta_dev_ledger.md`、`deploy/docs/*.md`、`deploy/logs/*`）中的平铺路径**未回改**
+   （属当时事实记录）；**操作类文档已改**（`阿里云国际站菲律宾部署_详细操作指南-v2.0.md` 2 处）。
+**Redis**：复用 dev 的 Tair `r-d9j5iy2q82p1ugiwrt.redis.ap-southeast-5.rds.aliyuncs.com:6379`（内网 `10.2.54.77`，与 jkt 集群同 VPC），**仅改 db index 隔离**。
+pre slave 规格沿用 dev（`200m/512Mi`，req `100m/256Mi`）；perf slave **与 perf master 同规格**
+（`2C/4Gi`，req `1C/2Gi`，`GOMAXPROCS=2`、`SQL_SLOW_THRESHOLD_MS=200`）—— 压测环境 slave 必须能独立扛压。
+四个负载都加了 `prometheus.io/scrape`（slave 是流量入口，压测必须看它的指标）。
+
+**回滚**：恢复 `git` 历史版本 IaC + `kubectl apply`，并把 Ingress backend 指回旧 Service 名。
+
+### 坑：云助手命令体上限
+body 脚本超 **~19 KB** 直接被 `CmdContentExceedLimit` 拒（16.5 KB 已触发预警）。
+⇒ 多对象清单要**按环境拆分 body + 剥离 YAML 注释**（4 个 body 各压到 3.3 KB 才稳）。
