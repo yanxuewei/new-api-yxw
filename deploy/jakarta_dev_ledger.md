@@ -1561,3 +1561,33 @@ stdout 路不受影响（纳秒来自 runtime `_time_`）。属既有挂账 G8�
 - 日志库与 pre/perf 的主库**同一实例**（`pgm-d9j9p421lzx4gw73`）⇒ 任务 41 的 I-1 连接预算此后应把 pre/perf 的日志连接一并计入；本轮只做接线，未重算。
 - 未改动：马尼拉正式环境的 `LOG_SQL_DSN`（仍指向已删除的 CK，属另一条待核准变更）、`mock-upstream`、任何 ResourceQuota。
 
+
+## 23. 任务 33 · 压测第一轮：1500 并发 SSE 通过（2026-10-20，`new-api-perf`，k6 口径）
+
+> 完整数据与未跑场景：`deploy/logs/perf_task33_20261020/README.md`；k6 脚本 `deploy/perf/k6/sse.js`。
+
+**环境定版（用户 2026-10-20 裁定）**：不建独立节点池、复用 `np-jkt-dev-x4c`；控制台已建 `perf-new-api-master` / `perf-new-api-slave`（各 1 副本，镜像 `20261015-c62445555`）。本轮补了 `svc/perf-new-api-master`（原先只有 slave 有 Service）。库身份 psql 断定为 **`newapi_perf`**（42 表），`SQL_DSN`/`SQL_DSN_MIGRATE` 均 @6432 经池；Redis 与 dev 同实例、**db=2**（dev db=0）。
+
+**端到端**：channel `mock-perf`（OpenAI → mock）已存在且启用；经 slave 打 `/v1/chat/completions`：非流式 200、SSE 52 chunks + `[DONE]`。
+
+**容量结论（单副本恒定 VU×120s）**：100/300/600/900 VU 全绿（P95 TTFB 342→713ms，CPU 148→927m）；**1200 VU 破线（P95 949ms，CPU 1017m）⇒ 单副本 C ≈ 1000–1100 并发流**。
+**1500 并发验收**：双副本并行各 750 VU —— master P95 **557ms** / slave P95 **626ms**，0% 5xx，合计 ≈689 rps ⇒ **S2 判据达成**（本环境无 ALB/NAT/真实上游开销，结论不外推到生产容量，仅作流水线验收与 C 基线）。
+
+
+**与 §21（10-19 curl 驱动）读数的差异（必须一起看）**：同档位下本轮 k6 明显更好（900 VU P95 713ms vs §21 的 800 档 P95 1.94s）。差异来源**未闭环**，候选：客户端形态（k6 长连接连接池 vs curl 每请求新建连接/进程）、计时口径（`http_req_waiting` 不含建连 vs `time_starttransfer`）、窗口 120s vs 60s。本轮数据内部自洽（100→1200 单调劣化、0% 5xx），但**在补一次同驱动对照前，不把两组数混用**；C≈1000–1100 是 k6 口径下的结论。
+
+**三条环境问题（待处置）**：① `LOG_SQL_DSN` 指向 dev 的 `newapi_logs` ⇒ perf 日志串进 dev 库（与坑 3 同类），建议改指 `newapi_perf`；② Redis 与 dev 同实例（db 隔离）⇒ **S6 只能 pod 侧断连**，不得停实例；③ 仓库 `new-api-perf.yaml` 仍带独立节点池占位，与实际控制台负载不一致，需对齐或废弃。
+
+### 23.1 事故：channel 的 API 地址被改成网关自身域名 ⇒ 401 自环（2026-10-20，已修复）
+
+**现象**：控制台把 `mock-perf` 的「API 地址」从 `http://mock-upstream.new-api-perf.svc.cluster.local` 改成 `https://perf.likha.hk` 后，请求报 `401 Invalid token`。
+
+**根因**：channel 的 API 地址是**上游厂商地址**；`perf.likha.hk` 是 perf 网关**自己的公网入口**（`ingress/perf-route` → 同一 Service）⇒ 自环：客户端请求 → 网关 → 按 channel 转发给 `perf.likha.hk` → 回到同一网关 → 这次拿 channel 的密钥当客户 token（`key` 为空）→ 鉴权失败 401。若 channel key 恰好是有效 token，会退化成无限递归（请求量自乘），比 401 更危险。
+
+**修复**：`channels.base_url` 改回 mock（id=3），等 `SYNC_FREQUENCY=30s` 缓存同步；复验：非流式 200（0.32s）、SSE 200（52 chunks / 1.83s）。**注意**：admin API 的 `PUT /api/channel/` 用 GET 读出的对象回写会回 `{"message":"Invalid parameters"}`（含只读字段），本轮改走库内 UPDATE，后续写一个只提交可变字段的 patch 更稳。
+
+**附带核实**：公网入口本身健康 —— `https://perf.likha.hk/api/status → 200（ssl_verify=0）`、`http → 301`。若要做「经 ALB 公网路径」的压测，改 k6 的 `BASE=https://perf.likha.hk` 即可，**channel 保持指向 mock，不要填网关域名**。
+
+**压测脚本归档（2026-10-20）**：一次性 /tmp 脚本已整理为 `deploy/perf/k6/`（`run.sh` 本机入口 + `bodies/{stage,dual1500,summary,readback}.sh` 节点侧 + `sse.js` + README）。
+用法：`bash deploy/perf/k6/run.sh stage perf-new-api-slave 300 120s` / `dual1500` / `summary` / `readback`。
+归档后回归实测：50 VU×20s → 550 请求、0% 5xx、P95 501ms、cpu_peak=62m，`summary`/`readback` 两动作输出正常。
