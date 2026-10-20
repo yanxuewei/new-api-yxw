@@ -46,7 +46,7 @@ jakarta_perf/
 | 项 | 值 |
 |---|---|
 | Redis | 复用 dev 的 Tair，**db `/2`**（dev=`/0`、pre=`/1`） |
-| secret keys | 4 个（**缺 `LOG_SQL_DSN`**） |
+| secret keys | 5 个：`SQL_DSN` / `SQL_DSN_MIGRATE` / `SESSION_SECRET` / `REDIS_CONN_STRING` / **`LOG_SQL_DSN`**（2026-10-20 与 dev 同源，三环境共用日志库 `newapi_logs`；由 `deploy/ops/bodies/sync_log_dsn.sh` 维护） |
 | 规格 | master 与 slave **同档**：`requests 1C/2Gi` · `limits 2C/4Gi`，`GOMAXPROCS=2`、`SQL_SLOW_THRESHOLD_MS=200` |
 | 为什么 slave 与 master 同档 | slave 是压测唯一入口，按开发档 `200m` 会先在它身上打满，测出来的就不是被测对象的数 |
 | ResourceQuota | `new-api-perf-quota` 对象在、`spec` 为空 ⇒ **实际无资源上限**（fanyan 2026-10-20 裁定不恢复） |
@@ -61,6 +61,41 @@ kubectl -n new-api-perf logs -l app=perf-new-api-slave --tail=200
 vim deploy/jakarta_perf/manifests/perf-master-slave.yaml
 # 应用经云助手通道：写 body（kubectl apply -f - <<'EOF' … EOF）→ bash deploy/lib/ack_remote_jkt_dev.sh <body.sh>
 ```
+
+## 管理员登录凭据（2026-10-20 排障结论）
+
+> 症状：`perf.likha.hk` 登录报「用户名或密码错误，或用户已被封禁」。**实际是用户名填错** —— 库里根本没有
+> `admin` 这个账号，唯一的管理员是 **`perfroot`**。
+
+| 项 | 值 |
+|---|---|
+| 唯一账号 | **`perfroot`**（`users.id=2`，`role=100`，`status=1`，`display_name=Root User`） |
+| 口令哈希 | `$argon2id$…`（97 字符，走 `common/crypto.go` 的 argon2id 分支，不是 bcrypt） |
+| 凭据真源 | Secret **`perf-load-test-credentials`**（2026-10-19 建）含 4 个 key：`admin_username` / `admin_password` / `token_id` / `token_key` |
+| 明文口令 | **不入库、不写文档** —— `deploy/ops/secret_scan.sh` 会扫出来；每次现从 Secret 取 |
+
+取法（本机无 kubeconfig，必须经云助手通道在节点内跑 `kubectl`）：
+
+```bash
+# 1) 写一个只读 body
+cat > /tmp/show_cred.sh <<'EOF'
+kubectl -n new-api-perf get secret perf-load-test-credentials -o yaml
+EOF
+# 2) 经通道执行，输出里 admin_username / admin_password 是 base64
+bash deploy/lib/ack_remote_jkt_dev.sh /tmp/show_cred.sh
+# 3) 本地解码
+echo '<admin_password 的 base64>' | base64 -d
+```
+
+**若口令也丢了**（Secret 被删或与库不一致），走台账 `jakarta_dev_ledger.md:1484` 记载的恢复路径：
+删 `users`（+ `setups`）里 root 相关行 → `rollout restart` → 访问 `/api/setup` 门禁重开 → 用 `perfroot`
+重设口令 → 立刻把口令写回 Secret `perf-load-test-credentials`。
+
+> 附带发现：`POST /api/user/login` 默认收**明文口令**（`PASSWORD_LOGIN_ENCRYPTION_ENABLED` 默认 `false`，
+> 只有置 `true` 才需要 `password_encrypted` + `encryption_key_id`）。登出接口是
+> `POST /api/user/auth/logout`（**不是** `/api/user/logout`），会话管理在
+> `GET /api/user/sessions`、`DELETE /api/user/sessions/<sid>`、`POST /api/user/sessions/revoke-others`。
+> ⚠ `DELETE` 掉自己的 current 会话会让当前 token 立刻失效，后续请求全 401 —— 删多个时要**把 current 排最后**。
 
 ## 提醒
 

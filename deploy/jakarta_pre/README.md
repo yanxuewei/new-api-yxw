@@ -59,7 +59,7 @@ vim deploy/jakarta_pre/manifests/pre-master-slave.yaml
 | 项 | 值 |
 |---|---|
 | Redis | 复用 dev 的 Tair，**db `/1`**（dev=`/0`、perf=`/2`，隔离限流计数与渠道缓存） |
-| secret keys | 4 个（**缺 `LOG_SQL_DSN`** ⇒ 日志库回落主库） |
+| secret keys | 5 个：`SQL_DSN` / `SQL_DSN_MIGRATE` / `SESSION_SECRET` / `REDIS_CONN_STRING` / **`LOG_SQL_DSN`**（2026-10-20 与 dev 同源，三环境共用日志库 `newapi_logs`；由 `deploy/ops/bodies/sync_log_dsn.sh` 维护） |
 | 规格 | master `100m/256Mi → 500m/512Mi`；slave `100m/256Mi → 200m/512Mi` |
 | ResourceQuota | `new-api-pre-quota` 对象在、`spec` 为空 ⇒ **实际无资源上限**（fanyan 2026-10-20 裁定不恢复） |
 | 探针差异 | slave 有 `preStop sleep 15` 与更大的 `initialDelay`（优雅摘流）；master 无 |

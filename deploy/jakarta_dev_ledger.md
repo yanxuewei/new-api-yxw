@@ -1530,3 +1530,34 @@ stdout 路不受影响（纳秒来自 runtime `_time_`）。属既有挂账 G8�
 3. **ResourceQuota 保持"不动"**（本轮裁定），因此共池无上限这一事实继续有效：perf 再压更高档位时，**dev/pre 邻居会被一起带走**——本轮 800 档没有（邻居全 Ready），但那是"没到量"而不是"有护栏"。
 4. 任务 45 的 MySQL 列（顺延 T+14）、Prepaid 续费（生产 PG 2026-10-28 / dev RDS 2026-11-12 / 日志 MySQL 2026-11-15）、仓库明文凭据脱敏与口令轮换（负责人 2026-10-19 早前口径「暂时不用管」，此处仅登记不执行）——继续携带。
 
+## 22. pre / perf 接入共享日志库 `newapi_logs`（2026-10-20，**Secret 补第 5 键 + 4 个 Deployment 重启**）
+
+### 22.1 变更与源值形态
+负责人要求：参照 `newapi-dev` 的 `LOG_SQL_DSN`，给 `new-api-pre` / `new-api-perf` 的 `new-api-secrets` 补同一个键，三环境共用日志库。
+- 源值实测（只出形态，不出值）：`postgres` @ `pgm-d9j9p421lzx4gw73…:6432`、db=`newapi_logs`、user=`newapi`、len=129、sha256=`459e8dd9ecea`。
+  ⇒ **不是马尼拉 MySQL**，就是雅加达本地 PG 的 `newapi_logs` 库、走 6432 托管池；同 VPC，无需白名单/网络变更。
+- 写入工具（新增）：`deploy/ops/bodies/sync_log_dsn.sh` —— `APPLY=0` 只读取证 / `APPLY=1` 才 patch；`RESTART=1` 才滚动重启；
+  值经 600 临时文件 `--patch-file` 传入，**不进 argv、不进输出**；命名空间白名单只放 dev/pre/perf。
+- 回读：pre / perf 的 `LOG_SQL_DSN` 与 dev **逐字同值**（sha256 `459e8dd9ecea`），两 ns 键面均为 5 个
+  （`SQL_DSN` / `SQL_DSN_MIGRATE` / `SESSION_SECRET` / `REDIS_CONN_STRING` / `LOG_SQL_DSN`）。
+
+### 22.2 生效判据（envFrom 只在容器创建时求值 ⇒ 必须重建 Pod）
+- `rollout restart` 四个业务 Deployment：`pre-new-api-master` / `pre-new-api-slave` / `perf-new-api-master` / `perf-new-api-slave`，
+  **`mock-upstream`(6) 明确跳过**；四次均 `successfully rolled out`。
+- 运行中进程 `printenv LOG_SQL_DSN` 的 sha256 与 dev 同值（pre/perf 共 4 个 Pod 全 OK；`startTime=2026-10-20T04:58:59Z`、`restarts=0`）。
+- master **全量**日志（非 tail 截断）：`using PostgreSQL as database` ×2 + `database migration started` ×2（= 主库 + 日志库各一次），
+  `[FATAL]`/`panic` **0 条** ⇒ `InitLogDB` 成功（该函数失败会 `FatalLog` 退出，见 `model/main.go:268`），`migrateLOGDB()` 已在 `newapi_logs` 上跑过。
+- 同 ns Service `/api/status` 两侧均正常返回。
+- 证据 InvokeId：`t-ida70kuo8cd7xts`（写 Secret）· `t-ida70kup085x1c0`（重启）· `t-ida70kurfdvdc74` / `t-ida70kusndkhse8`（验证）。
+
+### 22.3 顺带修掉的持久性坑（不修就会被下一次重跑静默回退）
+- `deploy/ops/bodies/apply_pre_secret.sh` 原先用 `create secret --dry-run | apply` **只建 3 键**，且**显式拒绝**载荷里出现
+  `LOG_SQL_DSN` / `REDIS_CONN_STRING` ⇒ 任何人重跑一次就把刚加的键删掉。已改为 **merge patch**（只覆盖托管的 3 键、其余保留），
+  并加 K3b：目标缺 `LOG_SQL_DSN` 时自动从 dev 复制同源值。
+- `deploy/jakarta_pre/README.md`、`deploy/jakarta_perf/README.md` 的「secret keys 4 个（缺 `LOG_SQL_DSN`）」已按实况改为 5 键。
+
+### 22.4 需知
+- 三环境写入**同一张 `logs` 表、无环境列区分** ⇒ 按负责人裁定执行，但按环境切分统计不可行是预期副作用。
+- 日志库与 pre/perf 的主库**同一实例**（`pgm-d9j9p421lzx4gw73`）⇒ 任务 41 的 I-1 连接预算此后应把 pre/perf 的日志连接一并计入；本轮只做接线，未重算。
+- 未改动：马尼拉正式环境的 `LOG_SQL_DSN`（仍指向已删除的 CK，属另一条待核准变更）、`mock-upstream`、任何 ResourceQuota。
+

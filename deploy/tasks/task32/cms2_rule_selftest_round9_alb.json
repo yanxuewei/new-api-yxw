@@ -1,0 +1,26 @@
+{
+  "workspace": "default-cms-5108890064395960-ap-southeast-6",
+  "displayName": "[TEST] 降噪验证-ALB实体(异实体)",
+  "enabled": true,
+  "contentTemplate": "任务32 第9轮：用 ALB 实体（非 k8s 集群）验证是否为合并降噪抑制",
+  "labels": {"task": "task32", "kind": "selftest", "round": "9"},
+  "datasourceConfig": {"type": "CLOUD_MONITORING", "productCategory": "acs_alb"},
+  "queryConfig": {
+    "type": "CLOUD_MONITORING_QUERY",
+    "namespace": "acs_alb",
+    "dimensions": [{"loadBalancerId": "alb-1riqckb1h8ezm0y7s9"}]
+  },
+  "conditionConfig": {
+    "type": "CLOUD_MONITORING_CONDITION",
+    "escalationType": "SIMPLE",
+    "simpleEscalation": {
+      "metricName": "AliyunAlb_LoadBalancerHTTPCode5XX",
+      "period": 60,
+      "escalations": [
+        {"severity": "CRITICAL", "threshold": -1, "comparisonOperator": "GreaterThanThreshold", "times": 1}
+      ]
+    }
+  },
+  "notifyConfig": {"type": "NOTIFY_POLICY", "notifyStrategies": ["bf11235791b74ccbabe3bc379aa1dae2"]},
+  "scheduleConfig": {"type": "FIXED", "intervalSecs": 60}
+}

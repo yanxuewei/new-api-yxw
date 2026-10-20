@@ -2,8 +2,9 @@
 # deploy/ops/bodies/apply_pre_secret.sh —— 建/更新 Secret new-api-secrets（pre/perf ns，3 键，无明文回显）
 # 载荷 $SEC_B64 = tar.gz：SQL_DSN / SQL_DSN_MIGRATE / SESSION_SECRET
 # 载荷 $NS / $DBNAME（header 注入）：目标命名空间与该环境专属库名（默认 pre/newapi_pre）。
-# 与 dev 的差别（刻意的，不是漏了）：**没有 LOG_SQL_DSN、没有 REDIS_CONN_STRING** ⇒
-#   日志表随主库、缓存走进程内（卡片偏差 ③④）。
+# 与 dev 的差别：本 body 只**托管** 3 个键（SQL_DSN / SQL_DSN_MIGRATE / SESSION_SECRET）。
+#   `LOG_SQL_DSN`（日志库）与 `REDIS_CONN_STRING`（共享 Tair）属运维另加 ⇒ 本 body **合并保留、绝不删除**；
+#   其中 LOG_SQL_DSN 缺失时会从 newapi-dev 复制同源值（2026-10-20 起三环境共用日志库 newapi_logs）。
 NS="${NS:-new-api-pre}"; DBNAME="${DBNAME:-newapi_pre}"
 trap 'shred -u "$T"/sec/* 2>/dev/null; rm -rf "$T"' EXIT
 mkdir -p "$T/sec"; chmod 700 "$T/sec"
@@ -14,8 +15,12 @@ for f in "$T"/sec/*; do printf '    %-18s bytes=%s\n' "$(basename "$f")" "$(wc -
 for k in SQL_DSN SQL_DSN_MIGRATE SESSION_SECRET; do
   [ -s "$T/sec/$k" ] || { echo "    [XX] 缺少键 $k"; exit 1; }
 done
-for k in LOG_SQL_DSN REDIS_CONN_STRING; do
-  [ -e "$T/sec/$k" ] && { echo "    [XX] 载荷里出现了 $k ⇒ 与卡片偏差③④冲突，终止"; exit 1; }
+# 载荷只允许上面 3 个键；LOG_SQL_DSN / REDIS_CONN_STRING 由 K3 合并保留，**不从载荷注入**
+for f in "$T"/sec/*; do
+  case "$(basename "$f")" in
+    SQL_DSN|SQL_DSN_MIGRATE|SESSION_SECRET) : ;;
+    *) echo "    [XX] 载荷含未托管的键 $(basename "$f") ⇒ 终止"; exit 1 ;;
+  esac
 done
 
 echo "=== K2 DSN 结构自检（本地 grep，值不外泄）"
@@ -47,12 +52,46 @@ SS=$(cat "$T/sec/SESSION_SECRET")
 printf '    SESSION_SECRET   len=%s fp=%s（与 dev 是否同值由 K4 反证）\n' "${#SS}" "$(printf '%s' "$SS" | sha256sum | cut -c1-12)"
 unset SS
 
-echo "=== K3 apply Secret（幂等）"
-ARGS=""
-for k in SQL_DSN SQL_DSN_MIGRATE SESSION_SECRET; do ARGS="$ARGS --from-file=$k=$T/sec/$k"; done
-kubectl -n "$NS" create secret generic new-api-secrets $ARGS --dry-run=client -o yaml > "$T/secret.yaml" 2>"$T/err" \
-  || { echo "    [XX] create 失败："; sed 's/^/    /' "$T/err"; exit 1; }
-kubectl apply -f "$T/secret.yaml" 2>&1 | sed 's/^/    /'
+echo "=== K3 apply Secret（merge：只覆盖托管的 3 键，保留 LOG_SQL_DSN / REDIS_CONN_STRING）"
+if ! kubectl -n "$NS" get secret new-api-secrets >/dev/null 2>&1; then
+  ARGS=""
+  for k in SQL_DSN SQL_DSN_MIGRATE SESSION_SECRET; do ARGS="$ARGS --from-file=$k=$T/sec/$k"; done
+  kubectl -n "$NS" create secret generic new-api-secrets $ARGS >/dev/null 2>&1 \
+    && echo "    首次创建（3 键；日志库键由 K3b 补）" \
+    || { echo "    [XX] create 失败"; exit 1; }
+fi
+kubectl -n "$NS" get secret new-api-secrets -o jsonpath='{.data}' > "$T/cur.json" 2>/dev/null || true
+[ -s "$T/cur.json" ] || echo '{}' > "$T/cur.json"
+python3 - "$T" <<'PY'
+import base64, json, os, sys
+T = sys.argv[1]
+try:
+    cur = json.load(open(os.path.join(T, "cur.json")))
+except Exception:
+    cur = {}
+for k in ("SQL_DSN", "SQL_DSN_MIGRATE", "SESSION_SECRET"):
+    with open(os.path.join(T, "sec", k), "rb") as f:
+        cur[k] = base64.b64encode(f.read()).decode()
+json.dump({"data": cur}, open(os.path.join(T, "patch.json"), "w"))
+PY
+chmod 600 "$T/patch.json"
+kubectl -n "$NS" patch secret new-api-secrets --type=merge --patch-file "$T/patch.json" 2>&1 | sed 's/^/    /'
+rm -f "$T/patch.json" "$T/cur.json"
+
+echo "=== K3b 日志库键：缺则从 newapi-dev 复制同源值（三环境共用 newapi_logs）"
+if [ -z "$(kubectl -n "$NS" get secret new-api-secrets -o jsonpath='{.data.LOG_SQL_DSN}' 2>/dev/null)" ]; then
+  B=$(kubectl -n newapi-dev get secret new-api-secrets -o jsonpath='{.data.LOG_SQL_DSN}' 2>/dev/null)
+  if [ -n "$B" ]; then
+    printf '{"data":{"LOG_SQL_DSN":"%s"}}' "$B" > "$T/logpatch.json"; chmod 600 "$T/logpatch.json"
+    kubectl -n "$NS" patch secret new-api-secrets --type=merge --patch-file "$T/logpatch.json" 2>&1 | sed 's/^/    /'
+    printf '    已从 newapi-dev 复制 fp=%s\n' "$(printf '%s' "$B" | base64 -d | sha256sum | cut -c1-12)"
+    rm -f "$T/logpatch.json"; unset B
+  else
+    echo "    [!] dev 也没有 LOG_SQL_DSN ⇒ 跳过（日志库将回落主库）"
+  fi
+else
+  echo "    已存在，保留现值（不覆盖）"
+fi
 
 echo "=== K4 反证：pre 的 SESSION_SECRET 不能等于 dev 的（坑 1 跨环境越权）"
 FP_PRE=$(kubectl -n "$NS" get secret new-api-secrets -o go-template='{{ index .data "SESSION_SECRET" }}' 2>/dev/null | base64 -d | sha256sum | cut -c1-12)
