@@ -1,0 +1,35 @@
+[i] 动态选定节点=i-k1afs8wedv35rai4pmx2（DescribeClusterNodes 现取，未写死）
+[i] 取 15 分钟临时私网 kubeconfig
+[i] server=    server: https://10.2.25.173:6443  节点=i-k1afs8wedv35rai4pmx2  RUN_ID=1792562661-50252-30073
+[i] InvokeId=t-ida70okzjl11fy8
+----- 节点内输出（status=Success）-----
+=== mode=burst base=http://172.23.2.189 vus=1500 dur=90s rate=
+  job_succeeded=1 failed=0 cpu_peak=849m mem_peak=223Mi
+===RUN_META===
+target=perf-new-api-slave
+base=http://172.23.2.189
+mode=burst
+vus=1500
+dur=90s
+cpu_peak_m=849
+mem_peak_mi=223
+replicas=2
+job=k6-burst
+ts=2026-10-21T06:06:47Z
+images=
+===END_META===
+     checks.........................: 100.00% 73940 out of 73940
+     data_received..................: 813 MB  6.2 MB/s
+     http_req_connecting............: avg=18.45µs  med=0s       p(90)=0s       p(95)=0s       p(99)=847.44µs max=56.68ms
+     http_req_duration..............: avg=2.25s    med=2.19s    p(90)=2.66s    p(95)=2.84s    p(99)=3.24s    max=4.45s  
+   ✓ http_req_failed................: 0.00%   0 out of 73940
+     http_req_receiving.............: avg=1.81s    med=1.75s    p(90)=2.16s    p(95)=2.32s    p(99)=2.69s    max=3.7s   
+     http_req_sending...............: avg=12.93µs  med=11.37µs  p(90)=18.93µs  p(95)=24.15µs  p(99)=38.57µs  max=1.23ms 
+     http_req_tls_handshaking.......: avg=0s       med=0s       p(90)=0s       p(95)=0s       p(99)=0s       max=0s     
+     http_req_waiting...............: avg=437.99ms med=381.83ms p(90)=612.76ms p(95)=730.95ms p(99)=993.97ms max=2.06s  
+     ✓ { type:sse }.................: avg=437.99ms med=381.83ms p(90)=612.76ms p(95)=730.95ms p(99)=993.97ms max=2.06s  
+     http_reqs......................: 73940   561.961514/s
+     vus_max........................: 1500    min=1500           max=1500
+### remote_rc=0 cleaned=YES
+-----------------------------------
+[i] 凭据清理：本机 已删 / 节点侧 cleaned=YES

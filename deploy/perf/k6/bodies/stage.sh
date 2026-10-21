@@ -73,7 +73,9 @@ done
 kill $SAMPLER 2>/dev/null; wait $SAMPLER 2>/dev/null
 CPUM=$(sort -n /tmp/cpu_${VUS}.txt 2>/dev/null | tail -1)
 MEMM=$(sort -n /tmp/mem_${VUS}.txt 2>/dev/null | tail -1)
-REPL=$(echo $LABELS | wc -w)
+REPL=$(kubectl -n $NS get deploy "$TARGET_SVC" -o jsonpath='{.status.readyReplicas}' 2>/dev/null)
+[ -n "$REPL" ] && [ "$REPL" != "0" ] || REPL=$(kubectl -n $NS get deploy perf-new-api-slave -o jsonpath='{.status.readyReplicas}' 2>/dev/null)
+[ -n "$REPL" ] || REPL=$(echo $LABELS | wc -w)
 IMG=$(kubectl -n $NS get deploy -o jsonpath='{range .items[*]}{.metadata.name}={.spec.template.spec.containers[0].image}{","}{end}' 2>/dev/null | tr ',' '\n' | grep -E "perf-new-api" | head -2 | tr '\n' ';')
 echo "--- job_succeeded=${S:-?} cpu_peak=${CPUM:-?}m mem_peak=${MEMM:-?}Mi"
 echo "===RUN_META==="
