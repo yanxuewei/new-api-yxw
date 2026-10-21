@@ -61,7 +61,14 @@ run_body() {
       safe=$(printf '%s' "${DESC:-$tag}" | tr -c 'A-Za-z0-9._-' '-' | sed 's/--*/-/g;s/-*$//')
       local html="$REPORT_DIR/perf_report_${safe}_${ts}.html"
       python3 "$HERE/report.py" --logs "$log" --out "$html" --eip-mbps "${EIP_MBPS:-5}" || true
-      echo "[perf-k6] 报告：$html" ;;
+      echo "[perf-k6] 本次报告：$html"
+      # 完整报告：聚合目录内全部运行（阶梯/多场景一览）
+      AGG="$REPORT_DIR/perf_report_ALL_${ts}.html"
+      HIST="$ROOT/deploy/logs/perf_reports"
+      DIRS=(--log-dir "$REPORT_DIR"); [ -d "$HIST" ] && DIRS+=(--log-dir "$HIST")
+      python3 "$HERE/report.py" "${DIRS[@]}" --out "$AGG" --eip-mbps "${EIP_MBPS:-5}" || true
+      cp -f "$AGG" "$REPORT_DIR/perf_report_ALL_latest.html" 2>/dev/null || true
+      echo "[perf-k6] 完整报告：$AGG（副本 perf_report_ALL_latest.html）" ;;
   esac
   return $rc
 }

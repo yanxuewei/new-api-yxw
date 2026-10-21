@@ -64,3 +64,24 @@ python3 deploy/perf/k6/report.py --log-dir deploy/perf/perf_reports \
 **带宽判定**：公网路径（k6→NAT→EIP→ALB）先撞 EIP 带宽时，表现为「RPS 塌陷 + 连接级失败 + 应用侧无 5xx + CPU 很低」。`run.sh` 用 `EIP_MBPS`（默认 5，雅加达 dev 现网实测 5 Mbps）把这条写进报告；此时**首个破线档不参与拐点插值**，卡片明确标注“拐点不可用，改用内网直连档位”。
 
 **已知边界**：2026-10-20 17:22 之前的 3 条日志因抓取过滤漏了 `http_req_duration`，明细表「P95 端到端」显示 0；新日志已含该行。
+
+## 完整报告（2026-10-21 起）
+
+每次 `stage`/`dual1500`/场景跑完，除"本次报告"外，还会聚合 `deploy/perf/perf_reports` + 历史 `deploy/logs/perf_reports` 生成**完整报告**：
+`perf_report_ALL_<时间戳>.html`，并同步覆盖 `perf_report_ALL_latest.html`。
+
+完整报告额外包含：
+- **趋势图每点可交互**：悬停显示简卡（场景/并发、RPS、P95/P99、错误率），单击弹出完整明细（时间、路径、副本、端到端 P95、checks、CPU/内存、下行）；深底亮字、高对比。
+- **VU 的含义**与 Little 定律换算说明。
+- **各 Job/动作的设计目的**对照表（stage/dual1500/burst/admin/degrade/rolling/long 为什么这么设计）。
+- **一次请求的链路耗时分解图**（上游首字 300ms / 网关+链路开销 / 流式吐字 1500ms / 传输余量），附口径说明。
+- 容量拐点只用**内网稳态档**（clusterip/clusterip-dual）计算；无破线档时用最小二乘外推并标注"外推值"。
+
+## 2026-10-21 二次优化
+
+1. **浮层可读性**：全局 `table{background:#fff}` 会盖掉 `.tip-t` 的深底，导致白底浅字；已加 `.tip table{background:transparent!important}` 与 `td{color:#f4fff9!important}`，标签列改亮绿加粗。
+2. **链路耗时改为模块级**：用 k6 客户端阶段指标（`http_req_sending / connecting / tls_handshaking / waiting / receiving`）按 **p90** 实测分解；
+   模块表：k6 发送 · DNS/TCP 连接 · TLS 握手 · **网关+链路（NAT/ALB/Ingress/鉴权/限流/选渠道）** · mock 首字(300ms) · mock 流式吐字(1500ms) · 客户端接收余量。
+   NAT/ALB/Ingress 目前无逐跳埋点，合并为“网关+链路”= waiting_p90 − 300ms；要再拆需接 SLS 访问日志或 trace（未做，不填假数据）。
+3. **标签遮挡**：去掉条形图内的长标签，改为图下表格（模块/耗时/占比/数据来源），彻底避免“上游首字”和“网关+链路”文字重叠。
+4. 每个 body 的日志过滤已包含四个阶段指标；`report.py` 取**有阶段数据的最优档**画链路图（`best_phase`）。

@@ -89,5 +89,5 @@ echo "job=$JOB"
 echo "ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo "images=$IMG"
 echo "===END_META==="
-kubectl -n $NS logs job/$JOB 2>&1 | grep -E "http_reqs|http_req_failed|http_req_waiting|\{ type:sse \}|checks|iterations\.\.\.|data_received|vus_max|http_req_duration|✗" | head -12
+kubectl -n $NS logs job/$JOB 2>&1 | grep -E "http_reqs|http_req_failed|http_req_waiting|\{ type:sse \}|checks|iterations\.\.\.|data_received|vus_max|http_req_duration|http_req_connecting|http_req_tls_handshaking|http_req_sending|http_req_receiving|✗" | head -12
 rm -f /tmp/cpu_${VUS}.txt /tmp/mem_${VUS}.txt

@@ -43,14 +43,20 @@ def parse_meta(text: str) -> dict:
 
 
 def _num(s: str, unit: str = "") -> float:
+    """k6 时长字符串 -> 毫秒。支持 12m4.4s / 992.81µs / 6.74ms / 2.1s。"""
     s = s.strip()
     if unit and s.endswith(unit):
         s = s[: -len(unit)]
-    if s.endswith("ms"):
-        return float(s[:-2])
-    if s.endswith("s"):
-        return float(s[:-1]) * 1000.0
-    return float(s)
+    m = re.fullmatch(r"(?:(\d+)m)?([\d.]+)(\u00b5s|us|ms|s)", s)
+    if not m:
+        m2 = re.fullmatch(r"(\d+)m", s)
+        if m2:
+            return float(m2.group(1)) * 60000.0
+        return float(s)
+    mins = float(m.group(1) or 0)
+    val = float(m.group(2))
+    u = m.group(3)
+    return mins * 60000.0 + val * {"\u00b5s": 0.001, "us": 0.001, "ms": 1.0, "s": 1000.0}[u]
 
 
 def parse_summary(text: str) -> dict:
@@ -60,7 +66,7 @@ def parse_summary(text: str) -> dict:
         "reqs": r"http_reqs\.+:\s*(\d+)\s+([\d.]+)/s",
         "failed": r"http_req_failed\.+:\s*([\d.]+)%\s+(\d+) out of (\d+)",
         "waiting": r"http_req_waiting\.+:\s*(.+)",
-        "duration": r"http_req_duration\.+:\s*avg=([^\s]+)\s+min=([^\s]+)\s+med=([^\s]+)\s+p\(90\)=([^\s]+)\s+p\(95\)=([^\s]+)\s+p\(99\)=([^\s]+)\s+max=([^\s]+)",
+        "duration": r"http_req_duration(?:\{[^}]*\})?\.+:\s*avg=(\S+)\s+(?:min=\S+\s+)?med=(\S+)\s+p\(90\)=(\S+)\s+p\(95\)=(\S+)\s+p\(99\)=(\S+)\s+max=(\S+)",
         "checks": r"checks\.+:\s*([\d.]+)%\s+(\d+) out of (\d+)",
         "data_recv": r"data_received\.+:\s*([\d.]+)\s*(\wB)",
         "data_rate": r"data_received\.+:\s*[\d.]+\s*\wB\s+([\d.]+)\s*(k|M)B/s",
@@ -98,9 +104,10 @@ def parse_summary(text: str) -> dict:
     durs = re.findall(pats["duration"], text)
     if durs:
         out["dur_avg"] = max(_num(d[0]) for d in durs)
-        out["dur_med"] = max(_num(d[2]) for d in durs)
-        out["dur_p95"] = max(_num(d[4]) for d in durs)
-        out["dur_p99"] = max(_num(d[5]) for d in durs)
+        out["dur_med"] = max(_num(d[1]) for d in durs)
+        out["dur_p90"] = max(_num(d[2]) for d in durs)
+        out["dur_p95"] = max(_num(d[3]) for d in durs)
+        out["dur_p99"] = max(_num(d[4]) for d in durs)
     m = re.search(pats["checks"], text)
     if m:
         out["checks_pct"] = float(m.group(1))
@@ -116,6 +123,27 @@ def parse_summary(text: str) -> dict:
     if m:
         out["vus_max"] = int(m.group(1))
     return out
+
+
+PHASE_KEYS = {
+    "phase_connecting": "http_req_connecting",
+    "phase_tls": "http_req_tls_handshaking",
+    "phase_sending": "http_req_sending",
+    "phase_waiting": "http_req_waiting",
+    "phase_receiving": "http_req_receiving",
+    "phase_duration": "http_req_duration",
+}
+
+
+def parse_phase_p90(text: str, metric: str) -> float | None:
+    """从 k6 摘要取某指标 p(90)（毫秒）。行形如：http_req_sending...: avg=.. min=.. med=.. p(90)=.. p(95)=.."""
+    m = re.search(re.escape(metric) + r"(?:\{[^}]*\})?\.+:\s*avg=\S+\s+(?:min=\S+\s+)?med=\S+\s+p\(90\)=(\S+)", text)
+    if not m:
+        return None
+    try:
+        return _num(m.group(1))
+    except ValueError:
+        return None
 
 
 def load_runs(paths: list[str], eip_mbps: float = 0.0) -> list[dict]:
@@ -139,6 +167,10 @@ def load_runs(paths: list[str], eip_mbps: float = 0.0) -> list[dict]:
         run["mem_mi"] = float(meta.get("mem_peak_mi", 0) or 0)
         run["dur_s"] = float(re.sub(r"[^0-9.]", "", meta.get("dur", "0")) or 0)
         run["source"] = os.path.basename(p)
+        for k, metric in PHASE_KEYS.items():
+            v = parse_phase_p90(text, metric)
+            if v is not None:
+                run[k] = v
         run["pass"] = (s.get("err_pct", 100) <= SLO_ERR_RATE * 100) and (s.get("ttfb_p95", 1e9) <= SLO_TTFB_P95)
         # 派生量
         if run["rps"] > 0:
@@ -162,27 +194,56 @@ def analyse(runs: list[dict], eip_mbps: float = 0.0) -> dict:
     if not runs:
         return a
     passing = [r for r in runs if r["pass"]]
-    a["best"] = max(passing, key=lambda r: r["rps"]) if passing else None
+    sse = [r for r in passing if r.get("mode") != "admin"]
+    adm = [r for r in passing if r.get("mode") == "admin"]
+    a["best"] = max(sse, key=lambda r: r["rps"]) if sse else (max(passing, key=lambda r: r["rps"]) if passing else None)
+    a["best_admin"] = max(adm, key=lambda r: r["rps"]) if adm else None
+    phased = [r for r in sse if r.get("phase_receiving")]
+    a["best_phase"] = max(phased, key=lambda r: r["rps"]) if phased else a["best"]
     a["worst"] = max(runs, key=lambda r: r["vus_i"])
-    a["first_fail"] = next((r for r in runs if not r["pass"]), None)
-    # 单副本拐点：最后一个通过点与第一个失败点之间，对 P95 做线性插值到 800ms
+    # 稳态容量档：只认内网直连（单副本/双副本），排除公网（带宽受限）、管理面、劣化、滚动、长流
+    cap_runs = [r for r in runs if r.get("mode") in ("clusterip", "clusterip-dual")]
+    cap_runs.sort(key=lambda r: r.get("vus_per_replica") or 0)
+    cap_pass = [r for r in cap_runs if r["pass"]]
+    fail = next((r for r in cap_runs if not r["pass"]), None)
+    a["first_fail"] = fail
     knee_vus = knee_rps = None
-    bw_blocked = bool(a["first_fail"] and (a["first_fail"].get("bw_util") or 0) >= 0.85)
-    a["knee_blocked"] = bw_blocked
-    if passing and a["first_fail"] and not bw_blocked:
-        p, f = passing[-1], a["first_fail"]
-        if p is not f and f.get("ttfb_p95") and p.get("ttfb_p95") and f["ttfb_p95"] > p["ttfb_p95"]:
-            vp, vf = p["vus_per_replica"], f["vus_per_replica"]
-            yp, yf = p["ttfb_p95"], f["ttfb_p95"]
-            ratio = (SLO_TTFB_P95 - yp) / (yf - yp)
-            knee_vus = vp + ratio * (vf - vp)
-            knee_rps = (p["rps_per_replica"] + ratio * (f["rps_per_replica"] - p["rps_per_replica"]))
+    note = ""
+    if cap_pass and fail:
+        p1 = cap_pass[-1]
+        v1, y1 = p1["vus_per_replica"], p1["ttfb_p95"]
+        v2, y2 = fail["vus_per_replica"], fail["ttfb_p95"]
+        if y2 > y1 and v2 > v1 and y1 < SLO_TTFB_P95:
+            ratio = (SLO_TTFB_P95 - y1) / (y2 - y1)
+            knee_vus = v1 + ratio * (v2 - v1)
+            knee_rps = p1["rps_per_replica"] + ratio * (fail["rps_per_replica"] - p1["rps_per_replica"])
+            note = "实测破线档插值"
+    if knee_vus is None and len(cap_pass) >= 2:
+        # 去掉冷启动畸变：保留 P95 最低点之后的点（低并发首跑常因副本未热身而 P95 偏高）
+        ys_all = [r["ttfb_p95"] for r in cap_pass]
+        k = ys_all.index(min(ys_all))
+        cap_use = cap_pass[k:]
+        if len(cap_use) >= 2:
+            cap_pass = cap_use
+        # 最小二乘：P95 = a + b * VU_per_replica，解 P95=800
+        xs = [r["vus_per_replica"] for r in cap_pass]
+        ys = [r["ttfb_p95"] for r in cap_pass]
+        n = len(xs)
+        mx, my = sum(xs) / n, sum(ys) / n
+        denom = sum((x - mx) ** 2 for x in xs)
+        if denom > 0:
+            b = sum((x - mx) * (y - my) for x, y in zip(xs, ys)) / denom
+            if b > 0 and my + b * (max(xs) - mx) < SLO_TTFB_P95:
+                knee_vus = mx + (SLO_TTFB_P95 - my) / b
+                rps_x = [r["rps_per_replica"] for r in cap_pass]
+                rps_b = sum((x - mx) * (y - my) for x, y in zip(xs, rps_x)) / denom
+                knee_rps = sum(rps_x) / n + rps_b * (knee_vus - mx)
+                note = "无破线档：内网稳态点最小二乘外推到 800ms（外推值）"
     a["knee_vus_per_replica"] = knee_vus
     a["knee_rps_per_replica"] = knee_rps
-    if bw_blocked:
-        a["knee_note"] = "首个破线档带宽利用率 ≥85%（链路先饱和）⇒ 该拐点不能当容量结论，改用内网直连档位"
     if knee_vus and knee_vus > 0:
         a["replicas_for_target"] = math.ceil(TARGET_VUS / knee_vus)
+    a["knee_note"] = note
     # 瓶颈判定（事实 + 推测分开写）
     facts, guesses = [], []
     if a["first_fail"]:
@@ -229,38 +290,115 @@ def badge(ok: bool, text_pass="PASS", text_fail="FAIL") -> str:
     return f'<span class="badge {cls}">{text_pass if ok else text_fail}</span>'
 
 
+def short_label(r: dict) -> str:
+    m = {"clusterip": "内网", "clusterip-dual": "内网双副本", "public-url": "公网",
+         "burst": "突发", "admin": "管理面", "degrade": "劣化", "rolling": "滚动", "long": "长流"}.get(r.get("mode", ""), r.get("mode", ""))
+    return f"{m}@{r['vus_i']}"
+
+
 def svg_line(runs: list[dict], key: str, title: str, unit: str, slo: float | None = None) -> str:
-    W, H, L, R, T, B = 640, 220, 56, 16, 18, 34
-    xs = [r["vus_i"] for r in runs]
-    ys = [float(r.get(key, 0) or 0) for r in runs]
-    if not xs:
+    """按运行序号布点（保证每次运行都有一个可见点），每点带 hover 标题 + 可点击明细。"""
+    W, H, L, R, T, B = 760, 260, 64, 20, 22, 52
+    n = len(runs)
+    if n == 0:
         return ""
-    x0, x1 = min(xs), max(xs)
-    y0, y1 = 0.0, max(ys + ([slo] if slo else [])) * 1.15 or 1.0
-    def px(x): return L + (x - x0) / max(1, (x1 - x0)) * (W - L - R)
-    def py(y): return H - B - (y - y0) / max(1e-9, (y1 - y0)) * (H - T - B)
-    pts = " ".join(f"{px(x):.1f},{py(y):.1f}" for x, y in zip(xs, ys))
+    xs = list(range(n))
+    ys = [float(r.get(key, 0) or 0) for r in runs]
+    y0 = 0.0
+    y1 = max(ys + ([slo] if slo else [])) * 1.15 or 1.0
+
+    def px(i: int) -> float:
+        return L if n == 1 else L + i / (n - 1) * (W - L - R)
+
+    def py(y: float) -> float:
+        return H - B - (y - y0) / max(1e-9, (y1 - y0)) * (H - T - B)
+
+    pts = " ".join(f"{px(i):.1f},{py(y):.1f}" for i, y in enumerate(ys))
     dots = "".join(
-        f'<circle class="pt" data-i="{i}" cx="{px(x):.1f}" cy="{py(y):.1f}" r="5" fill="#0f9d58" '
-        f'stroke="#ffffff" stroke-width="1.6" style="cursor:pointer"><title>VU={x}</title></circle>'
-        for i, (x, y) in enumerate(zip(xs, ys)))
+        f'<circle class="pt" data-i="{i}" cx="{px(i):.1f}" cy="{py(y):.1f}" r="6" fill="#12b76a" '
+        f'stroke="#ffffff" stroke-width="2" style="cursor:pointer"/>'
+        for i, y in enumerate(ys))
     slo_line = ""
     if slo:
         yy = py(slo)
-        slo_line = (f'<line x1="{L}" y1="{yy:.1f}" x2="{W-R}" y2="{yy:.1f}" stroke="#e53e3e" '
-                    f'stroke-dasharray="5 4" stroke-width="1"/><text x="{W-R}" y="{yy-5:.1f}" text-anchor="end" '
-                    f'font-size="11" fill="#e53e3e">SLO {slo:g}{unit}</text>')
-    labels = "".join(f'<text x="{px(x):.1f}" y="{H-12}" text-anchor="middle" font-size="10" fill="#666">{x}</text>' for x in xs)
+        slo_line = (f'<line x1="{L}" y1="{yy:.1f}" x2="{W-R}" y2="{yy:.1f}" stroke="#e11d48" '
+                    f'stroke-dasharray="6 4" stroke-width="1.4"/>'
+                    f'<text x="{W-R}" y="{yy-6:.1f}" text-anchor="end" font-size="11" fill="#be123c" font-weight="600">SLO {slo:g}{unit}</text>')
     yticks = ""
     for i in range(4):
         yv = y0 + (y1 - y0) * i / 3
         yy = py(yv)
-        yticks += (f'<line x1="{L}" y1="{yy:.1f}" x2="{W-R}" y2="{yy:.1f}" stroke="#eee"/>'
-                   f'<text x="{L-6}" y="{yy+3.5:.1f}" text-anchor="end" font-size="10" fill="#888">{yv:.0f}</text>')
-    return f'''<figure class="chart"><figcaption>{esc(title)}（横轴 VU，纵轴 {esc(unit)}）</figcaption>
+        yticks += (f'<line x1="{L}" y1="{yy:.1f}" x2="{W-R}" y2="{yy:.1f}" stroke="#e6f4ec"/>'
+                   f'<text x="{L-8}" y="{yy+4:.1f}" text-anchor="end" font-size="10.5" fill="#3f6152">{yv:.0f}</text>')
+    xlabels = ""
+    for i, r in enumerate(runs):
+        xlabels += (f'<text x="{px(i):.1f}" y="{H-30}" text-anchor="end" font-size="10" fill="#315244" '
+                    f'transform="rotate(-32 {px(i):.1f} {H-30})">{esc(short_label(r))}</text>')
+    return f'''<figure class="chart"><figcaption>{esc(title)}（横轴=运行序号，括号内为场景@并发；纵轴 {esc(unit)}）</figcaption>
 <svg viewBox="0 0 {W} {H}" role="img" aria-label="{esc(title)}">
-{yticks}{slo_line}<polyline points="{pts}" fill="none" stroke="#2b6cb0" stroke-width="2"/>{dots}{labels}
+{yticks}{slo_line}<polyline points="{pts}" fill="none" stroke="#0f9d58" stroke-width="2.4"/>{dots}{xlabels}
 </svg></figure>'''
+
+
+def svg_waterfall(best: dict | None) -> str:
+    """一次请求的模块级耗时分解。
+
+    口径优先级：k6 客户端阶段指标（实测 p90）> 已知 mock 参数 > 差值；
+    网关+链路（含 DNS/NAT/ALB/Ingress）与"客户端接收余量"用差值推导，并在表格里标注来源。
+    """
+    if not best:
+        return ""
+    mock_first = 300.0
+    stream = 50 * 30.0
+    send = best.get("phase_sending") or 0.0
+    conn = best.get("phase_connecting") or 0.0
+    tls = best.get("phase_tls") or 0.0
+    wait = best.get("phase_waiting") or best.get("ttfb_p90") or 0.0
+    recv = best.get("phase_receiving") or 0.0
+    total = best.get("phase_duration") or best.get("dur_p90") or best.get("dur_p95") or 0.0
+    gw = max(0.0, wait - mock_first)
+    recv_tail = max(0.0, recv - stream)
+    used = send + conn + tls + gw + mock_first + stream + recv_tail
+    tail = max(0.0, total - used)
+    segs = [
+        ("k6 发送", send, "#0b7a45", "实测 http_req_sending p90"),
+        ("DNS/TCP 连接", conn, "#116b3a", "实测 http_req_connecting p90（复用连接时为 0）"),
+        ("TLS 握手", tls, "#1a8f4c", "实测 http_req_tls_handshaking p90"),
+        ("网关+链路（NAT/ALB/Ingress/鉴权）", gw, "#12b76a", "差值：waiting_p90 − mock 首字 300ms"),
+        ("mock 首字", mock_first, "#34d399", "已知：FIRST_TOKEN_DELAY_MS=300"),
+        ("mock 流式吐字", stream, "#6ee7a8", "已知：50 token × 30ms"),
+        ("客户端接收余量", recv_tail, "#a7f3d0", "差值：receiving_p90 − 1500ms"),
+    ]
+    if tail > 0:
+        segs.append(("未归类余量", tail, "#d1fae5", "差值：总时长 − 以上各项"))
+    sumv = sum(v for _, v, _, _ in segs) or 1.0
+
+    W, H, L, R = 760, 96, 16, 16
+    barY, barH = 30, 40
+    barW = W - L - R
+    x = L
+    rects = ""
+    for name, v, color, _ in segs:
+        w = v / sumv * barW
+        if w <= 0:
+            continue
+        rects += f'<rect x="{x:.1f}" y="{barY}" width="{w:.1f}" height="{barH}" fill="{color}" rx="2"/>'
+        if w > 58:
+            rects += (f'<text x="{x + w/2:.1f}" y="{barY + barH/2 + 4:.1f}" text-anchor="middle" '
+                      f'font-size="10.5" fill="#04231a" font-weight="700">{v:.0f}</text>')
+        x += w
+    rows = "".join(
+        f'<tr><td>{esc(name)}</td><td>{v:.1f} ms</td><td>{v/sumv*100:.1f}%</td><td class="src">{esc(src)}</td></tr>'
+        for name, v, _, src in segs)
+    return f'''<figure class="chart"><figcaption>一次请求的模块耗时（{esc(short_label(best))}，按 k6 客户端阶段实测 p90 分解，合计 {sumv:.0f} ms）</figcaption>
+<svg viewBox="0 0 {W} {H}" role="img" aria-label="请求链路模块耗时">
+<text x="{L}" y="20" font-size="10.5" fill="#3f6152">0 ms</text>
+<text x="{W-R}" y="20" text-anchor="end" font-size="10.5" fill="#3f6152">{sumv:.0f} ms</text>
+{rects}
+</svg></figure>
+<table class="mini" style="margin-top:10px"><thead><tr><th>模块</th><th>耗时</th><th>占比</th><th>数据来源</th></tr></thead><tbody>{rows}</tbody></table>
+<div class="note" style="margin-top:8px">说明：<b>NAT / ALB / Ingress / 鉴权 / 渠道选择 / 连接池</b> 目前没有逐跳埋点，全部落在「网关+链路」这一段（等待首字节减去 mock 首字）；
+若需把它们再拆开，需要给入口接 SLS 访问日志或 OpenTelemetry trace（本次未做，不做假数据填充）。</div>'''
 
 
 def render(runs: list[dict], a: dict, out_path: str, eip_mbps: float = 0.0) -> None:
@@ -287,7 +425,8 @@ def render(runs: list[dict], a: dict, out_path: str, eip_mbps: float = 0.0) -> N
     first_fail = a.get("first_fail")
     cards = f'''
 <div class="card"><div class="k">本次运行数</div><div class="v">{a["n"]}</div><div class="s">由同一目录日志聚合</div></div>
-<div class="card"><div class="k">实测最优通过档</div><div class="v">{fmt(best["rps"], 1) if best else "—"}<small> req/s</small></div><div class="s">VU={best["vus_i"] if best else "—"} · P95={fmt(best.get("ttfb_p95"), 0) if best else "—"}ms</div></div>
+<div class="card"><div class="k">SSE 最优通过档</div><div class="v">{fmt(best["rps"], 1) if best else "—"}<small> req/s</small></div><div class="s">VU={best["vus_i"] if best else "—"} · P95={fmt(best.get("ttfb_p95"), 0) if best else "—"}ms</div></div>
+{f'<div class="card"><div class="k">管理面峰值（读接口）</div><div class="v">{fmt(a["best_admin"]["rps"],1)}<small> req/s</small></div><div class="s">P95 时延 {fmt((a["best_admin"].get("dur_p95") or 0),1)}ms</div></div>' if a.get("best_admin") else ''}
 <div class="card"><div class="k">单副本拐点（线性插值到 800ms）</div><div class="v">{fmt(a.get("knee_vus_per_replica"), 0) if a.get("knee_vus_per_replica") else "—"}<small> 并发流/副本</small></div><div class="s">{esc(a.get("knee_note") or ("≈ %s req/s/副本" % fmt(a.get("knee_rps_per_replica"), 1) if a.get("knee_rps_per_replica") else "数据不足"))}</div></div>
 <div class="card"><div class="k">{TARGET_VUS} 并发所需副本</div><div class="v">{a.get("replicas_for_target", "—")}</div><div class="s">ceil({TARGET_VUS} ÷ 单副本拐点)</div></div>'''
 
@@ -355,12 +494,16 @@ pre{{background:#06281a;color:#d9ffe9;border:1px solid #14532d;padding:14px 16px
 .chart{{margin:10px 0 0;background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px 12px}}
 .chart figcaption{{font-size:12px;color:var(--mut);margin-bottom:4px}}
 .lim{{color:#315244;font-size:12.5px;line-height:1.7}}
-.tip{{position:fixed;z-index:99;background:#06281a;color:#e9fff2;border:1px solid #16a34a;border-radius:10px;
-  box-shadow:0 12px 32px rgba(5,46,27,.35);padding:12px 14px;font-size:12.5px;min-width:260px}}
-.tip-h{{font-weight:700;margin-bottom:6px;color:#7ef0b0;display:flex;align-items:center;gap:8px}}
+.tip{{position:fixed;z-index:99;background:#04231a;color:#f2fff8;border:2px solid #22c55e;border-radius:12px;
+  box-shadow:0 16px 40px rgba(2,20,12,.55);padding:14px 16px;font-size:13px;min-width:300px;line-height:1.55}}
+.tip-h{{font-weight:800;margin-bottom:8px;color:#a7f3d0;display:flex;align-items:center;gap:8px;font-size:13.5px}}
+.tip-x{{margin-left:auto;cursor:pointer;color:#86efac;font-size:16px;padding:0 4px}}
+.tip table, .tip .tip-t{{background:transparent !important;border:none !important;border-radius:0;box-shadow:none}}
 .tip-t{{width:100%;border-collapse:collapse}}
-.tip-t td{{padding:2px 6px;border:none;font-size:12px;color:#cdeedd}}
-.tip-t td:first-child{{color:#8fbfa9;white-space:nowrap}}
+.tip-t td{{padding:3px 8px;border:none !important;background:transparent !important;font-size:13px;color:#f4fff9 !important}}
+.tip-t td b{{color:#86efac}}
+.tip-t td:first-child{{color:#a7f3d0 !important;white-space:nowrap;font-weight:700}}
+.tip-t td.hint{{color:#6ee7a8;font-style:italic;font-weight:400}}
 </style></head><body>
 <header>
   <h1>new-api · SSE 容量压测报告</h1>
@@ -381,6 +524,14 @@ pre{{background:#06281a;color:#d9ffe9;border:1px solid #14532d;padding:14px 16px
 {svg_line(runs, "ttfb_p95", "P95 首字延迟 vs 并发", "ms", SLO_TTFB_P95)}
 {svg_line(runs, "rps", "吞吐 RPS vs 并发", "req/s")}
 
+<h2>一次请求的完整链路耗时</h2>
+{svg_waterfall(a.get("best_phase"))}
+<div class="note" style="margin-top:10px">
+分段全部按 <b>p90</b> 取值：k6 客户端阶段（sending / connecting / tls_handshaking / waiting / receiving）为实测；
+<b>mock 首字</b>=300ms、<b>流式吐字</b>=50×30ms 为配置已知量；<b>网关+链路</b>=waiting−300ms（含 DNS/NAT/ALB/Ingress/鉴权/限流/选渠道/取连接）；
+<b>客户端接收余量</b>=receiving−1500ms。占比以各段合计为分母。
+</div>
+
 <h2>瓶颈判定</h2>
 <div class="note"><b>事实</b><ul>{facts}</ul></div>
 <div class="note" style="margin-top:10px"><b>推断（需下钻验证）</b><ul>{guesses}</ul></div>
@@ -396,7 +547,22 @@ pre{{background:#06281a;color:#d9ffe9;border:1px solid #14532d;padding:14px 16px
 </div>
 
 <h2>公式与口径（完整）</h2>
-<pre>
+<div class="note">
+<b>VU（Virtual User，虚拟用户）</b>：k6 里一个 VU 就是一条独立执行循环 + 一条（或一组）连接。SSE 场景下每条请求持续到流结束（本次约 1.9s），
+所以"VU≈同时在途的 SSE 流数≈并发连接数"，不是"每秒请求数"。吞吐与并发的关系由 Little 定律给出：
+<code>RPS ≈ VU ÷ 平均请求时长</code>（例：1500 VU ÷ 2.1s ≈ 714 RPS，与实测 701.6 吻合）。
+</div>
+<table class="mini" style="margin-top:10px">
+<thead><tr><th>Job / 动作</th><th>脚本</th><th>含义</th><th>为什么这么设计（设计目的）</th></tr></thead><tbody>
+<tr><td><code>stage</code></td><td>sse.js</td><td>恒定 VU 打 SSE，阶梯取 100/300/500/900/1200…</td><td>固定并发观察 P95/CPU 随并发单调变化，用线性插值找 800ms 拐点（单副本容量 C）</td></tr>
+<tr><td><code>dual1500</code></td><td>sse.js</td><td>把 slave 扩到 2 副本，单 Job 打 Service</td><td>用 kube-proxy 自然分摊，复现"多副本入口"形态；避免直连单 Pod 造成失真</td></tr>
+<tr><td><code>burst</code></td><td>s3_burst.js</td><td>0→1500 用 30s 拉起，保持后再降</td><td>验证 HPA/排队/冷启动在突增下的收敛能力（S3），而非稳态容量</td></tr>
+<tr><td><code>admin</code></td><td>s4_admin.js</td><td>恒定到达率打管理面读接口</td><td>管理面是"请求/秒"型负载，用 arrival-rate 而非 VU，才能对准 800 QPS 目标</td></tr>
+<tr><td><code>degrade</code></td><td>sse.js + mock_ctl</td><td>mock 注入 50% 5xx + 5s 延迟</td><td>验证上游劣化时网关"不被拖死"、错误归类正确（S5），不产生级联雪崩</td></tr>
+<tr><td><code>rolling</code></td><td>sse.js + rollout restart</td><td>压测中滚动重启被测负载</td><td>验证发布期间连接是否被优雅摘除（S10），暴露 preStop/就绪延迟缺口</td></tr>
+<tr><td><code>long</code></td><td>s9_long.js</td><td>单请求、超长流（约 12 分钟）</td><td>验证 ALB/网关对长连接是"空闲超时"还是"总时长上限"（S9 口径之争）</td></tr>
+</tbody></table>
+<pre style="margin-top:12px">
 1) 首字延迟（代理）   TTFB_p95 = k6 http_req_waiting 的 p(95)
    说明：SSE 场景下响应头与首块几乎同时到达；若需真实 token 级首字，需改用自定义流式客户端。
 
@@ -442,45 +608,86 @@ bash deploy/perf/k6/run.sh summary</pre>
 
 <p class="lim">本报告由 deploy/perf/k6/report.py 自动生成；点击趋势图上的绿色数据点可查看该次运行明细。</p>
 </main>
-<div id="tip" class="tip" hidden></div>
-<script>
-const RUNS = {runs_json};
-const tip = document.getElementById('tip');
-function showTip(ev, i) {{
-  const r = RUNS[i]; if (!r) return;
-  const f = (v, n, suf) => (v === null || v === undefined || v === 0 ? '—' : Number(v).toFixed(n) + (suf || ''));
-  tip.innerHTML = `<div class="tip-h">${{r.job}} <span class="badge ${{r.pass ? 'ok' : 'bad'}}">${{r.pass ? 'PASS' : 'FAIL'}}</span></div>`
-    + `<table class="tip-t"><tr><td>时间</td><td>${{r.ts}}</td></tr>`
-    + `<tr><td>并发 / 副本</td><td>${{r.vus}} / ${{r.replicas}}</td></tr>`
-    + `<tr><td>路径</td><td>${{r.mode}} · ${{r.target}}</td></tr>`
-    + `<tr><td>RPS</td><td>${{f(r.rps,1)}}</td></tr>`
-    + `<tr><td>首字 P50/P95/P99</td><td>${{f(r.ttfb_p50,0)}} / ${{f(r.ttfb_p95,0)}} / ${{f(r.ttfb_p99,0)}} ms</td></tr>`
-    + `<tr><td>端到端 P95</td><td>${{f(r.dur_p95,0)}} ms</td></tr>`
-    + `<tr><td>错误率 / checks</td><td>${{f(r.err_pct,3)}}% / ${{f(r.checks_pct,2)}}%</td></tr>`
-    + `<tr><td>CPU / 内存峰值</td><td>${{f(r.cpu,2)}} 核 / ${{f(r.mem,0)}} Mi</td></tr>`
-    + `<tr><td>下行</td><td>${{f(r.bw,2)}} Mbps</td></tr></table>`;
-  tip.hidden = false;
-  const pad = 14, w = tip.offsetWidth, h = tip.offsetHeight;
-  let x = ev.clientX + pad, y = ev.clientY + pad;
-  if (x + w > window.innerWidth - 8) x = ev.clientX - w - pad;
-  if (y + h > window.innerHeight - 8) y = ev.clientY - h - pad;
-  tip.style.left = x + 'px'; tip.style.top = y + 'px';
-}}
-document.querySelectorAll('circle.pt').forEach(el => {{
-  el.addEventListener('click', ev => {{ ev.stopPropagation(); showTip(ev, Number(el.dataset.i)); }});
-}});
-document.addEventListener('click', () => {{ tip.hidden = true; }});
-document.addEventListener('keydown', ev => {{ if (ev.key === 'Escape') tip.hidden = true; }});
-</script>
 </body></html>'''
+    doc = doc + render_js(runs_json)
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as f:
         f.write(doc)
 
 
+JS_TMPL = r"""
+<div id="tip" class="tip" hidden></div>
+<script>
+const RUNS = __RUNS__;
+const tip = document.getElementById('tip');
+let pinned = false;
+function f(v, n, suf) {
+  if (v === null || v === undefined || v === 0) return '\u2014';
+  return Number(v).toFixed(n) + (suf || '');
+}
+function head(r) {
+  return '<div class="tip-h">' + r.job + ' <span class="badge ' + (r.pass ? 'ok' : 'bad') + '">'
+    + (r.pass ? 'PASS' : 'FAIL') + '</span></div>';
+}
+function card(i) {
+  const r = RUNS[i];
+  return head(r) + '<table class="tip-t">'
+    + '<tr><td>\u573a\u666f / \u5e76\u53d1</td><td>' + r.mode + ' \u00b7 ' + r.vus + ' VU</td></tr>'
+    + '<tr><td>RPS</td><td>' + f(r.rps, 1) + '</td></tr>'
+    + '<tr><td>\u9996\u5b57 P95 / P99</td><td>' + f(r.ttfb_p95, 0) + ' / ' + f(r.ttfb_p99, 0) + ' ms</td></tr>'
+    + '<tr><td>\u9519\u8bef\u7387</td><td>' + f(r.err_pct, 3) + '%</td></tr>'
+    + '<tr><td class="hint">\u5355\u51fb\u67e5\u770b\u5b8c\u6574\u660e\u7ec6</td><td></td></tr></table>';
+}
+function detail(i) {
+  const r = RUNS[i];
+  return '<div class="tip-h">' + r.job + ' <span class="badge ' + (r.pass ? 'ok' : 'bad') + '">'
+    + (r.pass ? 'PASS' : 'FAIL') + '</span><span class="tip-x" onclick="document.getElementById(&quot;tip&quot;).hidden=true">\u00d7</span></div>'
+    + '<table class="tip-t">'
+    + '<tr><td>\u8fd0\u884c\u65f6\u95f4</td><td>' + r.ts + '</td></tr>'
+    + '<tr><td>\u573a\u666f / \u8def\u5f84</td><td>' + r.mode + ' \u00b7 ' + r.target + '</td></tr>'
+    + '<tr><td>\u5e76\u53d1 / \u526f\u672c</td><td>' + r.vus + ' VU / ' + r.replicas + ' \u526f\u672c</td></tr>'
+    + '<tr><td>\u541e\u5410 RPS</td><td><b>' + f(r.rps, 1) + '</b></td></tr>'
+    + '<tr><td>\u9996\u5b57 P50/P95/P99</td><td>' + f(r.ttfb_p50, 0) + ' / ' + f(r.ttfb_p95, 0) + ' / ' + f(r.ttfb_p99, 0) + ' ms</td></tr>'
+    + '<tr><td>\u7aef\u5230\u7aef P95</td><td>' + f(r.dur_p95, 0) + ' ms</td></tr>'
+    + '<tr><td>\u9519\u8bef\u7387 / checks</td><td>' + f(r.err_pct, 3) + '% / ' + f(r.checks_pct, 2) + '%</td></tr>'
+    + '<tr><td>CPU / \u5185\u5b58\u5cf0\u503c</td><td>' + f(r.cpu, 2) + ' \u6838 / ' + f(r.mem, 0) + ' Mi</td></tr>'
+    + '<tr><td>\u4e0b\u884c</td><td>' + f(r.bw, 2) + ' Mbps</td></tr></table>';
+}
+function place(ev) {
+  const pad = 16, w = tip.offsetWidth, h = tip.offsetHeight;
+  let x = ev.clientX + pad, y = ev.clientY + pad;
+  if (x + w > window.innerWidth - 8) x = ev.clientX - w - pad;
+  if (y + h > window.innerHeight - 8) y = ev.clientY - h - pad;
+  tip.style.left = x + 'px'; tip.style.top = y + 'px';
+}
+document.querySelectorAll('circle.pt').forEach(function (el) {
+  const i = Number(el.dataset.i);
+  el.addEventListener('mouseenter', function (ev) {
+    if (pinned) return;
+    tip.innerHTML = card(i); tip.hidden = false; place(ev);
+  });
+  el.addEventListener('mousemove', function (ev) { if (!pinned) place(ev); });
+  el.addEventListener('mouseleave', function () { if (!pinned) tip.hidden = true; });
+  el.addEventListener('click', function (ev) {
+    ev.stopPropagation();
+    pinned = true;
+    tip.innerHTML = detail(i); tip.hidden = false; place(ev);
+  });
+});
+document.addEventListener('click', function () { pinned = false; tip.hidden = true; });
+document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') { pinned = false; tip.hidden = true; } });
+</script>
+</body></html>
+"""
+
+
+def render_js(runs_json: str) -> str:
+    return JS_TMPL.replace("__RUNS__", runs_json)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--log-dir")
+    ap.add_argument("--log-dir", action="append", help="可重复；多个目录一起聚合")
     ap.add_argument("--logs", nargs="*")
     ap.add_argument("--out", required=True)
     ap.add_argument("--eip-mbps", type=float, default=0.0, help="公网路径的 EIP 标称带宽（Mbps），用于带宽利用率判定")
@@ -490,7 +697,9 @@ def main() -> None:
     if args.logs:
         paths = list(args.logs)
     elif args.log_dir:
-        paths = sorted(glob.glob(os.path.join(args.log_dir, "*.log")))
+        for d in args.log_dir:
+            paths += sorted(glob.glob(os.path.join(d, "*.log")))
+        paths = sorted(set(paths))
     runs = load_runs(paths, args.eip_mbps)
     render(runs, analyse(runs, args.eip_mbps), args.out, args.eip_mbps)
     print(f"[report] runs={len(runs)} -> {args.out}")
