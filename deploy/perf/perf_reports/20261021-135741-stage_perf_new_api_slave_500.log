@@ -1,0 +1,35 @@
+[i] 动态选定节点=i-k1afs8wedv35rai4pmx2（DescribeClusterNodes 现取，未写死）
+[i] 取 15 分钟临时私网 kubeconfig
+[i] server=    server: https://10.2.25.173:6443  节点=i-k1afs8wedv35rai4pmx2  RUN_ID=1792562262-46510-6840
+[i] InvokeId=t-ida70oke48dtiio
+----- 节点内输出（status=Success）-----
+=== target=perf-new-api-slave (clusterip, BASE=http://172.23.2.189)  vus=500 dur=120s
+--- job_succeeded=1 cpu_peak=358m mem_peak=103Mi
+===RUN_META===
+target=perf-new-api-slave
+base=http://172.23.2.189
+mode=clusterip
+vus=500
+dur=120s
+cpu_peak_m=358
+mem_peak_mi=103
+replicas=2
+job=k6-stage-500
+ts=2026-10-21T05:59:56Z
+images=perf-new-api-master=acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com/newapi-dev/newapi-master:20261015-c62445555;perf-new-api-slave=acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com/newapi-dev/newapi-master:20261015-c62445555;
+===END_META===
+     checks.........................: 100.00% 61436 out of 61436
+     data_received..................: 338 MB  2.8 MB/s
+     http_req_connecting............: avg=275.12µs min=0s       med=0s       p(90)=0s       p(95)=0s       p(99)=6.8ms    max=55.4ms  
+     http_req_duration..............: avg=1.96s    min=1.83s    med=1.9s     p(90)=2.15s    p(95)=2.23s    p(99)=2.73s    max=3.07s   
+   ✓ http_req_failed................: 0.00%   0 out of 30718
+     http_req_receiving.............: avg=1.61s    min=1.49s    med=1.54s    p(90)=1.79s    p(95)=1.84s    p(99)=2.02s    max=2.39s   
+     http_req_sending...............: avg=26.96µs  min=3.57µs   med=10.73µs  p(90)=15.68µs  p(95)=20.24µs  p(99)=764.89µs max=8.08ms  
+     http_req_tls_handshaking.......: avg=0s       min=0s       med=0s       p(90)=0s       p(95)=0s       p(99)=0s       max=0s      
+     http_req_waiting...............: avg=356.68ms min=335.55ms med=338.76ms p(90)=381.16ms p(95)=432.62ms p(99)=691.51ms max=894.03ms
+     ✓ { type:sse }.................: avg=356.68ms min=335.55ms med=338.76ms p(90)=381.16ms p(95)=432.62ms p(99)=691.51ms max=894.03ms
+     http_reqs......................: 30718   251.926186/s
+     iterations.....................: 30718   251.926186/s
+### remote_rc=0 cleaned=YES
+-----------------------------------
+[i] 凭据清理：本机 已删 / 节点侧 cleaned=YES

@@ -1,0 +1,38 @@
+[i] 动态选定节点=i-k1afs8wedv35rai4pmx2（DescribeClusterNodes 现取，未写死）
+[i] 取 15 分钟临时私网 kubeconfig
+[i] server=    server: https://10.2.25.173:6443  节点=i-k1afs8wedv35rai4pmx2  RUN_ID=1792562514-48896-21135
+[i] InvokeId=t-ida70okrne7wyyo
+----- 节点内输出（status=Success）-----
+=== 扩 perf-new-api-slave 到 2 副本
+  deployment.apps/perf-new-api-slave scaled
+  deployment "perf-new-api-slave" successfully rolled out
+  ready=2/2
+=== 起 k6 Job：VUS=1500 DUR=120s -> 172.23.2.189（2 副本）
+=== 等 Job 完成（并行采样 CPU/内存峰值）
+  job_succeeded=1 failed=0 cpu_peak=840m mem_peak=227Mi
+===RUN_META===
+target=perf-new-api-slave x2
+base=http://172.23.2.189
+mode=clusterip-dual
+vus=1500
+dur=120s
+cpu_peak_m=840
+mem_peak_mi=227
+replicas=2
+job=k6-1500
+ts=2026-10-21T06:04:09Z
+images=
+===END_META===
+     checks.........................: 100.00% 156248 out of 156248
+     http_req_connecting............: avg=878.79µs min=0s       med=0s       p(90)=0s      p(95)=0s       p(99)=36.82ms max=109.28ms
+     http_req_duration..............: avg=2.32s    min=1.84s    med=2.21s    p(90)=2.81s   p(95)=3.08s    p(99)=3.71s   max=5.07s   
+   ✓ http_req_failed................: 0.00%   0 out of 78124
+     http_req_receiving.............: avg=1.86s    min=1.46s    med=1.76s    p(90)=2.28s   p(95)=2.49s    p(99)=3.02s   max=4.54s   
+     http_req_sending...............: avg=66.93µs  min=3.75µs   med=11.52µs  p(90)=19.55µs p(95)=25.47µs  p(99)=1.74ms  max=11.35ms 
+     http_req_tls_handshaking.......: avg=0s       min=0s       med=0s       p(90)=0s      p(95)=0s       p(99)=0s      max=0s      
+     http_req_waiting...............: avg=457.74ms min=335.65ms med=391.93ms p(90)=677.3ms p(95)=792.46ms p(99)=1.08s   max=2.36s   
+     ✓ { type:sse }.................: avg=457.74ms min=335.65ms med=391.93ms p(90)=677.3ms p(95)=792.46ms p(99)=1.08s   max=2.36s   
+     http_reqs......................: 78124   639.154887/s
+### remote_rc=0 cleaned=YES
+-----------------------------------
+[i] 凭据清理：本机 已删 / 节点侧 cleaned=YES
