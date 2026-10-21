@@ -56,7 +56,7 @@ run_body() {
   printf '%s\n' "$out" > "$log"
   echo "[perf-k6] 日志：$log"
   case "$tag" in
-    stage_*|dual1500|s3_*|s4_*|s5_*|s9_*|s10_*)
+    stage_*|dual1500|s3_*|s4_*|s5_*|s9_*|s10_*|shard_*)
       # 文件名 = perf_report_<参数摘要>_<启动时刻>.html（参数里的路径/冒号等替换为 -）
       safe=$(printf '%s' "${DESC:-$tag}" | tr -c 'A-Za-z0-9._-' '-' | sed 's/--*/-/g;s/-*$//')
       local html="$REPORT_DIR/perf_report_${safe}_${ts}.html"
@@ -90,6 +90,10 @@ case "$ACTION" in
     run_body summary.sh summary "JOBS=$*" ;;
   readback)
     run_body readback.sh readback ;;
+  shard)
+    V="${1:-1500}"; D="${2:-120s}"; N="${3:-4}"
+    K6JS_FILE="$HERE/sse.js"; DESC="shard-${N}x-vu${V}-dur${D}"
+    run_body sharded.sh "shard_${N}" "VUS=$V" "DUR=$D" "SHARDS=$N" ;;
   burst)
     V="${1:-1500}"; D="${2:-90s}"
     K6JS_FILE="$HERE/s3_burst.js"; DESC="s3-burst-vu${V}-dur${D}"

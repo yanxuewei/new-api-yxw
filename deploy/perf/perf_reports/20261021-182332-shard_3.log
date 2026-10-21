@@ -1,0 +1,61 @@
+[i] 动态选定节点=i-k1afs8wedv35rai4pmx2（DescribeClusterNodes 现取，未写死）
+[i] 取 15 分钟临时私网 kubeconfig
+[i] server=    server: https://10.2.25.173:6443  节点=i-k1afs8wedv35rai4pmx2  RUN_ID=1792578213-85931-18252
+[i] InvokeId=t-ida70p83wqznda8
+----- 节点内输出（status=Success）-----
+=== 分片压测：total=240 VU  shards=3  dur=45s  base=http://172.23.2.189  后端副本=2
+=== 下发分片 Job
+  shard-0 -> 80 VU
+  shard-1 -> 80 VU
+  shard-2 -> 80 VU
+=== 等待所有分片
+  all_done=1 cpu_peak=135m mem_peak=52Mi
+===RUN_META===
+target=perf-new-api-slave x2
+base=http://172.23.2.189
+mode=clusterip-shard
+vus=240
+dur=45s
+cpu_peak_m=135
+mem_peak_mi=52
+replicas=2
+job=k6-shard-0..2
+ts=2026-10-21T10:25:19Z
+images=
+===END_META===
+----- shard-0
+     checks.........................: 100.00% 3948 out of 3948
+     http_req_connecting............: avg=80.95µs  min=0s       med=0s       p(90)=0s       p(95)=0s       p(99)=2.04ms   max=7.62ms  
+     http_req_duration..............: avg=1.86s    min=1.82s    med=1.84s    p(90)=1.85s    p(95)=1.9s     p(99)=2.45s    max=2.51s   
+   ✓ http_req_failed................: 0.00%   0 out of 1974
+     http_req_receiving.............: avg=1.51s    min=1.48s    med=1.5s     p(90)=1.51s    p(95)=1.55s    p(99)=1.77s    max=1.9s    
+     http_req_sending...............: avg=24.3µs   min=4.26µs   med=11.26µs  p(90)=15.96µs  p(95)=21.35µs  p(99)=102.37µs max=10.06ms 
+     http_req_tls_handshaking.......: avg=0s       min=0s       med=0s       p(90)=0s       p(95)=0s       p(99)=0s       max=0s      
+     http_req_waiting...............: avg=351.08ms min=332.44ms med=337.09ms p(90)=339.73ms p(95)=345.94ms p(99)=752.75ms max=774.15ms
+     ✓ { type:sse }.................: avg=351.08ms min=332.44ms med=337.09ms p(90)=339.73ms p(95)=345.94ms p(99)=752.75ms max=774.15ms
+     http_reqs......................: 1974    42.144824/s
+----- shard-1
+     checks.........................: 100.00% 4000 out of 4000
+     http_req_connecting............: avg=64.74µs  min=0s       med=0s       p(90)=0s       p(95)=0s       p(99)=2.54ms   max=5.22ms  
+     http_req_duration..............: avg=1.85s    min=1.82s    med=1.84s    p(90)=1.86s    p(95)=1.93s    p(99)=2s       max=2.01s   
+   ✓ http_req_failed................: 0.00%   0 out of 2000
+     http_req_receiving.............: avg=1.51s    min=1.49s    med=1.5s     p(90)=1.52s    p(95)=1.53s    p(99)=1.61s    max=1.66s   
+     http_req_sending...............: avg=57.24µs  min=4.92µs   med=11.46µs  p(90)=16.85µs  p(95)=22.78µs  p(99)=1.29ms   max=7.23ms  
+     http_req_tls_handshaking.......: avg=0s       min=0s       med=0s       p(90)=0s       p(95)=0s       p(99)=0s       max=0s      
+     http_req_waiting...............: avg=339.74ms min=332.76ms med=337.23ms p(90)=340.17ms p(95)=344.73ms p(99)=476.31ms max=486.16ms
+     ✓ { type:sse }.................: avg=339.74ms min=332.76ms med=337.23ms p(90)=340.17ms p(95)=344.73ms p(99)=476.31ms max=486.16ms
+     http_reqs......................: 2000    42.823353/s
+----- shard-2
+     checks.........................: 100.00% 4000 out of 4000
+     http_req_connecting............: avg=51.12µs  min=0s       med=0s       p(90)=0s       p(95)=0s       p(99)=1.02ms   max=6.32ms  
+     http_req_duration..............: avg=1.85s    min=1.81s    med=1.84s    p(90)=1.86s    p(95)=1.88s    p(99)=1.95s    max=1.96s   
+   ✓ http_req_failed................: 0.00%   0 out of 2000
+     http_req_receiving.............: avg=1.51s    min=1.48s    med=1.51s    p(90)=1.52s    p(95)=1.53s    p(99)=1.6s     max=1.62s   
+     http_req_sending...............: avg=73.63µs  min=4.3µs    med=11.15µs  p(90)=16.06µs  p(95)=21.06µs  p(99)=85.5µs   max=9.4ms   
+     http_req_tls_handshaking.......: avg=0s       min=0s       med=0s       p(90)=0s       p(95)=0s       p(99)=0s       max=0s      
+     http_req_waiting...............: avg=337.93ms min=332.39ms med=337.06ms p(90)=338.96ms p(95)=341.19ms p(99)=426.54ms max=437.33ms
+     ✓ { type:sse }.................: avg=337.93ms min=332.39ms med=337.06ms p(90)=338.96ms p(95)=341.19ms p(99)=426.54ms max=437.33ms
+     http_reqs......................: 2000    42.936131/s
+### remote_rc=0 cleaned=YES
+-----------------------------------
+[i] 凭据清理：本机 已删 / 节点侧 cleaned=YES

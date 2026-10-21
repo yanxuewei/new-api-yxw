@@ -14,6 +14,7 @@ const DUR = __ENV.DUR || '120s';
 const BASE = __ENV.BASE;
 const MODEL = __ENV.MODEL || 'mock-gpt';
 const TOKEN = __ENV.TOKEN;
+const SHARD = __ENV.SHARD || '0';   // 分片编号（多 Job 并行时用于区分指标）
 
 export const options = {
   scenarios: {
@@ -43,7 +44,7 @@ export default function () {
       'Content-Type': 'application/json',
     },
     timeout: '120s',
-    tags: { type: 'sse' },
+    tags: { type: 'sse', shard: SHARD },
   });
   check(res, {
     'status 200': (r) => r.status === 200,

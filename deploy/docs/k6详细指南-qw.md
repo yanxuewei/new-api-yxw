@@ -123,6 +123,74 @@ resources:
 
 **为什么必须在集群内跑**：压测客户端到被测服务的链路要尽量短且稳定；跑在笔记本上，你测的是"家里宽带 + 公网 + NAT"，而不是网关。本次客户端的 Pod 与被测 Pod 同集群，内网档完全不过 NAT/ALB。
 
+### 3.3 运行形态选型：为什么用 Kubernetes Job，而不是 Pod / Deployment / 本机
+
+k6 本身只是一个"跑完就退出"的进程，但**用什么形态承载它**会直接决定数据是否可信。本次统一用 `batch/v1 Job`，原因有五条：
+
+**① 客户端必须贴近被测系统（位置决定数据是否可用）**
+
+被测的 new-api（`perf-new-api-slave`）与 mock（`mock-upstream`）都在 `new-api-perf` 里，集群 API Server 只在内网。如果在本机跑 k6：
+
+- 只能走公网入口 `perf.likha.hk`，路径变成 `本机 → 公网 → NAT/EIP → ALB → 网关`，测的是"家里宽带 + EIP 带宽"，不是网关容量；
+- 内网 `ClusterIP` 本机完全连不上，做不了真正的容量档。
+
+本次有一组现成对照：同一 600 VU 档，EIP **5 Mbps** 时是 **52 RPS / 14.37% 错误**，调到 **100 Mbps** 后变成 **290 RPS / 0%**。客户端若在集群外，还要再叠加本地上行带宽与运营商抖动，数字无法归因。
+
+**② Job 的语义与"一次性压测"完全匹配**
+
+```yaml
+kind: Job
+spec:
+  backoffLimit: 0                 # 失败不重试（重试会污染数据）
+  ttlSecondsAfterFinished: 7200   # 跑完自动清理，不堆垃圾
+  template:
+    spec:
+      restartPolicy: Never
+```
+
+- 普通 **Pod**：没有 completion 状态可判断，容易残留、跑完无人回收；
+- **Deployment**：语义是"长期维持副本数"，跑完会被重新拉起，完全不对；
+- **CronJob**：定时任务，不匹配"人工触发一次验收"；
+- **Job**：`Complete/Failed` 两个终态，`ttlSecondsAfterFinished` 自动清理。
+
+**③ 结果是"可判定"的，能直接做门禁**
+
+k6 阈值不成立时退出码为 **99**，Job 随之变成 `Failed`。这让"压测通过/不通过"成为集群里的客观状态，而不是靠人翻日志：
+
+```bash
+kubectl -n new-api-perf get job k6-stage-500 \
+  -o jsonpath='{.status.succeeded}{"/"}{.status.failed}'
+kubectl -n new-api-perf logs job/k6-stage-500
+```
+
+本项目脚本就是靠这个状态等待结束、抓摘要、再生成 HTML 报告。**踩过的坑也在这里**：最初的等待循环只判断 `succeeded`，遇到阈值破线（Job failed）就白等 900 秒（云助手超时），后来补上 `.status.failed` 判断才修好。
+
+**④ 环境隔离与可复现**
+
+| 维度 | Job 带来的约束 |
+|---|---|
+| 版本 | 镜像固定 `grafana/k6:0.54.0`，不会因本机升级导致数字漂移 |
+| 参数 | `VUS/BASE/DUR` 走 env，token 走 `secretKeyRef`，不进命令行、不进仓库 |
+| 资源 | `requests/limits` 限制客户端，避免 k6 抢走被测 Pod 的 CPU（客户端成为瓶颈是最常见的假数据来源） |
+| 审计 | 每次运行 = 一个 Job 名 + 一份日志 + 一份报告，可回溯 |
+
+**⑤ 与其他跑法的取舍**
+
+| 方式 | 问题 | 结论 |
+|---|---|---|
+| 本机/笔记本跑 k6 | 只能走公网；受本地带宽、NAT、运营商影响；内网档做不了 | ✗ |
+| 在节点上 curl 循环 | 每请求 fork 进程，800 并发时协调器自身成为瓶颈：同档位 P95 比 k6 高 **3 倍**（1.94s vs 713ms），数据不可用 | ✗（本项目上一轮踩过，见台账 §21） |
+| 在节点上直接跑 k6 二进制 | 节点无 k6；裸进程绕过 cgroup limits，可能挤占 kubelet 与其他 Pod | ✗ |
+| 单独买一台压测 ECS | 多一份费用与运维，还要处理它与集群的网络路径 | △ |
+| **集群内 Job** | 路径最短、资源受控、状态可判定、跑完自清理 | ✓ 本次选择 |
+
+**边界与注意事项**
+
+- Job 里的 k6 仍是**单进程**：1500 VU 时客户端自身约需 2 核 / 1Gi 与数千连接，所以 `limits` 不能给小（本次 2 核 / 1Gi、`requests` 500m / 256Mi）；
+- 若要压 5000+ 并发，应**拆成多个 Job 并行**打同一个 Service，而不是无限加大单 Job 资源——否则客户端先撞自己的天花板；
+- Job 名复用前要先 `kubectl delete job`（本项目各 body 里都会先删再建），否则 apply 报不可变字段冲突；
+- `backoffLimit: 0` 是刻意的：阈值失败后自动重试会让"失败"被重试掩盖，也会污染统计。
+
 ---
 
 ## 4. 最小可用脚本（先跑通再谈容量）
@@ -452,7 +520,90 @@ deploy/perf/perf_reports/perf_report_ALL_latest.html            # 全部运行�
 4. **链路分解**：按 k6 阶段指标 p90 拆成 k6 发送 / 连接 / TLS / 网关+链路 / mock 首字 / 流式吐字 / 客户端接收余量；
 5. **公式区**：口径、Job 设计目的、VU 定义、副本数计算。
 
-### 12.6 收尾
+### 12.6 多 Job 分片并行（客户端先撞天花板时）
+
+**什么时候需要**：单个 k6 Job 是**单进程**，1500 VU 时客户端自身已占约 2 核 / 1Gi 和数千连接。要压 3000–5000+ 并发时，继续给单 Job 加 `limits` 只会让它先撞自己的 CPU/文件描述符，压出来的 P95 是客户端排队，不是服务端能力。
+
+**做法**：把总并发切成 N 份，起 N 个 Job（各自独立进程、独立连接池），全部打同一个 Service；kube-proxy 仍按连接把流量分摊到后端副本。
+
+```bash
+# 总 1500 VU，分 4 片（每片 375 VU），打同一个 svc/perf-new-api-slave
+EIP_MBPS=100 bash deploy/perf/k6/run.sh shard 1500 120s 4
+```
+
+执行体 `deploy/perf/k6/bodies/sharded.sh` 的关键逻辑：
+
+```bash
+BASE_VU=$((TOTAL / SHARDS)); REM=$((TOTAL % SHARDS))
+for i in $(seq 0 $((SHARDS - 1))); do
+  V=$BASE_VU; [ "$i" -lt "$REM" ] && V=$((V + 1))    # 余数分给前几片，保证总和精确等于 TOTAL
+  kubectl apply -f - <<YAML
+apiVersion: batch/v1
+kind: Job
+metadata: {name: k6-shard-$i, namespace: new-api-perf, labels: {app: k6, shard: "$i"}}
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 7200
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: k6
+          image: grafana/k6:0.54.0
+          args: ["run", "/scripts/sse.js"]
+          env:
+            - {name: VUS, value: "$V"}
+            - {name: DUR, value: "$DUR"}
+            - {name: BASE, value: "http://$IP"}     # 同一个 ClusterIP
+            - {name: SHARD, value: "$i"}            # 注入 tag，便于按分片看指标
+            - name: TOKEN
+              valueFrom: {secretKeyRef: {name: perf-load-test-credentials, key: token_key}}
+          resources: {requests: {cpu: 500m, memory: 256Mi}, limits: {cpu: "2", memory: 1Gi}}
+      volumes: [{name: scripts, configMap: {name: k6-sse}}]
+YAML
+done
+```
+
+脚本侧只需一个可选参数（`sse.js` 已支持）：
+
+```js
+const SHARD = __ENV.SHARD || '0';
+// …
+tags: { type: 'sse', shard: SHARD },   // 指标可按分片切片：http_req_waiting{shard:"2"}
+```
+
+**聚合口径**：`sharded.sh` 把 N 个 Job 的摘要**依次打印到同一份日志**，`report.py` 按"一个日志多条摘要"聚合：
+
+| 指标 | 聚合方式 | 原因 |
+|---|---|---|
+| `http_reqs` / RPS | **求和** | N 个分片是并行独立的吞吐 |
+| `http_req_failed` | 分子分母分别求和后再算比例 | 避免"取平均"稀释错误 |
+| `P50/P95/P99` 首字 | **取最差分片** | 保守口径，不掩盖某个分片劣化 |
+| `vus` / `replicas` | 取 `RUN_META`（总量 / 后端副本数） | 分片是客户端侧的概念 |
+
+**实测样例（3 分片 × 80 VU = 240 VU，2 副本，45s）**：
+
+| 分片 | RPS | P95 首字 |
+|---|---|---|
+| shard-0 | 42.1 | 345.9 ms |
+| shard-1 | 42.8 | 344.7 ms |
+| shard-2 | 42.9 | 341.2 ms |
+| **聚合** | **127.9** | **345.9 ms**（最差分片） |
+
+报告文件名：`perf_report_shard-3x-vu240-dur45s_<时间戳>.html`（`shard` 动作已纳入自动报告）。
+
+**坑点**：
+
+1. **Job 名复用**：重跑前必须 `kubectl delete job k6-shard-<i>`（`sharded.sh` 已内置）；
+2. **VU 取整**：`1500/4=375` 整除；若是 `1501/4`，余数按 `i < REM` 分给前几片，务必保证总和等于目标值，否则报告的"总并发"与实际不符；
+3. **客户端总资源** = 分片数 × 单 Job `limits`。4 片 × 2 核 = 8 核上限，排到同一节点会互相抢；用 `nodeSelector`/反亲和或降低单片 `limits`；
+4. **误差来源**：各分片的 `duration` 起点有几秒差异，聚合 RPS 是"平均速率之和"，不是严格同窗口；做 SLO 判定时以最差分片的 P95 为准更稳；
+5. **配额/限流共池**：N 个分片共享同一个 token 配额与同一个限流桶（按 IP 或按用户），片数越多越容易触发 429——先用小档确认限流阈值；
+6. **判定**：任一分片阈值破线，该 Job `failed`；等待逻辑需对每个分片判断 `succeeded||failed`（`sharded.sh` 已处理），否则会像早期 stage 脚本那样白等。
+
+---
+
+### 12.7 收尾
 
 ```bash
 # 恢复被临时修改的限流配置
@@ -526,8 +677,8 @@ A：不能。公网多一跳 NAT/EIP + ALB，且受 EIP 带宽限制。报告里
 | `deploy/perf/k6/s3_burst.js` | 突发 |
 | `deploy/perf/k6/s4_admin.js` | 管理面到达率 |
 | `deploy/perf/k6/s9_long.js` | 长流 |
-| `deploy/perf/k6/run.sh` | 本机入口（stage/dual1500/burst/admin/degrade/rolling/long/summary/readback） |
-| `deploy/perf/k6/bodies/*.sh` | 节点侧执行体 |
+| `deploy/perf/k6/run.sh` | 本机入口（stage/dual1500/shard/burst/admin/degrade/rolling/long/summary/readback） |
+| `deploy/perf/k6/bodies/*.sh` | 节点侧执行体（`sharded.sh` = 多 Job 分片并行） |
 | `deploy/perf/k6/report.py` | 单文件 HTML 报告生成 |
 | `deploy/perf/mock-upstream/` | mock 上游与 `mock_ctl.sh` |
 | `deploy/perf/perf_reports/` | 报告与日志 |

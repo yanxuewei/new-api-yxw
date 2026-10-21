@@ -85,3 +85,17 @@ python3 deploy/perf/k6/report.py --log-dir deploy/perf/perf_reports \
    NAT/ALB/Ingress 目前无逐跳埋点，合并为“网关+链路”= waiting_p90 − 300ms；要再拆需接 SLS 访问日志或 trace（未做，不填假数据）。
 3. **标签遮挡**：去掉条形图内的长标签，改为图下表格（模块/耗时/占比/数据来源），彻底避免“上游首字”和“网关+链路”文字重叠。
 4. 每个 body 的日志过滤已包含四个阶段指标；`report.py` 取**有阶段数据的最优档**画链路图（`best_phase`）。
+
+## 多 Job 分片并行（`shard`，2026-10-21）
+
+单 Job 是单进程，1500 VU 已需要约 2 核/1Gi；3000+ 并发时用分片：
+
+```bash
+EIP_MBPS=100 bash deploy/perf/k6/run.sh shard 1500 120s 4    # 4 片 × 375 VU，打同一 Service
+```
+
+- 执行体 `bodies/sharded.sh`：按 `SHARDS` 均分 VU（余数给前几片），每片一个 Job（`k6-shard-N`），全部打同一个 `ClusterIP`；
+- `sse.js` 支持 `SHARD` env → `tags:{type:'sse',shard:N}`，可按分片切片指标；
+- 日志聚合：N 个摘要写进同一份日志，`report.py` 按“RPS 求和、错误率合并、P95 取最差分片”处理；
+- 实测样例（3×80 VU）：分片 42.1/42.8/42.9 RPS → 聚合 **127.9 RPS**、P95 345.9ms；
+- 注意：客户端总资源 = 分片数 × 单 Job limits；重跑前先删同名 Job；配额/限流是共池的。
