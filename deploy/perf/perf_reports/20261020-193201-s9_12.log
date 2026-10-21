@@ -1,0 +1,32 @@
+[i] 动态选定节点=i-k1afs8wedv35rai4pmx2（DescribeClusterNodes 现取，未写死）
+[i] 取 15 分钟临时私网 kubeconfig
+[i] server=    server: https://10.2.25.173:6443  节点=i-k1afs8wedv35rai4pmx2  RUN_ID=1792495923-341833-16368
+[i] InvokeId=t-ida70ltrgtkwhds
+----- 节点内输出（status=Success）-----
+=== mode=long base=https://perf.likha.hk vus= dur= rate=
+  mock -> 长流(24000 token)
+  mock -> normal
+  job_succeeded=1 failed=0 cpu_peak=293m mem_peak=81Mi
+===RUN_META===
+target=https://perf.likha.hk
+base=https://perf.likha.hk
+mode=long
+vus=1
+dur=
+cpu_peak_m=293
+mem_peak_mi=81
+replicas=2
+job=k6-long
+ts=2026-10-20T11:44:23Z
+images=
+===END_META===
+     checks.........................: 100.00% 1 out of 1
+     data_received..................: 5.6 MB  7.8 kB/s
+     http_req_duration..............: avg=12m4s    med=12m4s    p(90)=12m4s    p(95)=12m4s    p(99)=12m4s    max=12m4s   
+     http_req_failed................: 0.00%   0 out of 1
+     http_req_waiting...............: avg=349.28ms med=349.28ms p(90)=349.28ms p(95)=349.28ms p(99)=349.28ms max=349.28ms
+     http_reqs......................: 1       0.00138/s
+     vus_max........................: 1       min=1      max=1
+### remote_rc=0 cleaned=YES
+-----------------------------------
+[i] 凭据清理：本机 已删 / 节点侧 cleaned=YES

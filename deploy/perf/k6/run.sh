@@ -17,9 +17,9 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../../.." && pwd)"
 REMOTE="$ROOT/deploy/lib/ack_remote_jkt_dev.sh"
 BODIES="$HERE/bodies"
-K6JS="$HERE/sse.js"
+K6JS_FILE="$HERE/sse.js"   # 每个动作可切换（burst/admin/long 用各自脚本）
 
-[ -s "$K6JS" ] || { echo "[!] 缺 $K6JS"; exit 1; }
+[ -s "$K6JS_FILE" ] || { echo "[!] 缺 $K6JS_FILE"; exit 1; }
 [ -x "$REMOTE" ] || { echo "[!] 缺通道脚本 $REMOTE"; exit 1; }
 
 ACTION="${1:?action: stage|dual1500|summary|readback}"; shift || true
@@ -31,12 +31,13 @@ header() {
 set -uo pipefail
 export PATH=/usr/bin:/bin:/usr/local/bin:$PATH
 HDR
-  printf "export K6JS_B64='%s'\n" "$(base64 -w0 "$K6JS")"
+  printf "export K6JS_GZ='%s'\n" "$(gzip -9 -c "$K6JS_FILE" | base64 -w0)"
   local kv
   for kv in "$@"; do printf "export %s='%s'\n" "${kv%%=*}" "${kv#*=}"; done
 }
 
-REPORT_DIR="$ROOT/deploy/logs/perf_reports"
+REPORT_DIR="$ROOT/deploy/perf/perf_reports"
+DESC=""   # 本次压测参数摘要，由分发处赋值，用于报告文件名
 
 run_body() {
   local body="$1" tag="$2"; shift 2
@@ -45,36 +46,62 @@ run_body() {
   { header "$@"; cat "$BODIES/$body"; } > "$full"; chmod 700 "$full"
   echo "[perf-k6] action=$tag payload=$# body=$(wc -c <"$full")B"
   # 捕获远端输出：一边打屏，一边落盘（报告的数据源），跑完自动渲染 HTML
-  local out rc log ts
+  local out rc log ts safe
+  ts=$(date +%Y%m%d-%H%M%S)          # 启动时刻（精确到秒），用于报告文件名
   out=$(bash "$REMOTE" "$full" 2>&1); rc=$?
   printf '%s\n' "$out"
   rm -f "$full"
-  ts=$(date +%Y%m%d-%H%M%S)
   mkdir -p "$REPORT_DIR"
   log="$REPORT_DIR/${ts}-${tag}.log"
   printf '%s\n' "$out" > "$log"
   echo "[perf-k6] 日志：$log"
   case "$tag" in
-    stage_*|dual1500)
-      python3 "$HERE/report.py" --log-dir "$REPORT_DIR" --out "$REPORT_DIR/index.html" \
-        --eip-mbps "${EIP_MBPS:-5}" || true
-      cp -f "$REPORT_DIR/index.html" "$REPORT_DIR/${ts}-report.html" 2>/dev/null || true
-      echo "[perf-k6] 报告：$REPORT_DIR/index.html  （快照 ${ts}-report.html）" ;;
+    stage_*|dual1500|s3_*|s4_*|s5_*|s9_*|s10_*)
+      # 文件名 = perf_report_<参数摘要>_<启动时刻>.html（参数里的路径/冒号等替换为 -）
+      safe=$(printf '%s' "${DESC:-$tag}" | tr -c 'A-Za-z0-9._-' '-' | sed 's/--*/-/g;s/-*$//')
+      local html="$REPORT_DIR/perf_report_${safe}_${ts}.html"
+      python3 "$HERE/report.py" --logs "$log" --out "$html" --eip-mbps "${EIP_MBPS:-5}" || true
+      echo "[perf-k6] 报告：$html" ;;
   esac
   return $rc
 }
 
 case "$ACTION" in
   stage)
+    K6JS_FILE="$HERE/sse.js"
     # TGT 可为 Service 名（集群内直连）或完整 URL（如 https://perf.likha.hk，走公网 ALB 路径）
     TGT="${1:?stage 需要 <target-svc|url>}"; VUS="${2:?stage 需要 <vus>}"; DUR="${3:-120s}"
+    case "$TGT" in *://*) P=public ;; *) P=clusterip ;; esac
+    DESC="stage-${P}-vu${VUS}-dur${DUR}"
     run_body stage.sh "stage_${TGT//[^a-zA-Z0-9]/_}_${VUS}" "TARGET_SVC=$TGT" "VUS=$VUS" "DUR=$DUR" ;;
   dual1500)
+    K6JS_FILE="$HERE/sse.js"
     EACH="${1:-750}"; DUR="${2:-120s}"
-    run_body dual1500.sh dual1500 "VUS_EACH=$EACH" "DUR=$DUR" ;;
+    DESC="dual-slave2-vu$((EACH * 2))-dur${DUR}"
+    run_body dual1500.sh dual1500 "VUS=$((EACH * 2))" "DUR=$DUR" ;;
   summary)
     run_body summary.sh summary "JOBS=$*" ;;
   readback)
     run_body readback.sh readback ;;
+  burst)
+    V="${1:-1500}"; D="${2:-90s}"
+    K6JS_FILE="$HERE/s3_burst.js"; DESC="s3-burst-vu${V}-dur${D}"
+    run_body scenario.sh "s3_${V}" "MODE=burst" "VUS=$V" "DUR=$D" ;;
+  admin)
+    R="${1:-800}"; D="${2:-60s}"
+    K6JS_FILE="$HERE/s4_admin.js"; DESC="s4-admin-rate${R}-dur${D}"
+    run_body scenario.sh "s4_${R}" "MODE=admin" "RATE=$R" "DUR=$D" ;;
+  degrade)
+    V="${1:-300}"; D="${2:-90s}"
+    DESC="s5-degrade-vu${V}-dur${D}"
+    run_body scenario.sh "s5_${V}" "MODE=degrade" "VUS=$V" "DUR=$D" ;;
+  rolling)
+    V="${1:-300}"; D="${2:-120s}"
+    DESC="s10-rolling-vu${V}-dur${D}"
+    run_body scenario.sh "s10_${V}" "MODE=rolling" "VUS=$V" "DUR=$D" ;;
+  long)
+    M="${1:-13}"
+    K6JS_FILE="$HERE/s9_long.js"; DESC="s9-long-${M}min"
+    run_body scenario.sh "s9_${M}" "MODE=long" "MIN=$M" "BASE_URL=${BASE_URL:-https://perf.likha.hk}" ;;
   *) echo "[!] 未知动作：$ACTION（stage|dual1500|summary|readback）"; exit 2 ;;
 esac

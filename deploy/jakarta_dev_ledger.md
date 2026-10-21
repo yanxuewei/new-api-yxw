@@ -1601,3 +1601,27 @@ stdout 路不受影响（纳秒来自 runtime `_time_`）。属既有挂账 G8�
 报告内容：摘要卡（最优通过档 / 单副本拐点 / 1500 所需副本）、明细表（RPS、P50/P95/P99 首字、端到端 P95、错误率、checks、CPU/内存峰值、下行 Mbps、PASS/FAIL）、趋势图、瓶颈判定（事实与推断分开）、理想 QPS/资源效率、完整公式段（Little 定律、每核吞吐、拐点插值、副本数、带宽利用率）。
 **实测发现（重要）**：公网路径 `https://perf.likha.hk` 的瓶颈是 **dev NAT 的 EIP 仅 5 Mbps**（按流量计费）——120 VU 下行已 6.24 Mbps、150 VU 7.38 Mbps，600 VU 时 RPS 塌到 52、错误率 14.4%，而应用侧 0 条 5xx、CPU 仅 0.26 核 ⇒ 链路先饱和，不是网关容量。报告在该情形下**拒绝输出拐点**并提示改用内网直连。
 **路由事实**：`perf.likha.hk` 的 Ingress 只指向 `svc/perf-new-api-slave`（1 副本）；内网 dual1500 才是双副本。
+
+**报告与双副本口径修订（2026-10-20 晚）**：报告改存 `deploy/perf/perf_reports/`，文件名 = `perf_report_<参数摘要>_<启动时刻到秒>.html`（每次运行一份，不再覆盖 index.html）；标题改 `new-api · SSE 容量压测报告`、去掉任务编号；主题换绿色科技风（页头深绿渐变 + 绿色数据点），公式区代码与脚注加深底色/加粗边框提高对比；趋势图数据点**可点击**弹出该次运行明细（原生 JS，单文件无依赖）。
+**双副本方式变更**：`dual1500` 不再使用 `perf-new-api-master`，改为 `kubectl scale deploy/perf-new-api-slave --replicas=2` 后单 Job 打 `svc/perf-new-api-slave`（kube-proxy 分摊）。实测：`ready=2/2`、VUS=80 小档通过，报告 `perf_report_dual-slave2-vu80-dur15s_20261020-175655.html`。
+
+## 24. 任务 33 · S1–S10 全场景实测（2026-10-20，`perf-new-api-slave` ×2）
+
+> 汇总与逐场景报告见 `deploy/perf/perf_reports/SUMMARY.md` 与同目录 12 份 HTML。
+环境：slave 2 副本（未用 master）、mock 6 副本；S1–S5/S10 内网 ClusterIP，S9 公网 ALB。新增 k6 脚本：`s3_burst.js` / `s4_admin.js` / `s9_long.js`，执行器 `bodies/scenario.sh`（burst/admin/degrade/rolling/long），`run.sh` 文件动作 `burst/admin/degrade/rolling/long`。
+
+| 场景 | 实测 | 判定 |
+|---|---|---|
+| S1 500 VU | 255.5 rps / 0% / P95 398ms | ✅ |
+| S2 1500 VU（2 副本） | 701.6 rps / 0% / P95 578ms | ✅ |
+| S3 突发 0→1500/30s | 604.3 rps / 0% / P95 540ms | ✅ |
+| S4 800 QPS（默认限流） | 799.4 rps / **99.25% 429** | ❌ 限流拦截 |
+| S4 800 QPS（限流放开） | 797.7 rps / 0% / P95 7.2ms | ✅ |
+| S5 劣化 50%+5s | 50.99% 错误 / P95 5.34s / restarts 0 | ✅ 符合注入 |
+| S9 12min 长流 | 12m04s 完成 / 0% | ✅ 600s 为空闲超时 |
+| S10 滚动发布 | 0.14%（27/19096） | ❌ 未达 0 |
+| S6 Redis | — | ⏭ 共用 Tair（db=2），停实例波及 dev/pre |
+| S8 DB 切换 | — | ⏭ Basic 单机无备 |
+
+**三条上线前待办**：① 管理面限流需按来源分桶/内部豁免，否则 800 QPS 目标不成立（默认 360/180s ≈ 2 rps/IP）；② S10 需 `maxUnavailable=0` + preStop + 就绪摘流，复测目标 0 错误；③ 文档把「ALB 600s 上限」改为**空闲超时**口径（实测连续流 12m 未被切）。
+**副作用已复原**：测试期间临时放开的 `GLOBAL_API_RATE_LIMIT` 已删除并重启（CM 回读为空值），slave 2 副本 `ready=true restarts=0`。

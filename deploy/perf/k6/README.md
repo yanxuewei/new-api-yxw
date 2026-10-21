@@ -50,15 +50,15 @@ bash deploy/perf/k6/run.sh readback
 ## 自动 HTML 报告（2026-10-20 起）
 
 每次 `stage` / `dual1500` 跑完，`run.sh` 会自动：
-1. 把远端输出落盘到 `deploy/logs/perf_reports/<时间戳>-<tag>.log`（报告的数据源）；
-2. 调 `report.py` 聚合该目录**全部**日志，生成单文件 `deploy/logs/perf_reports/index.html`（并留快照 `<时间戳>-report.html`）。
+1. 把远端输出落盘到 `deploy/perf/perf_reports/<时间戳>-<tag>.log`（报告的数据源）；
+2. 调 `report.py` 生成**本次运行**的单文件报告：`deploy/perf/perf_reports/perf_report_<参数摘要>_<启动时刻>.html`（如 `perf_report_stage-public-vu100-dur15s_20261020-175609.html`）。
 
 报告内容：摘要卡（最优通过档 / 单副本拐点 / 1500 并发所需副本）、每次运行明细表（RPS、P50/P95/P99 首字、端到端 P95、错误率、checks、CPU/内存峰值、下行 Mbps、PASS/FAIL）、两张内联 SVG 趋势图（P95 vs VU、RPS vs VU）、瓶颈判定（事实/推断分开）、理想 QPS 与资源效率、完整公式段。
 
 ```bash
 # 手动重生成（例如补了历史日志、或改了 EIP 带宽口径）
-python3 deploy/perf/k6/report.py --log-dir deploy/logs/perf_reports \
-  --out deploy/logs/perf_reports/index.html --eip-mbps 5
+python3 deploy/perf/k6/report.py --log-dir deploy/perf/perf_reports \
+  --out deploy/perf/perf_reports/index.html --eip-mbps 5
 ```
 
 **带宽判定**：公网路径（k6→NAT→EIP→ALB）先撞 EIP 带宽时，表现为「RPS 塌陷 + 连接级失败 + 应用侧无 5xx + CPU 很低」。`run.sh` 用 `EIP_MBPS`（默认 5，雅加达 dev 现网实测 5 Mbps）把这条写进报告；此时**首个破线档不参与拐点插值**，卡片明确标注“拐点不可用，改用内网直连档位”。

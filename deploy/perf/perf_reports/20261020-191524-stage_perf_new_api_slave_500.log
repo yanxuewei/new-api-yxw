@@ -1,0 +1,32 @@
+[i] 动态选定节点=i-k1afs8wedv35rai4pmx2（DescribeClusterNodes 现取，未写死）
+[i] 取 15 分钟临时私网 kubeconfig
+[i] server=    server: https://10.2.25.173:6443  节点=i-k1afs8wedv35rai4pmx2  RUN_ID=1792494926-330482-10877
+[i] InvokeId=t-ida70lsa3jzxxq8
+----- 节点内输出（status=Success）-----
+=== target=perf-new-api-slave (clusterip, BASE=http://172.23.2.189)  vus=500 dur=120s
+--- job_succeeded=1 cpu_peak=338m mem_peak=95Mi
+===RUN_META===
+target=perf-new-api-slave
+base=http://172.23.2.189
+mode=clusterip
+vus=500
+dur=120s
+cpu_peak_m=338
+mem_peak_mi=95
+replicas=1
+job=k6-stage-500
+ts=2026-10-20T11:17:40Z
+images=perf-new-api-master=acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com/newapi-dev/newapi-master:20261015-c62445555;perf-new-api-slave=acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com/newapi-dev/newapi-master:20261015-c62445555;
+===END_META===
+     checks.........................: 100.00% 62336 out of 62336
+     data_received..................: 343 MB  2.8 MB/s
+     http_req_duration..............: avg=1.94s    min=1.82s    med=1.88s    p(90)=2.08s   p(95)=2.13s    p(99)=2.45s    max=2.73s   
+   ✓ http_req_failed................: 0.00%   0 out of 31168
+     http_req_waiting...............: avg=348.17ms min=332.28ms med=337.44ms p(90)=359.7ms p(95)=397.66ms p(99)=611.27ms max=729.07ms
+     ✓ { type:sse }.................: avg=348.17ms min=332.28ms med=337.44ms p(90)=359.7ms p(95)=397.66ms p(99)=611.27ms max=729.07ms
+     http_reqs......................: 31168   255.468539/s
+     iterations.....................: 31168   255.468539/s
+     vus_max........................: 500     min=500            max=500
+### remote_rc=0 cleaned=YES
+-----------------------------------
+[i] 凭据清理：本机 已删 / 节点侧 cleaned=YES

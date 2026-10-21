@@ -1,0 +1,38 @@
+[i] 动态选定节点=i-k1afs8wedv35rai4pmx2（DescribeClusterNodes 现取，未写死）
+[i] 取 15 分钟临时私网 kubeconfig
+[i] server=    server: https://10.2.25.173:6443  节点=i-k1afs8wedv35rai4pmx2  RUN_ID=1792495659-339238-12861
+[i] InvokeId=t-ida70ltdd3qvv9c
+----- 节点内输出（status=Success）-----
+=== mode=degrade base=http://172.23.2.189 vus=300 dur=90s rate=
+  mock -> S5
+  [!!] k6 job failed（阈值破线），仍采集
+  mock -> normal
+  job_succeeded=? failed=1 cpu_peak=191m mem_peak=54Mi
+===RUN_META===
+target=perf-new-api-slave
+base=http://172.23.2.189
+mode=degrade
+vus=300
+dur=90s
+cpu_peak_m=191
+mem_peak_mi=54
+replicas=2
+job=k6-degrade
+ts=2026-10-20T11:29:24Z
+images=
+===END_META===
+     ✗ status 200
+      ↳  49% — ✓ 2301 / ✗ 2394
+     ✗ has [DONE]
+      ↳  49% — ✓ 2301 / ✗ 2394
+     checks.........................: 49.00% 4602 out of 9390
+     data_received..................: 26 MB  271 kB/s
+     http_req_duration..............: avg=5.93s    min=5s      med=5.3s    p(90)=6.86s   p(95)=6.86s   p(99)=7.44s    max=7.49s  
+   ✗ http_req_failed................: 50.99% 2394 out of 4695
+     http_req_waiting...............: avg=5.18s    min=5s      med=5.3s    p(90)=5.34s   p(95)=5.34s   p(99)=5.62s    max=5.64s  
+     ✗ { type:sse }.................: avg=5.18s    min=5s      med=5.3s    p(90)=5.34s   p(95)=5.34s   p(99)=5.62s    max=5.64s  
+     http_reqs......................: 4695   48.498622/s
+     vus_max........................: 300    min=300          max=300
+### remote_rc=0 cleaned=YES
+-----------------------------------
+[i] 凭据清理：本机 已删 / 节点侧 cleaned=YES

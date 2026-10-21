@@ -1,0 +1,4 @@
+[i] 动态选定节点=i-k1afs8wedv35rai4pmx2（DescribeClusterNodes 现取，未写死）
+[i] 取 15 分钟临时私网 kubeconfig
+[i] server=    server: https://10.2.25.173:6443  节点=i-k1afs8wedv35rai4pmx2  RUN_ID=1792495213-333226-13268
+[!] 命令体 15785 字节，接近云助手上限（实测 ~19KB 直接被 CmdContentExceedLimit 拒）⇒ 拆步/瘦身 body

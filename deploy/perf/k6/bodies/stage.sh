@@ -15,7 +15,7 @@ case "$TARGET_SVC" in
 esac
 echo "=== target=$TARGET_SVC ($MODE, BASE=$BASE)  vus=$VUS dur=$DUR"
 
-echo "$K6JS_B64" | base64 -d > /tmp/sse.js
+echo "$K6JS_GZ" | base64 -d | gzip -d > /tmp/sse.js
 kubectl -n $NS create configmap $CM --from-file=sse.js=/tmp/sse.js --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 rm -f /tmp/sse.js
 

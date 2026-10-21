@@ -1,0 +1,32 @@
+[i] 动态选定节点=i-k1afs8wedv35rai4pmx2（DescribeClusterNodes 现取，未写死）
+[i] 取 15 分钟临时私网 kubeconfig
+[i] server=    server: https://10.2.25.173:6443  节点=i-k1afs8wedv35rai4pmx2  RUN_ID=1792490171-316254-5088
+[i] InvokeId=t-ida70ll7neaq3gg
+----- 节点内输出（status=Success）-----
+=== target=https://perf.likha.hk (public-url, BASE=https://perf.likha.hk)  vus=100 dur=15s
+--- job_succeeded=1 cpu_peak=1m mem_peak=47Mi
+===RUN_META===
+target=https://perf.likha.hk
+base=https://perf.likha.hk
+mode=public-url
+vus=100
+dur=15s
+cpu_peak_m=1
+mem_peak_mi=47
+replicas=1
+job=k6-stage-100
+ts=2026-10-20T09:56:35Z
+images=perf-new-api-master=acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com/newapi-dev/newapi-master:20261015-c62445555;perf-new-api-slave=acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com/newapi-dev/newapi-master:20261015-c62445555;
+===END_META===
+     checks.........................: 100.00% 1600 out of 1600
+     data_received..................: 10 MB   651 kB/s
+     http_req_duration..............: avg=1.93s    min=1.82s    med=1.86s    p(90)=2.19s    p(95)=2.23s    p(99)=2.27s    max=2.28s   
+   ✓ http_req_failed................: 0.00%   0 out of 800
+     http_req_waiting...............: avg=368.3ms  min=338.53ms med=341.84ms p(90)=504.08ms p(95)=518.72ms p(99)=580.2ms  max=589.48ms
+     ✓ { type:sse }.................: avg=368.3ms  min=338.53ms med=341.84ms p(90)=504.08ms p(95)=518.72ms p(99)=580.2ms  max=589.48ms
+     http_reqs......................: 800     50.485725/s
+     iterations.....................: 800     50.485725/s
+     vus_max........................: 100     min=100          max=100
+### remote_rc=0 cleaned=YES
+-----------------------------------
+[i] 凭据清理：本机 已删 / 节点侧 cleaned=YES

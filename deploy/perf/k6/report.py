@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import glob
 import html
+import json
 import math
 import os
 import re
@@ -239,7 +240,10 @@ def svg_line(runs: list[dict], key: str, title: str, unit: str, slo: float | Non
     def px(x): return L + (x - x0) / max(1, (x1 - x0)) * (W - L - R)
     def py(y): return H - B - (y - y0) / max(1e-9, (y1 - y0)) * (H - T - B)
     pts = " ".join(f"{px(x):.1f},{py(y):.1f}" for x, y in zip(xs, ys))
-    dots = "".join(f'<circle cx="{px(x):.1f}" cy="{py(y):.1f}" r="3.2" fill="#2b6cb0"/>' for x, y in zip(xs, ys))
+    dots = "".join(
+        f'<circle class="pt" data-i="{i}" cx="{px(x):.1f}" cy="{py(y):.1f}" r="5" fill="#0f9d58" '
+        f'stroke="#ffffff" stroke-width="1.6" style="cursor:pointer"><title>VU={x}</title></circle>'
+        for i, (x, y) in enumerate(zip(xs, ys)))
     slo_line = ""
     if slo:
         yy = py(slo)
@@ -305,44 +309,62 @@ def render(runs: list[dict], a: dict, out_path: str, eip_mbps: float = 0.0) -> N
                   '<tr><td>CPU 峰值 (核)</td>' + r_cpu + '</tr>'
                   '<tr><td>每千 RPS 用核</td>' + r_cpr + '</tr></tbody></table>')
 
+    runs_json = json.dumps([{
+        "job": r.get("job", ""), "ts": r.get("ts", ""), "vus": r["vus_i"],
+        "replicas": r["replicas_i"], "mode": r.get("mode", ""), "target": r.get("target", ""),
+        "rps": r.get("rps", 0), "ttfb_p50": r.get("ttfb_med", 0),
+        "ttfb_p95": r.get("ttfb_p95", 0), "ttfb_p99": r.get("ttfb_p99", 0),
+        "dur_p95": r.get("dur_p95", 0), "err_pct": r.get("err_pct", 0),
+        "checks_pct": r.get("checks_pct", 0), "cpu": r.get("cpu_cores", 0),
+        "mem": r.get("mem_mi", 0), "bw": r.get("data_mbps", 0), "pass": bool(r.get("pass")),
+    } for r in runs], ensure_ascii=False).replace("</", "<\\/")
+
     doc = f'''<!DOCTYPE html>
 <html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>压测报告 · 任务 33 · {now}</title>
+<title>new-api · SSE 容量压测报告 · {now}</title>
 <style>
-:root{{--fg:#1a202c;--mut:#64748b;--line:#e2e8f0;--bg:#f7fafc;--brand:#2b6cb0;--ok:#2f855a;--bad:#c53030}}
+:root{{--fg:#0b1f16;--mut:#4b6a5c;--line:#cde8d8;--bg:#f2fbf6;--brand:#0f9d58;--accent:#12b76a;--deep:#052e1b;--ok:#0b7a45;--bad:#b42318}}
 *{{box-sizing:border-box}}
-body{{margin:0;background:var(--bg);color:var(--fg);font:14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans SC",sans-serif}}
-header{{background:linear-gradient(120deg,#1a365d,#2b6cb0);color:#fff;padding:28px 32px}}
+body{{margin:0;color:var(--fg);font:14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans SC",sans-serif;
+  background:radial-gradient(1200px 500px at 15% -10%,rgba(18,183,106,.18),transparent 60%),
+             radial-gradient(900px 420px at 100% 0%,rgba(5,46,27,.10),transparent 55%),var(--bg)}}
+header{{background:linear-gradient(120deg,#052e1b 0%,#0b5d34 55%,#0f9d58 100%);color:#eafff3;padding:30px 34px;border-bottom:3px solid #12b76a;box-shadow:0 8px 24px rgba(5,46,27,.18)}}
 header h1{{margin:0 0 6px;font-size:22px;font-weight:650}}
 header .meta{{opacity:.85;font-size:12.5px}}
 main{{max-width:1180px;margin:0 auto;padding:24px 20px 64px}}
-h2{{font-size:16px;margin:30px 0 12px;padding-left:10px;border-left:4px solid var(--brand)}}
+h2{{font-size:16px;margin:30px 0 12px;padding-left:10px;border-left:4px solid var(--accent);letter-spacing:.3px}}
 .cards{{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}}
-.card{{background:#fff;border:1px solid var(--line);border-radius:10px;padding:14px 16px;box-shadow:0 1px 2px rgba(0,0,0,.03)}}
+.card{{background:#fff;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:10px;padding:14px 16px;box-shadow:0 2px 10px rgba(5,46,27,.05)}}
 .card .k{{font-size:12px;color:var(--mut)}}
-.card .v{{font-size:24px;font-weight:650;color:var(--brand);font-variant-numeric:tabular-nums}}
+.card .v{{font-size:24px;font-weight:700;color:#0b7a45;font-variant-numeric:tabular-nums}}
 .card .v small{{font-size:12px;color:var(--mut);font-weight:400}}
 .card .s{{font-size:11.5px;color:var(--mut);margin-top:4px}}
 table{{width:100%;border-collapse:collapse;background:#fff;border:1px solid var(--line);border-radius:10px;overflow:hidden}}
 th,td{{padding:8px 10px;border-bottom:1px solid var(--line);text-align:left;font-variant-numeric:tabular-nums;font-size:12.5px;vertical-align:top}}
-th{{background:#edf2f7;font-weight:600;font-size:12px;color:#2d3748}}
+th{{background:#e6f7ee;font-weight:600;font-size:12px;color:#0b3d27}}
 tr:last-child td{{border-bottom:none}}
 .sub{{color:var(--mut);font-size:10.5px}}
 .badge{{display:inline-block;padding:1px 8px;border-radius:999px;font-size:11px;font-weight:600}}
-.badge.ok{{background:#c6f6d5;color:var(--ok)}}
-.badge.bad{{background:#fed7d7;color:var(--bad)}}
+.badge.ok{{background:#d1fadf;color:var(--ok)}}
+.badge.bad{{background:#fee4e2;color:var(--bad)}}
 ul{{margin:6px 0 0 20px;padding:0}} li{{margin:3px 0}}
 .note{{background:#fff;border:1px dashed var(--line);border-radius:10px;padding:12px 14px;font-size:12.5px;color:#4a5568}}
-code{{background:#edf2f7;padding:1px 5px;border-radius:4px;font-size:12px}}
-pre{{background:#1a202c;color:#e2e8f0;padding:14px 16px;border-radius:10px;overflow:auto;font-size:12.5px;line-height:1.55}}
+code{{background:#e2f8ec;color:#064e2b;border:1px solid #b7e4c9;padding:1px 6px;border-radius:5px;font-size:12.5px;font-weight:600;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}}
+pre{{background:#06281a;color:#d9ffe9;border:1px solid #14532d;padding:14px 16px;border-radius:10px;overflow:auto;font-size:12.5px;line-height:1.6}}
 .chart{{margin:10px 0 0;background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px 12px}}
 .chart figcaption{{font-size:12px;color:var(--mut);margin-bottom:4px}}
-.lim{{color:var(--mut);font-size:12px}}
+.lim{{color:#315244;font-size:12.5px;line-height:1.7}}
+.tip{{position:fixed;z-index:99;background:#06281a;color:#e9fff2;border:1px solid #16a34a;border-radius:10px;
+  box-shadow:0 12px 32px rgba(5,46,27,.35);padding:12px 14px;font-size:12.5px;min-width:260px}}
+.tip-h{{font-weight:700;margin-bottom:6px;color:#7ef0b0;display:flex;align-items:center;gap:8px}}
+.tip-t{{width:100%;border-collapse:collapse}}
+.tip-t td{{padding:2px 6px;border:none;font-size:12px;color:#cdeedd}}
+.tip-t td:first-child{{color:#8fbfa9;white-space:nowrap}}
 </style></head><body>
 <header>
-  <h1>任务 33 · SSE 容量压测报告</h1>
-  <div class="meta">生成于 {now} · 数据源：deploy/logs/perf_reports/*.log（k6 文本摘要 + 采样元数据）· 集群 new-api-perf（雅加达 ap-southeast-5）</div>
+  <h1>new-api · SSE 容量压测报告</h1>
+  <div class="meta">生成于 {now} · 数据源：k6 文本摘要 + 运行时采样 · 集群 new-api-perf（雅加达 ap-southeast-5）</div>
 </header>
 <main>
 <h2>摘要</h2>
@@ -418,8 +440,39 @@ pre{{background:#1a202c;color:#e2e8f0;padding:14px 16px;border-radius:10px;overf
 bash deploy/perf/k6/run.sh stage perf-new-api-slave 900 120s
 bash deploy/perf/k6/run.sh summary</pre>
 
-<p class="lim">本报告为自动生成（deploy/perf/k6/report.py），请勿手工编辑；新一次压测会重新生成同名文件。</p>
-</main></body></html>'''
+<p class="lim">本报告由 deploy/perf/k6/report.py 自动生成；点击趋势图上的绿色数据点可查看该次运行明细。</p>
+</main>
+<div id="tip" class="tip" hidden></div>
+<script>
+const RUNS = {runs_json};
+const tip = document.getElementById('tip');
+function showTip(ev, i) {{
+  const r = RUNS[i]; if (!r) return;
+  const f = (v, n, suf) => (v === null || v === undefined || v === 0 ? '—' : Number(v).toFixed(n) + (suf || ''));
+  tip.innerHTML = `<div class="tip-h">${{r.job}} <span class="badge ${{r.pass ? 'ok' : 'bad'}}">${{r.pass ? 'PASS' : 'FAIL'}}</span></div>`
+    + `<table class="tip-t"><tr><td>时间</td><td>${{r.ts}}</td></tr>`
+    + `<tr><td>并发 / 副本</td><td>${{r.vus}} / ${{r.replicas}}</td></tr>`
+    + `<tr><td>路径</td><td>${{r.mode}} · ${{r.target}}</td></tr>`
+    + `<tr><td>RPS</td><td>${{f(r.rps,1)}}</td></tr>`
+    + `<tr><td>首字 P50/P95/P99</td><td>${{f(r.ttfb_p50,0)}} / ${{f(r.ttfb_p95,0)}} / ${{f(r.ttfb_p99,0)}} ms</td></tr>`
+    + `<tr><td>端到端 P95</td><td>${{f(r.dur_p95,0)}} ms</td></tr>`
+    + `<tr><td>错误率 / checks</td><td>${{f(r.err_pct,3)}}% / ${{f(r.checks_pct,2)}}%</td></tr>`
+    + `<tr><td>CPU / 内存峰值</td><td>${{f(r.cpu,2)}} 核 / ${{f(r.mem,0)}} Mi</td></tr>`
+    + `<tr><td>下行</td><td>${{f(r.bw,2)}} Mbps</td></tr></table>`;
+  tip.hidden = false;
+  const pad = 14, w = tip.offsetWidth, h = tip.offsetHeight;
+  let x = ev.clientX + pad, y = ev.clientY + pad;
+  if (x + w > window.innerWidth - 8) x = ev.clientX - w - pad;
+  if (y + h > window.innerHeight - 8) y = ev.clientY - h - pad;
+  tip.style.left = x + 'px'; tip.style.top = y + 'px';
+}}
+document.querySelectorAll('circle.pt').forEach(el => {{
+  el.addEventListener('click', ev => {{ ev.stopPropagation(); showTip(ev, Number(el.dataset.i)); }});
+}});
+document.addEventListener('click', () => {{ tip.hidden = true; }});
+document.addEventListener('keydown', ev => {{ if (ev.key === 'Escape') tip.hidden = true; }});
+</script>
+</body></html>'''
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as f:
         f.write(doc)
