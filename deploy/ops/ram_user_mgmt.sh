@@ -16,6 +16,11 @@
 # ════════════════════════════════════════════════════════════════════════
 set -uo pipefail
 
+# 程序身份的站点表与权限文档（与 ram_rrsa_program_onboard.sh 共用一份，避免权限漂移）
+HERE_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=../lib/program_identity.sh
+. "$HERE_DIR/../lib/program_identity.sh" 2>/dev/null || PROGRAM_LIB_MISSING=1
+
 REGION="${RAM_REGION:-ap-southeast-1}"
 # 账号站点决定 RAM 用户的控制台登录地址：国际站 alibabacloud.com（默认）/ 中国站 aliyun.com
 SITE="${RAM_SITE:-}"
@@ -624,6 +629,187 @@ print(' '.join(x['PolicyName'] for x in ((d.get('Policies') or {}).get('Policy')
   if is_ok "$out"; then ok "用户组 $g 已删除"; else fail "删除失败：$(err_msg "$out")"; return 1; fi
 }
 
+# ── 程序身份（AK 路线）────────────────────────────────────────────────
+# 集群内工作负载用 RRSA（ram_rrsa_program_onboard.sh），集群外程序只能用 AK。
+# 两者共用同一条策略，权限范围一致；差异只在"身份载体"。
+
+program_ak_secret_file() { printf '%s/newapi-%s-program-ak.json' "${AK_SECRET_DIR:-$HOME/.aliyun}" "$SITE_NAME"; }
+
+add_program_ak() {
+  local site="${1:-}"
+  [ -n "$site" ] || die "用法: deploy/ops/ram_user_mgmt.sh add-program-ak <mnl|jkt>"
+  [ "${PROGRAM_LIB_MISSING:-0}" = 1 ] && die "缺少 deploy/lib/program_identity.sh"
+  program_site "$site" || die "未知站点：$site（仅支持 mnl | jkt）"
+  program_prefix_allowed || die "OSS_PREFIX 不能占用审计前缀 actiontrail"
+
+  local secret_file; secret_file=$(program_ak_secret_file)
+  head1 "程序身份 · AK 路线：${SITE_NAME}（${SITE_CLUSTER_NAME}）"
+  say "  用户组 : $SITE_GROUP"
+  say "  用户   : $SITE_USER（仅 AK，无控制台登录）"
+  say "  策略   : $SITE_POLICY + newapi-audit-protect（只挂组）"
+  say "  权限   : OSS ${BUCKET}/${PREFIX:-<整桶>}/*（actiontrail 前缀 Deny）"
+  say "  Secret : $secret_file（0600，不回显）"
+  confirm "即将创建/补齐上述资源" || return 1
+
+  local out p t
+
+  # 1) 策略
+  out=$(ram GetPolicy --PolicyName "$SITE_POLICY" --PolicyType Custom)
+  if is_ok "$out"; then
+    skip "策略已存在：$SITE_POLICY"
+  else
+    out=$(ram CreatePolicy --PolicyName "$SITE_POLICY" --PolicyDocument "$(program_policy_doc)")
+    is_ok "$out" && ok "已创建策略 $SITE_POLICY" || { fail "创建策略失败：$(err_msg "$out")"; return 1; }
+  fi
+
+  # 2) 用户组
+  out=$(ram GetGroup --GroupName "$SITE_GROUP")
+  if is_ok "$out"; then
+    skip "用户组已存在：$SITE_GROUP"
+  else
+    out=$(ram CreateGroup --GroupName "$SITE_GROUP" --Comments "$SITE_GROUP_COMMENT")
+    is_ok "$out" && ok "已创建用户组 $SITE_GROUP" || { fail "创建用户组失败：$(err_msg "$out")"; return 1; }
+  fi
+
+  # 3) 绑定策略（只挂组）
+  for p in "$SITE_POLICY" newapi-audit-protect; do
+    out=$(ram ListPoliciesForGroup --GroupName "$SITE_GROUP")
+    if printf '%s' "$out" | grep -q "\"$p\""; then
+      skip "已绑定 $p"
+      continue
+    fi
+    t=Custom
+    out=$(ram GetPolicy --PolicyName "$p" --PolicyType Custom)
+    if ! is_ok "$out"; then
+      t=System
+      out=$(ram GetPolicy --PolicyName "$p" --PolicyType System)
+    fi
+    if ! is_ok "$out"; then
+      fail "策略不存在：$p（跳过绑定）"
+      continue
+    fi
+    out=$(ram AttachPolicyToGroup --GroupName "$SITE_GROUP" --PolicyName "$p" --PolicyType "$t")
+    is_ok "$out" && ok "已绑定 $SITE_GROUP ← $p（$t）" || fail "绑定 $p 失败：$(err_msg "$out")"
+  done
+
+  # 4) 纯 AK 用户（不建控制台登录）
+  out=$(ram GetUser --UserName "$SITE_USER")
+  if is_ok "$out"; then
+    skip "用户已存在：$SITE_USER"
+  else
+    out=$(ram CreateUser --UserName "$SITE_USER" --DisplayName "$SITE_USER" \
+            --Comments "program identity (AK only, no console login)")
+    is_ok "$out" && ok "已创建用户 $SITE_USER" || { fail "创建用户失败：$(err_msg "$out")"; return 1; }
+  fi
+
+  out=$(ram GetLoginProfile --UserName "$SITE_USER")
+  if printf '%s' "$out" | grep -q '"LoginProfile"'; then
+    fail "$SITE_USER 存在控制台登录配置，拒绝继续（纯程序身份不允许登录）"
+    return 1
+  fi
+  ok "无控制台登录"
+
+  # 5) 加入用户组
+  out=$(ram ListUsersForGroup --GroupName "$SITE_GROUP")
+  if printf '%s' "$out" | grep -q "\"$SITE_USER\""; then
+    skip "$SITE_USER 已在该组"
+  else
+    out=$(ram AddUserToGroup --GroupName "$SITE_GROUP" --UserName "$SITE_USER")
+    is_ok "$out" && ok "$SITE_USER → $SITE_GROUP" || { fail "加入用户组失败：$(err_msg "$out")"; return 1; }
+  fi
+
+  # 6) AccessKey：Secret 只落盘，不进终端
+  local n akid aksecret
+  n=$(ram ListAccessKeys --UserName "$SITE_USER" | "$PY" -c "
+import sys,json
+try: d=json.load(sys.stdin)
+except Exception: print(0); raise SystemExit
+print(len(((d.get('AccessKeys') or {}).get('AccessKey') or [])))" 2>/dev/null)
+  if [ "${n:-0}" -ge 1 ]; then
+    skip "已有 ${n} 个 AK（上限 2），不重复创建；如需轮转先禁用旧的再 new-ak"
+  else
+    out=$(ram CreateAccessKey --UserName "$SITE_USER")
+    if ! is_ok "$out"; then
+      fail "创建 AK 失败：$(err_msg "$out")"
+      return 1
+    fi
+    akid=$(printf '%s' "$out" | jq_get "AccessKey.AccessKeyId")
+    aksecret=$(printf '%s' "$out" | jq_get "AccessKey.AccessKeySecret")
+    mkdir -p "$(dirname "$secret_file")"
+    umask 077
+    printf '{"site":"%s","user":"%s","accessKeyId":"%s","accessKeySecret":"%s"}\n' \
+      "$SITE_NAME" "$SITE_USER" "$akid" "$aksecret" > "$secret_file"
+    chmod 600 "$secret_file"
+    ok "已创建 AK：$akid"
+    say "  Secret 已写入（0600）：$secret_file"
+    say "  ⚠ 仅此一次可见；请立即转入密钥管理并删除该文件"
+  fi
+
+  say ""
+  say "  交付约束：禁止进入 git / 镜像层 / 聊天记录；建议 90 天轮转"
+  say "  轮转：new-ak $SITE_USER → 切换 → toggle-ak $SITE_USER <旧AK> Inactive → 观察 → del-ak"
+}
+
+verify_program_ak() {
+  local site="${1:-}"
+  [ -n "$site" ] || die "用法: deploy/ops/ram_user_mgmt.sh verify-program-ak <mnl|jkt>"
+  [ "${PROGRAM_LIB_MISSING:-0}" = 1 ] && die "缺少 deploy/lib/program_identity.sh"
+  program_site "$site" || die "未知站点：$site（仅支持 mnl | jkt）"
+
+  head1 "校验程序身份 · AK 路线：${SITE_NAME}"
+  local rc=0 out
+
+  out=$(ram GetPolicy --PolicyName "$SITE_POLICY" --PolicyType Custom)
+  is_ok "$out" && ok "策略存在：$SITE_POLICY" || { fail "策略缺失：$SITE_POLICY"; rc=1; }
+
+  out=$(ram GetGroup --GroupName "$SITE_GROUP")
+  if is_ok "$out"; then
+    ok "用户组存在：$SITE_GROUP"
+    out=$(ram ListPoliciesForGroup --GroupName "$SITE_GROUP")
+    printf '%s' "$out" | grep -q "\"$SITE_POLICY\"" && ok "已挂 $SITE_POLICY" || { fail "未挂 $SITE_POLICY"; rc=1; }
+    printf '%s' "$out" | grep -q '"newapi-audit-protect"' && ok "已挂 newapi-audit-protect" || say "  提示：未挂 newapi-audit-protect"
+  else
+    fail "用户组缺失：$SITE_GROUP"; rc=1
+  fi
+
+  out=$(ram GetUser --UserName "$SITE_USER")
+  if is_ok "$out"; then
+    ok "用户存在：$SITE_USER"
+    out=$(ram GetLoginProfile --UserName "$SITE_USER")
+    printf '%s' "$out" | grep -q '"LoginProfile"' && { fail "存在控制台登录配置"; rc=1; } || ok "无控制台登录"
+
+    out=$(ram ListUsersForGroup --GroupName "$SITE_GROUP")
+    printf '%s' "$out" | grep -q "\"$SITE_USER\"" && ok "已在 $SITE_GROUP" || { fail "未加入 $SITE_GROUP"; rc=1; }
+
+    local up
+    up=$(ram ListPoliciesForUser --UserName "$SITE_USER" | "$PY" -c "
+import sys,json
+try: d=json.load(sys.stdin)
+except Exception: print('?'); raise SystemExit
+print(len(((d.get('Policies') or {}).get('Policy') or [])))" 2>/dev/null)
+    if [ "${up:-?}" = 0 ]; then
+      ok "无用户级直挂策略"
+    else
+      fail "存在 ${up} 条用户级直挂策略（违反只挂组）"; rc=1
+    fi
+
+    ram ListAccessKeys --UserName "$SITE_USER" | "$PY" -c "
+import sys,json
+d=json.load(sys.stdin)
+ks=((d.get('AccessKeys') or {}).get('AccessKey') or [])
+print('  AK: ' + (', '.join('%s(%s)' % (k['AccessKeyId'], k.get('Status')) for k in ks) if ks else '无'))
+act=[k for k in ks if k.get('Status')=='Active']
+raise SystemExit(0 if act else 3)" 2>/dev/null || { fail "没有启用中的 AK"; rc=1; }
+  else
+    fail "用户缺失：$SITE_USER"; rc=1
+  fi
+
+  say ""
+  say "  范围：OSS ${BUCKET}/${PREFIX:-<整桶>}/* ；Secret：$(program_ak_secret_file)"
+  if [ "$rc" = 0 ]; then ok "校验全部通过"; else fail "存在未通过项"; fi
+  return "$rc"
+}
+
 # ── 帮助与分发 ────────────────────────────────────────────────────────
 usage() {
   cat <<'EOF'
@@ -646,6 +832,10 @@ ram_user_mgmt.sh —— 阿里云 RAM 用户/组/策略 增删改查
   add-group <组名> [备注]        建用户组
   attach <组> <策略> [Custom|System]   给组绑策略
   join <组> <用户>               把用户加入组
+  add-program-ak <mnl|jkt>       程序身份（AK 路线）：建/补齐 用户组 + 纯 AK 用户 + 策略
+                                 Secret 写入 $AK_SECRET_DIR（默认 ~/.aliyun，0600），不回显
+                                 集群内工作负载请改用 RRSA：deploy/ops/ram_rrsa_program_onboard.sh
+  verify-program-ak <mnl|jkt>    回读校验：组/用户/无控制台/无用户级策略/AK 状态
 
 修改
   set-display <用户> <显示名>    改显示名称
@@ -691,7 +881,7 @@ main() {
   [ $# -gt 0 ] && shift
   case "$cmd" in
     users|groups|policies|who) need_cli ;;
-    add-user|add-group|attach|join|set-display|reset-password|new-ak|toggle-ak|del-ak|leave|detach|del-user|del-group) need_cli ;;
+    add-user|add-group|attach|join|add-program-ak|verify-program-ak|set-display|reset-password|new-ak|toggle-ak|del-ak|leave|detach|del-user|del-group) need_cli ;;
     help|-h|--help) usage; exit 0 ;;
     *) say "未知命令：$cmd"; say ""; usage; exit 1 ;;
   esac
@@ -714,6 +904,8 @@ main() {
     detach)         detach_policy "${1:-}" "${2:-}" "${3:-Custom}" ;;
     del-user)       del_user "${1:-}" ;;
     del-group)      del_group "${1:-}" ;;
+    add-program-ak)    add_program_ak "${1:-}" ;;
+    verify-program-ak) verify_program_ak "${1:-}" ;;
   esac
 }
 
