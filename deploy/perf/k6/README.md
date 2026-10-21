@@ -37,7 +37,7 @@ bash deploy/perf/k6/run.sh readback
 - **首字延迟 = `http_req_waiting`（TTFB 代理）**：k6 不做半流式读取，SSE 下响应头+首块几乎同时到达，可作近似；毫秒级 P95 由 k6 统计，节点侧只做秒级粗验。
 - **判据**：`http_req_failed < 0.05%`、`P95 TTFB < 800ms`（S1/S2）。1200 VU 单副本实测 P95 949ms ⇒ 单副本 C≈1000–1100。
 - **token 不进命令行**：Job 里用 `secretKeyRef` 取 `perf-load-test-credentials/token_key`；脚本自己拼 `sk-` 前缀。
-- **mock 参数切换**：用 `deploy/perf/mock-upstream/mock_ctl.sh`（全副本广播），不要直接打 Service 的 `/__ctrl`（只命中一个 Pod）。
+- **mock 参数切换**：用 `~/git_code/service_ops/mock-upstream/mock_ctl.sh`（全副本广播），不要直接打 Service 的 `/__ctrl`（只命中一个 Pod）。
 - **窗口上限**：单次云助手命令 900s；两档 120s 串跑会踩线，必要时分两次调用。
 - 采集结果同时落台账：`deploy/jakarta_dev_ledger.md` §21/§23、`deploy/logs/perf_task33_20261020/`。
 

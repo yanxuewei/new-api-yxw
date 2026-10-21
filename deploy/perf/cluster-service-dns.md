@@ -6,7 +6,7 @@
 
 ## 1. 来源：我们自己部署的 Service 清单
 
-`deploy/perf/mock-upstream/mock-upstream.yaml`：
+`~/git_code/service_ops/mock-upstream/mock-upstream.yaml`：
 
 ```yaml
 kind: Service
@@ -75,7 +75,7 @@ wget -qO- http://mock-upstream.new-api-perf.svc.cluster.local/v1/models
 
 | 路径 | 说明 |
 |---|---|
-| `deploy/perf/mock-upstream/mock-upstream.yaml` | Service/Deployment 定义（地址的来源） |
-| `deploy/perf/mock-upstream/README.md` | mock 参数矩阵与验证记录 |
+| `~/git_code/service_ops/mock-upstream/mock-upstream.yaml` | Service/Deployment 定义（地址的来源） |
+| `~/git_code/service_ops/mock-upstream/README.md` | mock 参数矩阵与验证记录 |
 | `deploy/perf/k6/` | 压测脚本（`stage`/`dual1500`/`summary`/`readback`） |
 | `deploy/jakarta_dev_ledger.md` §23 | 任务 33 压测结果与本地址相关的自环事故 |

@@ -1634,3 +1634,7 @@ stdout 路不受影响（纳秒来自 runtime `_time_`）。属既有挂账 G8�
 容量：单副本拐点外推 **978 并发流**（内网稳态最小二乘），1500 并发需 2 副本、无余量，生产建议 3 副本。测试后已恢复默认限流（CM 键删除 + 重启，Pod ready=2/2 restarts=0）。完整报告 `deploy/perf/perf_reports/perf_report_ALL_latest.html`（23 次运行）。
 
 **分片压测能力（2026-10-21）**：新增 `run.sh shard <总VU> <时长> <分片数>` + `bodies/sharded.sh`，解决单 k6 进程在 1500+ VU 时的客户端瓶颈。实测 3 分片×80 VU（2 副本，45s）：分片 RPS 42.1/42.8/42.9，聚合 **127.9 RPS**、P95 取最差分片 **345.9ms**、错误 0%；`sse.js` 增 `SHARD` tag。报告命名 `perf_report_shard-3x-vu240-dur45s_*.html`。
+
+**mock-upstream 迁出主仓库（2026-10-21）**：`deploy/perf/mock-upstream/` → **`~/git_code/service_ops/mock-upstream/`**（service_ops 作为多工具仓库；迁入时补独立 `go.mod`，module `mockupstream`）；编译产物 `mock-upstream` 二进制不再入库。
+镜像构建/推送统一走新增的 **`deploy/ops/push.sh`**：`push.sh <module> [tag] [--no-build]`，自动 Go 交叉编译 → 确保 ACR 仓库 → 临时口令登录 → build/push → 回显 digest（tag 默认 `日期-主仓短sha`）。实测 `bash deploy/ops/push.sh mock-upstream` 成功，产出 `newapi-dev/mock-upstream:20261021-e2dc9c5ee`（digest sha256:55d572fc…）。
+文档引用已同步（`deploy/perf/README.md`、`deploy/perf/k6/README.md`、`deploy/perf/cluster-service-dns.md`、`deploy/docs/k6详细指南-qw.md`、模块自身 README）；`deploy/ops/README.md` 记录模块契约（Dockerfile 必需、Go 自动构建、可选 build.sh）。

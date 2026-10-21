@@ -2,7 +2,7 @@
 
 | 路径 | 作用 |
 |---|---|
-| `mock-upstream/` | mock 上游（Go，6 副本，SSE/JSON、延迟与错误注入、`mock_ctl.sh` 全副本广播） |
+| `~/git_code/service_ops/mock-upstream/` | mock 上游（Go，6 副本，SSE/JSON、延迟与错误注入、`mock_ctl.sh` 全副本广播）；**已移出本仓库**，镜像用 `deploy/ops/push.sh mock-upstream` 构建推送 |
 | `k6/` | 压测执行器：`run.sh`（本机入口）+ `bodies/{stage,dual1500,summary,readback}.sh` + `sse.js` |
 | `channel_patch.sh` | **channel 局部更新**（只提交可变字段，见下） |
 | `cluster-service-dns.md` | 集群内 Service 地址（`mock-upstream.new-api-perf.svc.cluster.local`）的来历与自查方法 |
