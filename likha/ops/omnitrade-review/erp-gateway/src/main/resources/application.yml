@@ -1,0 +1,130 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: erp-gateway
+  main:
+    web-application-type: reactive
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_HOST:mse-d5a70466-nacos-ans.mse.aliyuncs.com}:${NACOS_PORT:-8848}
+        namespace: erp-dev
+        group: DEFAULT_GROUP
+      config:
+        server-addr: ${NACOS_HOST:mse-d5a70466-nacos-ans.mse.aliyuncs.com}:${NACOS_PORT:-8848}
+        namespace: erp-dev
+        group: DEFAULT_GROUP
+        file-extension: yml
+        import-check:
+          enabled: false
+    gateway:
+      discovery:
+        locator:
+          enabled: true
+          lower-case-service-id: true
+      routes:
+        - id: auth-service
+          uri: lb://erp-user-service
+          predicates:
+            - Path=/api/auth/**
+          filters:
+            - StripPrefix=1
+        - id: order-service
+          uri: lb://erp-order-service
+          predicates:
+            - Path=/api/order/**
+          filters:
+            - StripPrefix=1
+        - id: product-service
+          uri: lb://erp-product-service
+          predicates:
+            - Path=/api/product/**
+          filters:
+            - StripPrefix=1
+        - id: platform-service
+          uri: lb://erp-platform-service
+          predicates:
+            - Path=/api/platform/**
+          filters:
+            - StripPrefix=2
+
+        # 供应商管理服务
+        - id: supplier-service
+          uri: lb://erp-supplier-service
+          predicates:
+            - Path=/api/supplier/**
+          filters:
+            - StripPrefix=1
+        # 客户管理服务
+        - id: customer-service
+          uri: lb://erp-customer-service
+          predicates:
+            - Path=/api/customer/**
+          filters:
+            - StripPrefix=1
+        # 仓储管理服务
+        - id: warehouse-service
+          uri: lb://erp-warehouse-service
+          predicates:
+            - Path=/api/warehouse/**
+          filters:
+            - StripPrefix=1
+        # 库存服务
+        - id: inventory-service
+          uri: lb://erp-inventory-service
+          predicates:
+            - Path=/api/inventory/**
+          filters:
+            - StripPrefix=1
+        # 财务服务
+        - id: finance-service
+          uri: lb://erp-finance-service
+          predicates:
+            - Path=/api/finance/**
+          filters:
+            - StripPrefix=1
+        # 物流服务
+        - id: logistics-service
+          uri: lb://erp-logistics-service
+          predicates:
+            - Path=/api/logistics/**
+          filters:
+            - StripPrefix=1
+
+        # AI 订单异常检测服务 (v1.6.0)
+        - id: anomaly-detection-service
+          uri: lb://erp-anomaly-detection-service
+          predicates:
+            - Path=/api/v1/anomaly/**
+          filters:
+            - StripPrefix=0
+
+        # AI 智能选品推荐服务 (v1.7.0)
+        - id: product-recommendation-service
+          uri: lb://erp-product-recommendation-service
+          predicates:
+            - Path=/api/v1/recommend/**
+          filters:
+            - StripPrefix=0
+
+    sentinel:
+      transport:
+        dashboard: localhost:8858
+        port: 8719
+      eager: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: '*'
+
+logging:
+  level:
+    org.springframework.cloud.gateway: INFO
+    org.springframework.cloud.loadbalancer: DEBUG
