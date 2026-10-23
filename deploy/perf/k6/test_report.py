@@ -16,7 +16,7 @@ SPEC.loader.exec_module(report)
 
 
 def summary(*, reqs=10000, errors=0, checks=20000, checks_total=20000,
-            complete=10000, waiting=600, duration=1900, admin_duration=None):
+            complete=10000, waiting=600, duration=1900, admin_duration=None, data_rate=None):
     lines = [
         f"http_reqs................: {reqs} 500/s",
         f"http_req_failed..........: 0.00% {errors} out of {reqs}",
@@ -29,6 +29,8 @@ def summary(*, reqs=10000, errors=0, checks=20000, checks_total=20000,
         lines.append(f"checks...................: 100.00% {checks} out of {checks_total}")
     if complete is not None:
         lines.append(f"sse_complete.............: 100.00% {complete} out of {reqs}")
+    if data_rate is not None:
+        lines.append(f"data_received............: 1 MB {data_rate} MB/s")
     return "\n".join(lines) + "\n"
 
 
@@ -134,6 +136,18 @@ class ReportTests(unittest.TestCase):
                 self.assertEqual(run.get("verdict"), "INCOMPLETE")
         run = self.run_record("")
         self.assertEqual(run.get("verdict"), "INCOMPLETE")
+
+    def test_log_dir_discovers_nested_run_directories(self):
+        nested = self.root / "reports" / "20261022-162242"
+        nested.mkdir(parents=True)
+        shutil.copyfile(self.log(job="nested-run"), nested / "nested-run.log")
+        out = self.root / "nested.html"
+        proc = subprocess.run([sys.executable, "-B", str(HERE / "report.py"),
+                               "--log-dir", str(self.root / "reports"), "--out", str(out)],
+                              capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("[report] runs=1", proc.stdout)
+        self.assertIn("nested-run", out.read_text())
 
     def test_missing_identity_metadata_and_invalid_duration_still_render(self):
         for field in ("job", "ts", "mode", "target", "base", "vus", "dur"):
@@ -249,6 +263,77 @@ class ReportTests(unittest.TestCase):
                 self.assertIn("无通过档", card)
                 self.assertNotIn("500.0", card)
 
+    def test_bandwidth_uses_decimal_units_and_only_public_path(self):
+        self.assertAlmostEqual(report.parse_summary("data_received..................: 1 MB 1 MB/s\n")["data_mbps"], 8.0)
+        cluster = self.run_record(summary(data_rate=10), mode="clusterip")
+        public = self.run_record(summary(data_rate=5), mode="public-url")
+        analysis = report.analyse([cluster, public], 100)
+        self.assertAlmostEqual(analysis["bw_util"], 0.4)
+        self.assertAlmostEqual(analysis["internal_bw_peak"], 80.0)
+        self.assertNotIn("bw_util", cluster)
+        internal_only = report.analyse([cluster], 100)
+        self.assertNotIn("bw_util", internal_only)
+        self.assertIn("未计算 EIP 利用率", internal_only.get("bw_note", ""))
+
+    def test_stage_chart_does_not_sum_different_percentiles(self):
+        run = self.run_record(summary(), mock_config="first_token_delay_ms=300,token_interval_ms=30,tokens_per_response=50")
+        rendered = report.svg_stages(run)
+        self.assertIn("不可相加", rendered)
+        self.assertIn("mock 首字（配置）", rendered)
+        legacy = self.run_record(summary(), mock_config="300ms:30ms:50tokens")
+        legacy_rendered = report.svg_stages(legacy)
+        self.assertIn("不给出 mock 首字/吐字参考", legacy_rendered)
+        self.assertNotIn("合计", legacy_rendered)
+        out = self.root / "stages.html"
+        report.render([run], report.analyse([run]), str(out))
+        doc = out.read_text()
+        self.assertIn("阶段耗时参考", doc)
+        self.assertIn("不可相加", doc)
+
+    def test_structured_archive_records_sampling_and_config_snapshot(self):
+        log = self.log(summary(), cpu_max_pod_m="500", pods_peak="2", sample_rows="6",
+                       load_config="k6-0.54.0:sse.js@abc123:const-vus:model=mock-gpt",
+                       mock_config="first_token_delay_ms=300,token_interval_ms=30")
+        archived = self.root / "run.json"
+        proc = subprocess.run([sys.executable, "-B", str(HERE / "report.py"),
+                               "--logs", str(log), "--json", str(archived)],
+                              capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        run = json.loads(archived.read_text())["runs"][0]
+        self.assertEqual(run["verdict"], "PASS")
+        self.assertEqual(run["pods_peak"], "2")
+        self.assertEqual(run["sample_rows"], "6")
+        self.assertEqual(run["cpu_max_pod_m"], "500")
+        self.assertIn("sse.js@abc123", run["load_config"])
+        self.assertIn("first_token_delay_ms=300", run["mock_config"])
+        self.assertFalse((self.root / "run.html").exists())
+
+    def test_run_archives_samples_separately_and_keeps_log_parseable(self):
+        sandbox = self.root / "archive_run"
+        k6 = sandbox / "deploy/perf/k6"
+        k6.mkdir(parents=True)
+        for name in ("run.sh", "report.py", "sse.js"):
+            shutil.copyfile(HERE / name, k6 / name)
+        shutil.copytree(HERE / "bodies", k6 / "bodies")
+        remote = sandbox / "deploy/lib/ack_remote_jkt_dev.sh"
+        remote.parent.mkdir(parents=True)
+        remote.write_text('#!/bin/bash\ncat "$FIXTURE_LOG"\nexit 0\n')
+        remote.chmod(0o700)
+        fixture = self.log(summary())
+        fixture.write_text(fixture.read_text()
+                           + "===SAMPLES===\n10:00:00\tpod-a\t300m\t128Mi\n10:00:05\tpod-b\t500m\t256Mi\n")
+        env = dict(os.environ, FIXTURE_LOG=str(fixture))
+        proc = subprocess.run(["bash", str(k6 / "run.sh"), "stage", "perf-new-api-slave", "100", "5s"],
+                              env=env, capture_output=True, text=True, timeout=30)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        run_dir = Path(proc.stdout.split("本次输出目录：")[1].splitlines()[0].strip())
+        log = next(run_dir.glob("*.log"))
+        samples = next(run_dir.glob("*.samples.tsv"))
+        archived = next(run_dir.glob("*.json"))
+        self.assertNotIn("pod-a", log.read_text())
+        self.assertIn("pod-b", samples.read_text())
+        self.assertEqual(json.loads(archived.read_text())["runs"][0]["verdict"], "PASS")
+
     def test_capacity_interpolates_only_inside_a_comparable_latency_bracket(self):
         passing = self.run_record(summary(waiting=600), vus="1200")
         failing = self.run_record(summary(waiting=1000).replace("500/s", "600/s"), vus="1800")
@@ -279,6 +364,13 @@ class ReportTests(unittest.TestCase):
                         self.run_record(summary(waiting=1000), vus="1800", **{field: ""})]
                 groups = report.analyse(runs).get("capacity_groups", [])
                 self.assertTrue(groups)
+                self.assertTrue(all(g["knee_vus"] is None for g in groups))
+                self.assertTrue(all(not g["config_complete"] for g in groups))
+        for bad in ("unavailable", "mixed", "changed"):
+            with self.subTest(mock_config=bad):
+                runs = [self.run_record(summary(waiting=600), vus="1200", mock_config=bad),
+                        self.run_record(summary(waiting=1000), vus="1800", mock_config=bad)]
+                groups = report.analyse(runs).get("capacity_groups", [])
                 self.assertTrue(all(g["knee_vus"] is None for g in groups))
                 self.assertTrue(all(not g["config_complete"] for g in groups))
 

@@ -1,0 +1,91 @@
+# mock 上游 · 马尼拉证书集群（ph-mnl）—— 正式环境压测供流
+#
+# 来源：从 ~/git_code/service_ops/mock-upstream/mock-upstream.yaml（雅加达 jkt-dev 版本）适配。
+# 适配差异（全部有实测依据）：
+#   ① namespace: new-api-perf → new-api
+#      马尼拉证书集群无独立 perf 命名空间；new-api ns 下 new-api-app SA 已由
+#      managed-aliyun-acr-credential-helper（实例 cri-avfqy9xkqi5bj8ee）授权（任务 16 / 任务 18）。
+#   ② ACR 域名走 VPC 内网端点
+#      acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com（公网）
+#      → acr-newapi-mnl-registry-vpc.ap-southeast-6.cr.aliyuncs.com（VPC 内网）
+#      与 master/stable/canary 保持一致；LinkedVpcs 已含本站 VPC，DefaultAccess=true（任务 18 实测）。
+#      仓库路径 newapi-dev/mock-upstream 不变（同一 ACR 实例，两个域名同一 digest）。
+#   ③ site 标签: jkt-dev → ph-mnl
+#   ④ 副本数：6（与雅加达一致，维持供流能力）
+#   ⑤ 资源规格：与雅加达一致（requests 100m/128Mi，limits 1C/512Mi）
+#      马尼拉证书集群节点规格见 stable-deployment.yaml 注释；mock 合计 600m requests 在余量内。
+#
+# 推送镜像（在 new-api-yxw 仓库执行，把 __IMAGE_TAG__ 替换为产出的 tag）：
+#   bash deploy/ops/push.sh -n dev --module ~/git_code/service_ops/mock-upstream
+#
+# 供流地址（new-api channel Base URL 填这个）：
+#   http://mock-upstream.new-api.svc.cluster.local/v1
+#   （channel type=OpenAI，模型 mock-gpt；/v1/chat/completions 同时支持 SSE 与 JSON）
+#
+# 参数矩阵（全部可 env 覆盖；运行时 POST /__ctrl 热改，GET /__state 回读）：
+#   FIRST_TOKEN_DELAY_MS  首字延迟（默认 300ms）
+#   TOKEN_INTERVAL_MS     每 token 间隔（默认 30ms）
+#   TOKENS_PER_RESPONSE   单响应 token 数（默认 50 ⇒ SSE 时长 ≈ 1.8s）
+#   TOKEN_TEXT_BYTES      每 token 文本字节（默认 12）
+#   ERROR_RATE / ERROR_STATUS  错误注入（默认 0，压测 S5 阶段再打开）
+#   EXTRA_LATENCY_MS      额外上游延迟（默认 0）
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mock-upstream
+  namespace: new-api
+  labels:
+    app: mock-upstream
+    purpose: perf-mock
+    site: ph-mnl
+spec:
+  replicas: 6
+  revisionHistoryLimit: 2
+  selector:
+    matchLabels: {app: mock-upstream}
+  template:
+    metadata:
+      labels:
+        app: mock-upstream
+        purpose: perf-mock
+        site: ph-mnl
+    spec:
+      serviceAccountName: new-api-app    # credential helper 只挂到该 SA（任务 18 实测）
+      containers:
+        - name: mock
+          image: acr-newapi-mnl-registry-vpc.ap-southeast-6.cr.aliyuncs.com/newapi-dev/mock-upstream:__IMAGE_TAG__
+          imagePullPolicy: IfNotPresent
+          ports:
+            - {name: http, containerPort: 8080}
+          env:
+            - {name: FIRST_TOKEN_DELAY_MS, value: "300"}
+            - {name: TOKEN_INTERVAL_MS, value: "30"}
+            - {name: TOKENS_PER_RESPONSE, value: "50"}
+            - {name: TOKEN_TEXT_BYTES, value: "12"}
+            - {name: ERROR_RATE, value: "0"}
+            - {name: ERROR_STATUS, value: "500"}
+            - {name: EXTRA_LATENCY_MS, value: "0"}
+          readinessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 20
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}    # 6 副本 × 100m = 600m
+            limits: {cpu: "1", memory: 512Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mock-upstream
+  namespace: new-api
+  labels:
+    app: mock-upstream
+    purpose: perf-mock
+spec:
+  type: ClusterIP
+  selector: {app: mock-upstream}
+  ports:
+    - {name: http, port: 80, targetPort: http}

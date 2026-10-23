@@ -17,8 +17,10 @@ echo "=== target=$TARGET_SVC ($MODE, BASE=$BASE)  vus=$VUS dur=$DUR"
 
 # 可选：REQ_REPLICAS 指定本次压测的副本数。起 Job 前先 scale 到该值并等就绪，
 # 保证同一阶梯内副本口径固定（HPA/人工改动不会混进同一档）。
+REPL_BEFORE=""
 if [ -n "${REQ_REPLICAS:-}" ] && [ "$MODE" = "clusterip" ]; then
-  echo "=== 目标副本数=$REQ_REPLICAS，先 scale deploy/$TARGET_SVC"
+  REPL_BEFORE=$(kubectl -n $NS get deploy "$TARGET_SVC" -o jsonpath='{.status.readyReplicas}' 2>/dev/null)
+  echo "=== 目标副本数=$REQ_REPLICAS（压测前 ready=${REPL_BEFORE:-?}），先 scale deploy/$TARGET_SVC"
   kubectl -n $NS scale deploy "$TARGET_SVC" --replicas="$REQ_REPLICAS" 2>&1 | sed 's/^/  /'
   kubectl -n $NS rollout status deploy/"$TARGET_SVC" --timeout=240s 2>&1 | sed 's/^/  /'
   READY=$(kubectl -n $NS get deploy "$TARGET_SVC" -o jsonpath='{.status.readyReplicas}' 2>/dev/null)
@@ -61,21 +63,11 @@ spec:
           configMap: {name: $CM}
 YAML
 
-# CPU/内存峰值采样（每 5s；Job 结束即停）。URL 模式会经两个副本 ⇒ 逐副本取各自峰值
-# 公网入口 perf.likha.hk 当前只路由到 svc/perf-new-api-slave（1 副本）；内网模式按目标 Service 采样
+# 资源采样：逐 Pod 记录时间序列（header 中的 sampler_*），结束后按同一时刻汇总。
+# 公网入口 perf.likha.hk 当前只路由到 svc/perf-new-api-slave；内网模式按目标 Service 采样。
 if [ "$MODE" = "public-url" ]; then LABELS="perf-new-api-slave"; else LABELS="$TARGET_SVC"; fi
-: > /tmp/cpu_${VUS}.txt; : > /tmp/mem_${VUS}.txt
-( for i in $(seq 1 120); do
-    for L in $LABELS; do
-      LINE=$(kubectl -n $NS top pod -l app=$L --no-headers 2>/dev/null | head -1)
-      C=$(printf '%s' "$LINE" | awk '{gsub(/m/,"",$2); print $2+0}')
-      M=$(printf '%s' "$LINE" | awk '{gsub(/Mi/,"",$3); print $3+0}')
-      [ -n "$C" ] && [ "$C" -gt 0 ] && echo "$C" >> /tmp/cpu_${VUS}.txt
-      [ -n "$M" ] && [ "$M" -gt 0 ] && echo "$M" >> /tmp/mem_${VUS}.txt
-    done
-    sleep 5
-  done ) &
-SAMPLER=$!
+MOCK_BEFORE=$(mock_fingerprint "$NS")
+sampler_start "$LABELS"
 for i in $(seq 1 90); do
   S=$(kubectl -n $NS get job $JOB -o jsonpath='{.status.succeeded}' 2>/dev/null)
   JFAIL=$(kubectl -n $NS get job $JOB -o jsonpath='{.status.failed}' 2>/dev/null)
@@ -83,16 +75,19 @@ for i in $(seq 1 90); do
   [ -n "$JFAIL" ] && [ "$JFAIL" != "0" ] && { echo "  [!!] k6 job failed（阈值破线，k6 退出码非 0）⇒ 仍采集结果"; break; }
   sleep 10
 done
-kill $SAMPLER 2>/dev/null; wait $SAMPLER 2>/dev/null
-CPUM=$(sort -n /tmp/cpu_${VUS}.txt 2>/dev/null | tail -1)
-MEMM=$(sort -n /tmp/mem_${VUS}.txt 2>/dev/null | tail -1)
+sampler_stop
+MOCK_AFTER=$(mock_fingerprint "$NS")
+# mock 配置中途变化时不得按同一条件比较不同档位
+if [ "$MOCK_BEFORE" = "$MOCK_AFTER" ]; then MOCK_CFG="$MOCK_AFTER"; else MOCK_CFG="changed"; fi
+CPUM="$CPU_PEAK_M"
+MEMM="$MEM_PEAK_MI"
 REPL=$(kubectl -n $NS get deploy "$TARGET_SVC" -o jsonpath='{.status.readyReplicas}' 2>/dev/null)
 [ -n "$REPL" ] && [ "$REPL" != "0" ] || REPL=$(kubectl -n $NS get deploy perf-new-api-slave -o jsonpath='{.status.readyReplicas}' 2>/dev/null)
 [ -n "$REPL" ] || REPL=$(echo $LABELS | wc -w)
 # 实际副本数 >1 时口径必须是 clusterip-dual，否则报告会把多副本档混进单副本容量曲线
 case "$REPL" in ''|*[!0-9]*) : ;; *) [ "$REPL" -gt 1 ] && [ "$MODE" = "clusterip" ] && MODE="clusterip-dual" ;; esac
-IMG=$(kubectl -n $NS get deploy -o jsonpath='{range .items[*]}{.metadata.name}={.spec.template.spec.containers[0].image}{","}{end}' 2>/dev/null | tr ',' '\n' | grep -E "perf-new-api" | head -2 | tr '\n' ';')
-echo "--- job_succeeded=${S:-?} cpu_peak=${CPUM:-?}m mem_peak=${MEMM:-?}Mi"
+IMG=$(kubectl -n $NS get deploy -o jsonpath='{range .items[*]}{.metadata.name}={.spec.template.spec.containers[0].image}{","}{end}' 2>/dev/null | tr ',' '\n' | grep -E "perf-new-api|mock-upstream" | sed '/^$/d' | sort | tr '\n' ';')
+echo "--- job_succeeded=${S:-?} cpu_peak_sum=${CPUM:-?}m cpu_peak_pod=${CPU_MAX_POD_M:-?}m mem_peak_sum=${MEMM:-?}Mi pods=${PODS_PEAK:-?} samples=${SAMPLE_ROWS:-?}"
 echo "===RUN_META==="
 echo "target=$TARGET_SVC"
 echo "base=$BASE"
@@ -100,7 +95,14 @@ echo "mode=$MODE"
 echo "vus=$VUS"
 echo "dur=$DUR"
 echo "cpu_peak_m=${CPUM:-0}"
+echo "cpu_max_pod_m=${CPU_MAX_POD_M:-0}"
 echo "mem_peak_mi=${MEMM:-0}"
+echo "mem_max_pod_mi=${MEM_MAX_POD_MI:-0}"
+echo "pods_peak=${PODS_PEAK:-0}"
+echo "sample_rows=${SAMPLE_ROWS:-0}"
+echo "load_config=k6-0.54.0:${SCRIPT_ID}:const-vus:model=${MODEL:-mock-gpt}"
+echo "mock_config=${MOCK_CFG}"
+echo "replicas_before=${REPL_BEFORE:-}"
 echo "replicas=$REPL"
 echo "job=$JOB"
 echo "ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -110,4 +112,4 @@ echo "shards=1"
 echo "k6_exit_codes=$(kubectl -n "$NS" get pods -l job-name="$JOB" -o jsonpath='{range .items[*].status.containerStatuses[?(@.name=="k6")]}{.state.terminated.exitCode}{","}{end}' 2>/dev/null | sed 's/,$//')"
 echo "===END_META==="
 kubectl -n $NS logs job/$JOB 2>&1 | grep -E "http_reqs|http_req_failed|http_req_waiting|\{ type:sse \}|checks|sse_complete|iterations\.\.\.|data_received|vus_max|http_req_duration|http_req_connecting|http_req_tls_handshaking|http_req_sending|http_req_receiving|✗"
-rm -f /tmp/cpu_${VUS}.txt /tmp/mem_${VUS}.txt
+sampler_dump

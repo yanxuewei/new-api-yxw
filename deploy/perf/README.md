@@ -19,7 +19,7 @@ bash deploy/perf/channel_patch.sh --id 3 --status 2                   # 2=禁用
 bash deploy/perf/channel_patch.sh --id 3 --key-file /tmp/k            # 改密钥，值不进 argv
 ```
 
-**语义边界**：后端 `model.Channel.Update()` 用 GORM `Updates(struct)`，**只更新非零值字段** ⇒ 无法通过它把字段改回空/0（清空 `base_url`、`weight` 归零要用控制台或 SQL）。脚本每次执行都会打印 before/after 供判效。
+**语义边界**：后端 `model.Channel.Update()` 用 GORM `Updates(struct)`，**只更新非零值字段** ⇒ 无法通过它把字段改回空/0（清空 `base_url`、`weight` 归零要用控制台或 SQL）。脚本每次执行都会打印 before/after 供判效，输出已脱敏：`key` 只报长度，`base_url` 内嵌的 `user:pass@` 替换为 `<redacted>@`；patch 内容经 base64 传给节点，临时脚本 600 权限且退出即删。
 
 ## 压测路径选择
 
@@ -27,7 +27,7 @@ bash deploy/perf/channel_patch.sh --id 3 --key-file /tmp/k            # 改密�
 |---|---|---|
 | 集群内直连（测应用本身） | `run.sh stage perf-new-api-slave 300 120s` | 走 ClusterIP，不含 ALB/NAT |
 | **公网 ALB 路径（本轮要求）** | `run.sh stage https://perf.likha.hk 300 120s` | k6 在集群内 → NAT → ALB → 网关；含真实入口开销 |
-| 双副本 1500（内网） | `run.sh dual1500` | master/slave 各 750 |
+| 双副本 1500（内网） | `run.sh dual1500` | 仅把 slave 扩到 2 副本，单个 Job 打 Service，总并发 1500 |
 
 > URL 模式判定：`stage` 第一参含 `://` 即按 URL 直用；否则按 Service 名解析 ClusterIP。
 > 注意：`cpu_peak` 采样对 ≥60s 的档才可靠（短档在采样前就跑完了）。

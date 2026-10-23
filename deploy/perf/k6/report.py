@@ -122,8 +122,8 @@ def parse_summary(text: str) -> dict:
         out["data_mb"] = float(m.group(1))
     rates = re.findall(pats["data_rate"], text)
     if rates:
-        # 取各摘要之和（dual 模式两条），kB/s → Mbps（十进制）
-        kbps = sum(float(v) * (1024 if u == "M" else 1) for v, u in rates)
+        # k6 数据单位按十进制换算（1 MB = 1000 kB），各摘要相加后转 Mbps
+        kbps = sum(float(v) * (1000 if u == "M" else 1) for v, u in rates)
         out["data_mbps"] = kbps * 8 / 1000.0
     m = re.search(pats["vus_max"], text)
     if m:
@@ -336,7 +336,8 @@ def load_runs(paths: list[str], eip_mbps: float = 0.0) -> list[dict]:
             run["vus_per_replica"] = run["vus_i"] / run["replicas_i"]
         if run.get("dur_avg"):
             run["little_vus"] = run["rps"] * run["dur_avg"] / 1000.0
-        if eip_mbps and run.get("data_mbps"):
+        # 只有真正经过 EIP 的公网路径才谈 EIP 利用率；ClusterIP 内网流量不计入。
+        if eip_mbps and run.get("data_mbps") and run.get("mode") == "public-url":
             run["bw_util"] = run["data_mbps"] / eip_mbps
         runs.append(run)
     runs.sort(key=lambda r: (r["vus_i"], r["ts"]))
@@ -369,7 +370,9 @@ def analyse(runs: list[dict], eip_mbps: float = 0.0) -> dict:
     groups = []
     for group_runs in grouped.values():
         first = group_runs[0]
-        complete = all(first.get(k) for k in config_fields)
+        # “读不到 / 中途变化 / 各副本不一致”都等于没有同一条件证据，不可当成分组键。
+        unknown_cfg = {"", "unavailable", "mixed", "changed"}
+        complete = all(first.get(k) and first.get(k) not in unknown_cfg for k in config_fields)
         accepted = [r for r in group_runs if r["pass"]]
         rejected = [r for r in group_runs if r.get("verdict") == "FAIL"]
         best = max(accepted, key=lambda r: r["vus_i"]) if accepted else None
@@ -414,15 +417,21 @@ def analyse(runs: list[dict], eip_mbps: float = 0.0) -> dict:
         if group["first_fail"]:
             f = group["first_fail"]
             facts.append(f"容量组 {i}：VU={f['vus_i']} 未通过，原因：{f['verdict_reason']}")
-    if eip_mbps and runs:
-        peak = max((r.get("data_mbps") or 0) for r in runs)
+    internal = [r for r in runs if r.get("mode") != "public-url" and r.get("data_mbps")]
+    if internal:
+        a["internal_bw_peak"] = max(r["data_mbps"] for r in internal)
+    public = [r for r in runs if r.get("mode") == "public-url" and r.get("data_mbps")]
+    if eip_mbps and public:
+        peak = max(r["data_mbps"] for r in public)
         a["eip_mbps"] = eip_mbps
         a["bw_peak"] = peak
-        a["bw_util"] = peak / eip_mbps if eip_mbps else 0
-        facts.append(f"下行流量峰值 {peak:.2f} Mbps（EIP 标称 {eip_mbps:.0f} Mbps，利用率 {peak / eip_mbps * 100:.0f}%）")
+        a["bw_util"] = peak / eip_mbps
+        facts.append(f"公网路径下行峰值 {peak:.2f} Mbps（EIP 标称 {eip_mbps:.0f} Mbps，利用率 {peak / eip_mbps * 100:.0f}%）")
         if peak >= 0.85 * eip_mbps:
-            guesses.append(f"带宽利用率 ≥85% ⇒ 公网路径（NAT→EIP {eip_mbps:.0f}Mbps）先于网关饱和；"
-                           "继续加并发只会放大超时/重置，需先抬带宽或改内网路径再测")
+            guesses.append(f"公网下行利用率 ≥85% ⇒ 可能先撞 NAT→EIP {eip_mbps:.0f}Mbps；"
+                           "需结合 EIP 实际监控确认，内网档位不受该限制")
+    elif eip_mbps:
+        a["bw_note"] = "本报告无公网路径运行，未计算 EIP 利用率"
     if a["best"]:
         b = a["best"]
         facts.append(f"最优通过档 VU={b['vus_i']}：RPS={b['rps']:.1f}、P95={b.get('ttfb_p95', 0):.0f}ms、错误率={b.get('err_pct', 0):.3f}%")
@@ -558,82 +567,78 @@ def svg_line(runs: list[dict], key: str, title: str, unit: str, slo: float | Non
 </svg></figure>'''
 
 
-def svg_waterfall(best: dict | None) -> str:
-    """一次请求的模块级耗时分解。
+def mock_timing(run: dict) -> tuple[float, float] | None:
+    """从采集到的 mock 配置取首字延迟与流式吐字总时长；旧日志/不可信值返回 None。"""
+    cfg = run.get("mock_config") or ""
+    if cfg in ("", "unavailable", "mixed", "changed"):
+        return None
+    parts = dict(p.split("=", 1) for p in cfg.split(",") if "=" in p)
+    try:
+        return (float(parts["first_token_delay_ms"]),
+                float(parts["tokens_per_response"]) * float(parts["token_interval_ms"]))
+    except (KeyError, ValueError):
+        return None
 
-    口径优先级：k6 客户端阶段指标（实测 p90）> 已知 mock 参数 > 差值；
-    网关+链路（含 DNS/NAT/ALB/Ingress）与"客户端接收余量"用差值推导，并在表格里标注来源。
 
-    「网关+链路」= waiting_p90 − mock首字300ms，它包含了 NAT/ALB/Ingress/鉴权/限流/连接池等
-    所有非 mock 延迟。公网路径（https://perf.likha.hk）比内网 ClusterIP 多经过 NAT+EIP+ALB，
-    通常多出 30~150ms，因此不同报告该值差异大属于正常——取决于所用路径，不代表网关自身性能差异。
+def svg_stages(best: dict | None) -> str:
+    """k6 客户端阶段 P90 参考图。
+
+    这些 P90 来自不同请求分布（连接复用、TLS 复用、流式接收各不相同），相加并不等于“一次请求的完整链路”；
+    网关内部耗时也无法仅凭汇总值分离，需要 trace/SLS。因此这里只并列展示，不求和、不算占比。
     """
     if not best:
         return ""
-    mock_first = 300.0
-    stream = 50 * 30.0
-    send = best.get("phase_sending") or 0.0
-    conn = best.get("phase_connecting") or 0.0
-    tls = best.get("phase_tls") or 0.0
-    wait = best.get("phase_waiting") or best.get("ttfb_p90") or 0.0
-    recv = best.get("phase_receiving") or 0.0
-    total = best.get("phase_duration") or best.get("dur_p90") or best.get("dur_p95") or 0.0
-    gw = max(0.0, wait - mock_first)
-    recv_tail = max(0.0, recv - stream)
-    used = send + conn + tls + gw + mock_first + stream + recv_tail
-    tail = max(0.0, total - used)
-
-    # 标注路径类型，帮助理解跨报告耗时差异
+    stages = [
+        ("TCP 连接", best.get("phase_connecting"), "http_req_connecting p90（含建连阻塞；DNS 未单独采集）"),
+        ("TLS 握手", best.get("phase_tls"), "http_req_tls_handshaking p90（复用连接时为 0）"),
+        ("请求发送", best.get("phase_sending"), "http_req_sending p90"),
+        ("等待首字节", best.get("phase_waiting"), "http_req_waiting p90（含网关处理与上游首 token）"),
+        ("接收响应", best.get("phase_receiving"), "http_req_receiving p90（含流式吐字与传输）"),
+        ("总时长", best.get("phase_duration") or best.get("dur_p90"), "http_req_duration p90"),
+    ]
+    timing = mock_timing(best)
+    if timing:
+        first, stream = timing
+        wait = best.get("phase_waiting") or 0.0
+        stages += [
+            ("mock 首字（配置）", first, "mock_config.first_token_delay_ms"),
+            ("mock 流式吐字（配置）", stream, "tokens_per_response × token_interval_ms"),
+            ("网关等其余环节（估算）", max(0.0, wait - first), "差值：waiting p90 − mock 首字"),
+        ]
+    rows = [(name, float(v), src) for name, v, src in stages if isinstance(v, (int, float))]
+    if not rows:
+        return '<div class="note">本档没有可用于阶段分解的客户端指标。</div>'
+    peak = max(v for _, v, _ in rows) or 1.0
+    W, L, R, gap = 760, 16, 16, 10
+    bar_h, label_w, bar_max = 16, 210, 400
+    H = gap + len(rows) * (bar_h + gap)
+    bars = ""
+    y = gap
+    for name, value, _ in rows:
+        width = max(2.0, value / peak * bar_max)
+        bars += (f'<text x="{L}" y="{y + bar_h - 4}" font-size="10.5" fill="#20463a">{esc(name)}</text>'
+                 f'<rect x="{L + label_w}" y="{y}" width="{width:.1f}" height="{bar_h}" fill="#12b76a" rx="2"/>'
+                 f'<text x="{L + label_w + width + 6:.1f}" y="{y + bar_h - 4}" font-size="10.5" fill="#20463a">{value:.1f} ms</text>')
+        y += bar_h + gap
     mode = best.get("mode", "")
     tgt = best.get("target", "") or best.get("base", "") or ""
-    path_note = ""
     if "public" in mode or "http" in tgt:
         path_note = "公网路径（k6→NAT→EIP→ALB→Ingress→Pod）"
     elif "clusterip" in mode or (tgt and not tgt.startswith("http")):
         path_note = "内网直连路径（k6 Pod→kube-proxy→Pod）"
-
-    segs = [
-        ("k6 发送", send, "#0b7a45", "实测 http_req_sending p90"),
-        ("DNS/TCP 连接", conn, "#116b3a", "实测 http_req_connecting p90（复用连接时为 0）"),
-        ("TLS 握手", tls, "#1a8f4c", "实测 http_req_tls_handshaking p90"),
-        ("网关+链路（NAT/ALB/Ingress/鉴权）", gw, "#12b76a", "差值：waiting_p90 − mock 首字 300ms"),
-        ("mock 首字", mock_first, "#34d399", "已知：FIRST_TOKEN_DELAY_MS=300"),
-        ("mock 流式吐字", stream, "#6ee7a8", "已知：50 token × 30ms"),
-        ("客户端接收余量", recv_tail, "#a7f3d0", "差值：receiving_p90 − 1500ms"),
-    ]
-    if tail > 0:
-        segs.append(("未归类余量", tail, "#d1fae5", "差值：总时长 − 以上各项"))
-    sumv = sum(v for _, v, _, _ in segs) or 1.0
-
-    W, H, L, R = 760, 96, 16, 16
-    barY, barH = 30, 40
-    barW = W - L - R
-    x = L
-    rects = ""
-    for name, v, color, _ in segs:
-        w = v / sumv * barW
-        if w <= 0:
-            continue
-        rects += f'<rect x="{x:.1f}" y="{barY}" width="{w:.1f}" height="{barH}" fill="{color}" rx="2"/>'
-        if w > 58:
-            rects += (f'<text x="{x + w/2:.1f}" y="{barY + barH/2 + 4:.1f}" text-anchor="middle" '
-                      f'font-size="10.5" fill="#04231a" font-weight="700">{v:.0f}</text>')
-        x += w
-    rows = "".join(
-        f'<tr><td>{esc(name)}</td><td>{v:.1f} ms</td><td>{v/sumv*100:.1f}%</td><td class="src">{esc(src)}</td></tr>'
-        for name, v, _, src in segs)
-    path_info = f'<div class="note" style="margin-top:6px">本次链路路径：<b>{esc(path_note or tgt or mode)}</b>（{esc(tgt)}）· VU={best.get("vus_i","")} · {esc(best.get("ts","")[:16])}</div>' if (path_note or tgt) else ""
-    return f'''<figure class="chart"><figcaption>一次请求的模块耗时（{esc(short_label(best))}，按 k6 客户端阶段实测 p90 分解，合计 {sumv:.0f} ms）</figcaption>
-<svg viewBox="0 0 {W} {H}" role="img" aria-label="请求链路模块耗时">
-<text x="{L}" y="20" font-size="10.5" fill="#3f6152">0 ms</text>
-<text x="{W-R}" y="20" text-anchor="end" font-size="10.5" fill="#3f6152">{sumv:.0f} ms</text>
-{rects}
+    else:
+        path_note = mode
+    table = "".join(f'<tr><td>{esc(n)}</td><td>{v:.1f} ms</td><td class="src">{esc(s)}</td></tr>'
+                    for n, v, s in rows)
+    timing_note = "" if timing else "本档未采集到可信的 mock 配置，因此不给出 mock 首字/吐字参考，也不做差值推算。"
+    return f'''<figure class="chart"><figcaption>阶段耗时参考（{esc(short_label(best))}）：k6 客户端各指标 P90，来自不同请求分布，<b>不可相加</b></figcaption>
+<svg viewBox="0 0 {W} {H}" role="img" aria-label="k6 客户端阶段耗时参考">
+{bars}
 </svg></figure>
-{path_info}
-<table class="mini" style="margin-top:10px"><thead><tr><th>模块</th><th>耗时</th><th>占比</th><th>数据来源</th></tr></thead><tbody>{rows}</tbody></table>
-<div class="note" style="margin-top:8px">说明：<b>NAT / ALB / Ingress / 鉴权 / 渠道选择 / 连接池</b> 目前没有逐跳埋点，全部落在「网关+链路」这一段（等待首字节减去 mock 首字）。
-<b>不同报告该值差异大的原因</b>：公网路径（https://...）比内网 ClusterIP 多经过 NAT+EIP+ALB，通常多出 30~150ms，属于路径差异而非网关性能差异。
-若需把各跳再拆开，需要给入口接 SLS 访问日志或 OpenTelemetry trace（本次未做，不做假数据填充）。</div>'''
+<div class="note" style="margin-top:6px">链路路径：<b>{esc(path_note)}</b>（{esc(tgt)}）· VU={best.get("vus_i","")} · {esc(best.get("ts","")[:16])}</div>
+<table class="mini" style="margin-top:10px"><thead><tr><th>指标</th><th>P90</th><th>数据来源</th></tr></thead><tbody>{table}</tbody></table>
+<div class="note" style="margin-top:8px">{timing_note}
+「网关等其余环节」只在 mock 配置可信时按 waiting−首字估算，仍包含 NAT/ALB/Ingress/鉴权/连接池等；要真正拆分需接 trace/SLS（未做，不填假数据）。</div>'''
 
 
 def render(runs: list[dict], a: dict, out_path: str, eip_mbps: float = 0.0) -> None:
@@ -654,7 +659,7 @@ def render(runs: list[dict], a: dict, out_path: str, eip_mbps: float = 0.0) -> N
 <td>{fmt(r.get("complete_pct") if r["mode"] != "admin" else r.get("checks_pct"), 3)}%</td>
 <td>{fmt(r["cpu_cores"], 2)}</td>
 <td>{fmt(r["mem_mi"], 0)}</td>
-<td>{fmt(r.get("data_mbps", 0), 2)}</td>
+<td>{fmt(r.get("data_mbps"), 2)}</td>
 <td>{badge(r["verdict"])}<div class="sub">{esc(r["verdict_reason"])}</div></td>
 </tr>'''
     best = a.get("best")
@@ -675,6 +680,15 @@ def render(runs: list[dict], a: dict, out_path: str, eip_mbps: float = 0.0) -> N
 <td>{fmt(group["knee_vus"], 0)} VU / {fmt(group["knee_rps"], 1)} req/s</td>
 <td>{esc(group["note"])}</td></tr>'''
 
+    stage_run = a.get("best_phase")
+    stages_section = ""
+    if stage_run:
+        stages_section = ('<h2>阶段耗时参考（不是逐请求链路）</h2>' + svg_stages(stage_run)
+                          + '<div class="note" style="margin-top:10px">'
+                            '各指标均取 <b>p90</b>，但来自不同请求分布：连接可能复用、TLS 可能复用、'
+                            '接收阶段覆盖整段流式响应。因此这些数值<b>不能相加</b>成“一次请求的完整耗时”，'
+                            '也不据此计算占比。mock 首字/吐字只在本次采集到可信 <code>mock_config</code> 时展示，'
+                            '否则不做差值推算。</div>')
     facts = "".join(f"<li>{esc(x)}</li>" for x in a.get("facts", [])) or "<li>（数据不足）</li>"
     guesses = "".join(f"<li>{esc(x)}</li>" for x in a.get("guesses", [])) or "<li>（数据不足，暂不推断）</li>"
 
@@ -764,10 +778,10 @@ pre{{background:#06281a;color:#d9ffe9;border:1px solid #14532d;padding:14px 16px
 
 <h2>每次运行明细</h2>
 <table>
-<thead><tr><th>Job / 时间</th><th>VU</th><th>路径</th><th>RPS</th><th>P50 首字</th><th>P95 首字</th><th>P99 首字</th><th>P95 端到端（管理面按标签）</th><th>错误率</th><th>完整流成功率 / 管理面 checks</th><th>CPU 峰值(核)</th><th>内存峰值(Mi)</th><th>下行(Mbps)</th><th>判定</th></tr></thead>
+<thead><tr><th>Job / 时间</th><th>VU</th><th>路径</th><th>RPS</th><th>P50 首字</th><th>P95 首字</th><th>P99 首字</th><th>P95 端到端（管理面按标签）</th><th>错误率</th><th>完整流成功率 / 管理面 checks</th><th>CPU 峰值(核·全副本合计)</th><th>内存峰值(Mi·全副本合计)</th><th>下行(Mbps)</th><th>判定</th></tr></thead>
 <tbody>{rows or "<tr><td colspan=14>无数据</td></tr>"}</tbody>
 </table>
-<div class="lim">首字使用 k6 <code>http_req_waiting</code>（TTFB 代理）。稳态：P95 &lt; {SLO_TTFB_P95:.0f}ms、请求失败率 &lt; {SLO_ERR_RATE*100:.2f}%、完整流成功率 &gt; 99.95%；突发：P95 &lt; 1500ms、失败率 &lt; 1%、完整流成功率 &gt; 99%；管理面：标签端到端 P95 &lt; 1000ms、失败率 &lt; 1%、业务成功 checks &gt; 99%、丢弃迭代为 0。旧日志只能确认已有指标是否失败，不能凭 checks 宣告通过或用于容量插值；新日志须有完整流/业务成功计数及 k6 退出状态。故障注入、滚动及长流待定义专属标准；分片缺少共同运行窗口证据时待评估。突发汇总阈值通过不代表已验证恢复时间。</div>
+<div class="lim">首字使用 k6 <code>http_req_waiting</code>（TTFB 代理）。稳态：P95 &lt; {SLO_TTFB_P95:.0f}ms、请求失败率 &lt; {SLO_ERR_RATE*100:.2f}%、完整流成功率 &gt; 99.95%；突发：P95 &lt; 1500ms、失败率 &lt; 1%、完整流成功率 &gt; 99%；管理面：标签端到端 P95 &lt; 1000ms、失败率 &lt; 1%、业务成功 checks &gt; 99%、丢弃迭代为 0。CPU/内存为采样窗口内同一时刻全副本合计峰值；旧日志只采首个 Pod，数值偏小且不可用于成本换算。旧日志只能确认已有指标是否失败，不能凭 checks 宣告通过或用于容量插值；新日志须有完整流/业务成功计数及 k6 退出状态。故障注入、滚动及长流待定义专属标准；分片缺少共同运行窗口证据时待评估。突发汇总阈值通过不代表已验证恢复时间。</div>
 
 <h2>可比配置容量边界</h2>
 <table><thead><tr><th>分组 / 配置</th><th>实测最高通过 VU</th><th>最小失败 VU</th><th>延迟边界估计（总量）</th><th>说明</th></tr></thead>
@@ -778,13 +792,7 @@ pre{{background:#06281a;color:#d9ffe9;border:1px solid #14532d;padding:14px 16px
 {svg_line(runs, "ttfb_p95", "P95 首字延迟 vs 并发", "ms", SLO_TTFB_P95)}
 {svg_line(runs, "rps", "吞吐 RPS vs 并发", "req/s")}
 
-<h2>一次请求的完整链路耗时</h2>
-{svg_waterfall(a.get("best_phase"))}
-<div class="note" style="margin-top:10px">
-分段全部按 <b>p90</b> 取值：k6 客户端阶段（sending / connecting / tls_handshaking / waiting / receiving）为实测；
-<b>mock 首字</b>=300ms、<b>流式吐字</b>=50×30ms 为配置已知量；<b>网关+链路</b>=waiting−300ms（含 DNS/NAT/ALB/Ingress/鉴权/限流/选渠道/取连接）；
-<b>客户端接收余量</b>=receiving−1500ms。占比以各段合计为分母。
-</div>
+{stages_section}
 
 <h2>瓶颈判定</h2>
 <div class="note"><b>事实</b><ul>{facts}</ul></div>
@@ -850,15 +858,16 @@ pre{{background:#06281a;color:#d9ffe9;border:1px solid #14532d;padding:14px 16px
    注意：本环境 mock 上游无真实厂商延迟，且部分档位未含 ALB（clusterip 模式）；
    URL 模式（https://perf.likha.hk）含 NAT+ALB 入口开销，两种模式不可直接混比。
 
-9) 链路带宽利用率
-   U_bw = data_received_rate(Mbps) / EIP_Bandwidth(Mbps)
-   公网路径（k6→NAT→EIP→ALB）先撞带宽时，表现为 RPS 塌陷 + 大量连接级失败（超时/重置），
-   而此时应用侧无 5xx、CPU 不高 ⇒ 必须换内网直连或抬带宽后再压。
+9) 链路带宽利用率（仅公网路径）
+   U_bw = data_received_rate(Mbps) / EIP_Bandwidth(Mbps)，k6 数据单位按十进制（1 MB = 1000 kB）。
+   ClusterIP 内网流量不经过 EIP，只记录集群内下行峰值，不参与 EIP 饱和度判断。
+   公网路径先撞带宽时表现为 RPS 塌陷 + 连接级失败（超时/重置）而应用侧无 5xx、CPU 不高；
+   该推断仍需 EIP 实际监控确认，不能只凭本报告下结论。
 
 10) 资源口径
-   CPU_peak = 压测窗口内 kubectl top 的峰值（URL 模式逐副本采样后取最大）
-   Mem_peak = 同上（MiB）
-   CPU 上限按部署 limits=2 核记（deploy/perf/... 实际 deployment 以集群为准）。
+   CPU_peak / Mem_peak = 采样窗口内同一时刻全副本合计峰值（逐 Pod 采样后求和，同刻去重）
+   单 Pod 峰值另存为 cpu_max_pod_m / mem_max_pod_mi；旧日志只采首个 Pod，数值偏小。
+   CPU 上限按部署 limits=2 核记（实际 deployment 以集群为准）。
 </pre>
 
 <h2>复现</h2>
@@ -950,6 +959,7 @@ def main() -> None:
     ap.add_argument("--log-dir", action="append", help="可重复；多个目录一起聚合")
     ap.add_argument("--logs", nargs="*")
     ap.add_argument("--out", help="HTML 输出路径（--check 时可省略）")
+    ap.add_argument("--json", help="把解析后的结构化运行结果写到该路径，供归档与二次分析")
     ap.add_argument("--eip-mbps", type=float, default=0.0, help="公网路径的 EIP 标称带宽（Mbps），用于带宽利用率判定")
     ap.add_argument("--check", metavar="LOG",
                     help="按场景判定：PASS 退出 0，FAIL 退出 1，数据不完整/待评估退出 2")
@@ -966,18 +976,24 @@ def main() -> None:
               f'err={fmt(r.get("err_pct"), 3)}% reason={r["verdict_reason"]}')
         sys.exit({"PASS": 0, "FAIL": 1}.get(r["verdict"], 2))
 
-    if not args.out:
-        ap.error("--out 必填（除非使用 --check）")
+    if not args.out and not args.json:
+        ap.error("--out 或 --json 至少需要一个（--check 除外）")
     paths = []
     if args.logs:
         paths = list(args.logs)
     elif args.log_dir:
         for d in args.log_dir:
-            paths += sorted(glob.glob(os.path.join(d, "*.log")))
+            paths += sorted(glob.glob(os.path.join(d, "**", "*.log"), recursive=True))
         paths = sorted(set(paths))
     runs = load_runs(paths, args.eip_mbps)
-    render(runs, analyse(runs, args.eip_mbps), args.out, args.eip_mbps)
-    print(f"[report] runs={len(runs)} -> {args.out}")
+    if args.json:
+        with open(args.json, "w", encoding="utf-8") as fh:
+            json.dump({"generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                       "runs": runs}, fh, ensure_ascii=False, indent=2)
+        print(f"[report] json={args.json} runs={len(runs)}")
+    if args.out:
+        render(runs, analyse(runs, args.eip_mbps), args.out, args.eip_mbps)
+        print(f"[report] runs={len(runs)} -> {args.out}")
 
 
 if __name__ == "__main__":

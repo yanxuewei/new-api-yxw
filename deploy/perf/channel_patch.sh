@@ -69,7 +69,10 @@ PY
 )
 [ -n "$PATCH_JSON" ] || { echo "[!] patch 组装失败"; exit 1; }
 
-FULL="/tmp/perf_chpatch.$$.sh"
+# 临时脚本自带密钥：先收紧 umask，再用 mktemp 生成不可预测文件名，退出时无论成败都删除。
+umask 077
+FULL="$(mktemp "${TMPDIR:-/tmp}/perf_chpatch.XXXXXX.sh")" || { echo "[!] 临时脚本创建失败"; exit 1; }
+trap 'rm -f "$FULL"' EXIT INT TERM
 {
   cat <<'HDR'
 #!/bin/bash
@@ -79,11 +82,8 @@ HDR
   printf "export CH_ID='%s'\n" "$ID"
   printf "export CH_SHOW='%s'\n" "$SHOW"
   printf "export CH_STATUS='%s'\n" "$STATUS"
-  printf "export CH_PATCH='%s'\n" "$PATCH_JSON"
+  printf "export CH_PATCH_B64='%s'\n" "$(printf '%s' "$PATCH_JSON" | base64 | tr -d '\n')"
   cat "$BODY"
 } > "$FULL"
-chmod 700 "$FULL"
 bash "$REMOTE" "$FULL"
-RC=$?
-rm -f "$FULL"
-exit $RC
+exit $?

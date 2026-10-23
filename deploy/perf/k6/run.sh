@@ -35,8 +35,88 @@ set -uo pipefail
 export PATH=/usr/bin:/bin:/usr/local/bin:$PATH
 HDR
   printf "export K6JS_GZ='%s'\n" "$(gzip -9 -c "$K6JS_FILE" | base64 -w0)"
+  printf "export SCRIPT_ID='%s@%s'\n" "$(basename "$K6JS_FILE")" "$(sha256sum "$K6JS_FILE" | cut -c1-12)"
   local kv
   for kv in "$@"; do printf "export %s='%s'\n" "${kv%%=*}" "${kv#*=}"; done
+  cat <<'LIB'
+
+# ---- 资源采样（各 action 复用）----
+# 逐 Pod 记录时间序列，并按同一时刻汇总：既保留单 Pod 峰值，也得到全副本同刻合计，
+# 避免“只取第一个 Pod”或“峰值 CPU 除以平均 RPS”这类口径错误。
+SAMPLER_TSV=""
+sampler_start() {
+  local label="$1"
+  SAMPLER_TSV="/tmp/perf_samples.$$.tsv"
+  : > "$SAMPLER_TSV"
+  (
+    while :; do
+      ts=$(date -u +%H:%M:%S)
+      kubectl -n "${SAMPLER_NS:-new-api-perf}" top pod -l "app=$label" --no-headers 2>/dev/null \
+        | awk -v ts="$ts" 'NF>=3 {print ts "\t" $1 "\t" $2 "\t" $3}' >> "$SAMPLER_TSV"
+      sleep "${SAMPLER_INTERVAL:-5}"
+    done
+  ) >/dev/null 2>&1 &
+  SAMPLER_PID=$!
+}
+sampler_stop() {
+  [ -n "${SAMPLER_PID:-}" ] && kill "$SAMPLER_PID" 2>/dev/null
+  [ -n "${SAMPLER_PID:-}" ] && wait "$SAMPLER_PID" 2>/dev/null
+  SAMPLE_ROWS=0; PODS_PEAK=0; CPU_PEAK_M=0; MEM_PEAK_MI=0; CPU_MAX_POD_M=0; MEM_MAX_POD_MI=0
+  [ -n "$SAMPLER_TSV" ] && [ -f "$SAMPLER_TSV" ] || return 0
+  SAMPLE_ROWS=$(wc -l < "$SAMPLER_TSV" | tr -d ' ')
+  # 同一秒内可能出现多轮采样：先按 (时刻, Pod) 去重，再按时刻求和，避免重复累加。
+  CPU_PEAK_M=$(awk -F'\t' '{v[$1 SUBSEP $2]=($3 ~ /m$/)?$3+0:($3+0)*1000} END{for(k in v){split(k,a,SUBSEP); s[a[1]]+=v[k]} m=0; for(t in s) if(s[t]>m) m=s[t]; printf "%.0f", m+0}' "$SAMPLER_TSV")
+  MEM_PEAK_MI=$(awk -F'\t' '{v[$1 SUBSEP $2]=($4 ~ /Gi$/)?($4+0)*1024:$4+0} END{for(k in v){split(k,a,SUBSEP); s[a[1]]+=v[k]} m=0; for(t in s) if(s[t]>m) m=s[t]; printf "%.0f", m+0}' "$SAMPLER_TSV")
+  CPU_MAX_POD_M=$(awk -F'\t' '{c=($3 ~ /m$/)?$3+0:($3+0)*1000; if(c>m) m=c} END{printf "%.0f", m+0}' "$SAMPLER_TSV")
+  MEM_MAX_POD_MI=$(awk -F'\t' '{m=($4 ~ /Gi$/)?($4+0)*1024:$4+0; if(m>p) p=m} END{printf "%.0f", p+0}' "$SAMPLER_TSV")
+  PODS_PEAK=$(awk -F'\t' '{seen[$1 SUBSEP $2]=1} END{for(k in seen){split(k,a,SUBSEP); c[a[1]]++} m=0; for(t in c) if(c[t]>m) m=c[t]; print m+0}' "$SAMPLER_TSV")
+}
+sampler_dump() {
+  [ -n "$SAMPLER_TSV" ] && [ -f "$SAMPLER_TSV" ] || return 0
+  echo "===SAMPLES==="
+  cat "$SAMPLER_TSV"
+  rm -f "$SAMPLER_TSV"
+}
+
+# ---- mock 上游状态快照与恢复 ----
+mock_pods() {
+  kubectl -n "$1" get pod -l app=mock-upstream -o jsonpath='{range .items[*]}{.status.podIP}{"\n"}{end}' 2>/dev/null
+}
+mock_state_json() {
+  local ns="$1" ip out
+  for ip in $(mock_pods "$ns"); do
+    out=$(curl -sS -m 3 "http://$ip:8080/__state" 2>/dev/null) && [ -n "$out" ] && { printf '%s' "$out"; return 0; }
+  done
+  return 1
+}
+mock_apply() {
+  local ns="$1" json="$2" ip
+  for ip in $(mock_pods "$ns"); do
+    curl -sS -m 5 -X POST -H 'Content-Type: application/json' -d "$json" "http://$ip:8080/__ctrl" >/dev/null 2>&1
+  done
+}
+mock_fingerprint() {
+  local ns="$1" ip out first="" mixed=0 n=0
+  for ip in $(mock_pods "$ns"); do
+    out=$(curl -sS -m 3 "http://$ip:8080/__state" 2>/dev/null | python3 -c '
+import json, sys
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    raise SystemExit(1)
+keys = ("first_token_delay_ms", "token_interval_ms", "tokens_per_response",
+        "token_text_bytes", "error_rate", "error_status", "extra_latency_ms")
+print(",".join("%s=%s" % (k, d.get(k)) for k in keys))
+' 2>/dev/null) || continue
+    n=$((n + 1))
+    [ -z "$first" ] && first="$out"
+    [ "$out" != "$first" ] && mixed=1
+  done
+  if [ "$n" -eq 0 ]; then echo unavailable
+  elif [ "$mixed" = 1 ]; then echo mixed
+  else printf '%s' "$first"; fi
+}
+LIB
 }
 
 REPORT_DIR="$ROOT/deploy/perf/perf_reports"
@@ -45,8 +125,10 @@ DESC=""   # 本次压测参数摘要，由分发处赋值，用于报告文件�
 run_body() {
   local body="$1" tag="$2"; shift 2
   [ -s "$BODIES/$body" ] || { echo "[!] 缺 body：$BODIES/$body"; exit 1; }
-  local full="/tmp/perf_k6_${tag}.$$.sh"
-  { header "$@"; cat "$BODIES/$body"; } > "$full"; chmod 700 "$full"
+  umask 077
+  local full
+  full="$(mktemp "${TMPDIR:-/tmp}/perf_k6_${tag}.XXXXXX.sh")" || { echo "[!] 临时脚本创建失败"; exit 1; }
+  { header "$@"; cat "$BODIES/$body"; } > "$full"
   echo "[perf-k6] action=$tag payload=$# body=$(wc -c <"$full")B"
   # 压测开始前先创建本次专属子目录，后续所有中间文件和报告直接落在这里
   local run_ts run_dir
@@ -56,26 +138,39 @@ run_body() {
   LAST_RUN_DIR="$run_dir"   # 供调用方（如 ramp）收集各阶段目录
   echo "[perf-k6] 本次输出目录：$run_dir"
   # 捕获远端输出：一边打屏，一边落盘（报告的数据源），跑完自动渲染 HTML
-  local out rc log safe
+  local out rc log samples safe
   rc=0
   out=$(bash "$REMOTE" "$full" 2>&1) || rc=$?
   printf '%s\n' "$out"
   rm -f "$full"
   log="$run_dir/${run_ts}-${tag}.log"
-  printf '%s\nrunner_rc=%s\n' "$out" "$rc" > "$log"
+  samples="${log%.log}.samples.tsv"
+  # 逐 Pod 采样序列与摘要分开归档：日志只留可解析指标，原始时间序列单独存 tsv。
+  # 无采样标记时全部内容留在日志，不能截掉任何一行。
+  printf '%s\n' "$out" | awk -v s="$samples" '
+    /^===SAMPLES===$/ {dump=1; next}
+    dump {print > s; next}
+    {print}
+  ' > "$log"
+  [ -s "$samples" ] || rm -f "$samples"
+  printf 'runner_rc=%s\n' "$rc" >> "$log"
   LAST_LOG="$log"   # 供调用方（ramp/ladder）做 SLO 判定
-  echo "[perf-k6] 日志：$log"
+  if [ -s "$samples" ]; then
+    echo "[perf-k6] 日志：$log（采样序列：$samples）"
+  else
+    echo "[perf-k6] 日志：$log"
+  fi
   case "$tag" in
     stage_*|dual1500|s3_*|s4_*|s5_*|s9_*|s10_*|shard_*)
       # 文件名 = perf_report_<参数摘要>_<启动时刻>.html（参数里的路径/冒号等替换为 -）
       safe=$(printf '%s' "${DESC:-$tag}" | tr -c 'A-Za-z0-9._-' '-' | sed 's/--*/-/g;s/-*$//')
       local html="$run_dir/perf_report_${safe}_${run_ts}.html"
-      python3 "$HERE/report.py" --logs "$log" --out "$html" --eip-mbps "${EIP_MBPS:-100}" || true
+      python3 "$HERE/report.py" --logs "$log" --out "$html" --json "$run_dir/${run_ts}-${tag}.json" --eip-mbps "${EIP_MBPS:-100}" || true
       echo "[perf-k6] 本次报告：$html"
-      # 完整报告：聚合本次目录 + 历史目录
+      # 完整报告：递归聚合全部历史运行目录，而不是只取本次目录
       local AGG="$run_dir/perf_report_ALL_${run_ts}.html"
       HIST="$ROOT/deploy/logs/perf_reports"
-      DIRS=(--log-dir "$run_dir")
+      DIRS=(--log-dir "$REPORT_DIR")
       [ -d "$HIST" ] && DIRS+=(--log-dir "$HIST")
       python3 "$HERE/report.py" "${DIRS[@]}" --out "$AGG" --eip-mbps "${EIP_MBPS:-100}" || true
       cp -f "$AGG" "$REPORT_DIR/perf_report_ALL_latest.html" 2>/dev/null || true
@@ -149,8 +244,14 @@ emit_report() {
   local HIST="$ROOT/deploy/logs/perf_reports"
   [ -d "$HIST" ] && args+=(--log-dir "$HIST")
   python3 "$HERE/report.py" "${args[@]}" --out "$out" --eip-mbps "${EIP_MBPS:-100}" || true
-  cp -f "$out" "$REPORT_DIR/perf_report_ALL_latest.html" 2>/dev/null || true
+  # 本次分阶段报告只覆盖本次阶段；ALL_latest 仍代表全部历史，避免把它缩成一次子集。
+  local full="$REPORT_DIR/perf_report_ALL_${ts}.html" hist_args=(--log-dir "$REPORT_DIR")
+  local HIST="$ROOT/deploy/logs/perf_reports"
+  [ -d "$HIST" ] && hist_args+=(--log-dir "$HIST")
+  python3 "$HERE/report.py" "${hist_args[@]}" --out "$full" --eip-mbps "${EIP_MBPS:-100}" || true
+  cp -f "$full" "$REPORT_DIR/perf_report_ALL_latest.html" 2>/dev/null || true
   echo "[perf-k6] ${pfx} 汇总报告：$out（共 ${#dirs[@]} 阶段）"
+  echo "[perf-k6] 全量报告：$full（副本 $REPORT_DIR/perf_report_ALL_latest.html）"
 }
 
 # 长阶梯被动中断（Ctrl+C / IDE 停止）时，已完成的阶段照常出报告，不白跑
@@ -167,6 +268,16 @@ on_interrupt() {
     emit_report "partial" "${pool[@]}"
   else
     echo "[perf-k6] 尚无完成的阶段，无可出报告。"
+  fi
+  # 中断时压测环境可能已改过副本数或 mock 配置：给出可执行的恢复依据，不静默留坑。
+  local before=""
+  if [ -n "${LAST_LOG:-}" ] && [ -s "$LAST_LOG" ]; then
+    before=$(grep -m1 '^replicas_before=' "$LAST_LOG" 2>/dev/null | cut -d= -f2)
+  fi
+  if [ -n "$before" ] && [ "$before" != "0" ]; then
+    echo "[perf-k6] 注意：本次压测前副本数=$before，恢复命令：bash $HERE/run.sh scale $before"
+  else
+    echo "[perf-k6] 注意：若本次动了副本数或 mock 配置，请用 run.sh scale <原副本数> 与 mock_ctl.sh 恢复；具体值见最近日志的 replicas_before / mock_config。"
   fi
   exit 130
 }

@@ -60,13 +60,9 @@ YAML
   echo "  shard-$i -> $V VU"
 done
 
-# 采样应用 CPU/内存峰值
-: > /tmp/c_shard; : > /tmp/m_shard
-( for t in $(seq 1 180); do
-    kubectl -n $NS top pod -l app=perf-new-api-slave --no-headers 2>/dev/null | while read -r N C M REST; do
-      c=${C%m}; m=${M%Mi}; [ -n "$c" ] && [ "$c" -gt 0 ] && echo "$c" >> /tmp/c_shard; [ -n "$m" ] && [ "$m" -gt 0 ] && echo "$m" >> /tmp/m_shard; done
-    sleep 5; done ) &
-SP=$!
+# 资源采样：逐 Pod 时间序列，结束后按同刻汇总（header 中的 sampler_*）
+MOCK_BEFORE=$(mock_fingerprint "$NS")
+sampler_start perf-new-api-slave
 
 echo "=== 等待所有分片"
 DONE=0
@@ -80,11 +76,14 @@ for round in $(seq 1 90); do
   [ "$DONE" = "1" ] && break
   sleep 10
 done
-kill $SP 2>/dev/null; wait $SP 2>/dev/null
-CP=$(sort -n /tmp/c_shard 2>/dev/null | tail -1)
-MP=$(sort -n /tmp/m_shard 2>/dev/null | tail -1)
+sampler_stop
+MOCK_AFTER=$(mock_fingerprint "$NS")
+if [ "$MOCK_BEFORE" = "$MOCK_AFTER" ]; then MOCK_CFG="$MOCK_AFTER"; else MOCK_CFG="changed"; fi
+CP="$CPU_PEAK_M"
+MP="$MEM_PEAK_MI"
+IMG=$(kubectl -n $NS get deploy -o jsonpath='{range .items[*]}{.metadata.name}={.spec.template.spec.containers[0].image}{","}{end}' 2>/dev/null | tr ',' '\n' | grep -E "perf-new-api|mock-upstream" | sed '/^$/d' | sort | tr '\n' ';')
 
-echo "  all_done=$DONE cpu_peak=${CP:-?}m mem_peak=${MP:-?}Mi"
+echo "  all_done=$DONE cpu_peak_sum=${CP:-?}m cpu_peak_pod=${CPU_MAX_POD_M:-?}m mem_peak_sum=${MP:-?}Mi pods=${PODS_PEAK:-?} samples=${SAMPLE_ROWS:-?}"
 echo "===RUN_META==="
 echo "target=perf-new-api-slave x${REPL}"
 echo "base=http://$IP"
@@ -92,11 +91,17 @@ echo "mode=clusterip-shard"
 echo "vus=$TOTAL"
 echo "dur=$DUR"
 echo "cpu_peak_m=${CP:-0}"
+echo "cpu_max_pod_m=${CPU_MAX_POD_M:-0}"
 echo "mem_peak_mi=${MP:-0}"
+echo "mem_max_pod_mi=${MEM_MAX_POD_MI:-0}"
+echo "pods_peak=${PODS_PEAK:-0}"
+echo "sample_rows=${SAMPLE_ROWS:-0}"
+echo "load_config=k6-0.54.0:${SCRIPT_ID}:const-vus:model=${MODEL:-mock-gpt}:shards=${SHARDS}"
+echo "mock_config=${MOCK_CFG}"
 echo "replicas=${REPL:-1}"
 echo "job=k6-shard-0..$((SHARDS - 1))"
 echo "ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-echo "images="
+echo "images=$IMG"
 echo "summary_schema=2"
 echo "shards=$SHARDS"
 EXIT_CODES=""
@@ -106,10 +111,9 @@ for i in $(seq 0 $((SHARDS - 1))); do
 done
 echo "k6_exit_codes=$EXIT_CODES"
 echo "===END_META==="
-rm -f /tmp/c_shard /tmp/m_shard
 
 for i in $(seq 0 $((SHARDS - 1))); do
   echo "----- shard-$i"
   kubectl -n $NS logs job/k6-shard-$i 2>&1 | grep -E "http_reqs|http_req_failed|http_req_waiting|http_req_duration|http_req_connecting|http_req_tls_handshaking|http_req_sending|http_req_receiving|\{ type:sse \}|checks|sse_complete|vus_max|✗"
 done
-
+sampler_dump

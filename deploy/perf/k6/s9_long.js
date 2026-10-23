@@ -5,6 +5,7 @@ import { check } from 'k6';
 const BASE = __ENV.BASE;
 const MODEL = __ENV.MODEL || 'mock-gpt';
 const TOKEN = __ENV.TOKEN;
+const MIN = Number(__ENV.MIN || 13);   // 观察窗口（分钟），由 run.sh long <MIN> 传入
 
 export const options = {
   scenarios: {
@@ -12,7 +13,7 @@ export const options = {
       executor: 'per-vu-iterations',
       vus: 1,
       iterations: 1,
-      maxDuration: '14m',
+      maxDuration: `${MIN}m`,
     },
   },
   summaryTrendStats: ['avg', 'med', 'p(90)', 'p(95)', 'p(99)', 'max'],
