@@ -7,7 +7,7 @@
 #   - 分片 tag 通过 env SHARD 注入脚本（tags={{type:'sse',shard:'i'}}），便于按分片看指标；
 #   - 结束后把各分片摘要拼接输出，report.py 会按"一个日志多条摘要"聚合（RPS 求和、延迟取差）。
 NS=new-api-perf
-CM=k6-sse
+CM="${K6JS_CM:?缺少 K6JS_CM（脚本 ConfigMap）}"
 SHARDS="${SHARDS:-4}"
 TOTAL="${VUS:-1500}"
 DUR="${DUR:-120s}"
@@ -18,9 +18,7 @@ IP=$(kubectl -n $NS get svc perf-new-api-slave -o jsonpath='{.spec.clusterIP}')
 REPL=$(kubectl -n $NS get deploy perf-new-api-slave -o jsonpath='{.status.readyReplicas}')
 echo "=== 分片压测：total=$TOTAL VU  shards=$SHARDS  dur=$DUR  base=http://$IP  后端副本=$REPL"
 
-echo "$K6JS_GZ" | base64 -d | gzip -d > /tmp/sse.js
-kubectl -n $NS create configmap $CM --from-file=sse.js=/tmp/sse.js --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-rm -f /tmp/sse.js
+kubectl -n $NS get configmap "$CM" >/dev/null 2>&1 || { echo "  [XX] 缺少脚本 ConfigMap：$CM"; exit 2; }
 
 # 清理旧分片 Job
 for i in $(seq 0 $((SHARDS - 1))); do kubectl -n $NS delete job k6-shard-$i --ignore-not-found >/dev/null 2>&1; done

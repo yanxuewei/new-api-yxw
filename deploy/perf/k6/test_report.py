@@ -210,9 +210,17 @@ class ReportTests(unittest.TestCase):
         for name in ("run.sh", "report.py", "sse.js", "s3_burst.js", "s4_admin.js", "s9_long.js"):
             shutil.copyfile(HERE / name, k6 / name)
         shutil.copytree(HERE / "bodies", k6 / "bodies")
+        shutil.copytree(HERE / "lib", k6 / "lib")
         remote = sandbox / "deploy/lib/ack_remote_jkt_dev.sh"
         remote.parent.mkdir(parents=True)
-        remote.write_text('#!/bin/bash\nprintf "remote-call\\n" >> "$FIXTURE_CALLS"\ncat "$FIXTURE_LOG"\nexit "${FIXTURE_RC:-0}"\n')
+        remote.write_text('#!/bin/bash\n'
+                          'case "$(basename "$1")" in\n'
+                          '  perf_k6_install.*)\n'
+                          '    cm=$(sed -n "s/.*export K6JS_CM=\'\\([^\']*\\)\'.*/\\1/p" "$1")\n'
+                          '    echo "  configmap/$cm 就绪"; exit 0 ;;\n'
+                          'esac\n'
+                          'printf "remote-call\\n" >> "$FIXTURE_CALLS"\n'
+                          'cat "$FIXTURE_LOG"\nexit "${FIXTURE_RC:-0}"\n')
         remote.chmod(0o700)
         bin_dir = sandbox / "bin"
         bin_dir.mkdir()
@@ -315,9 +323,16 @@ class ReportTests(unittest.TestCase):
         for name in ("run.sh", "report.py", "sse.js"):
             shutil.copyfile(HERE / name, k6 / name)
         shutil.copytree(HERE / "bodies", k6 / "bodies")
+        shutil.copytree(HERE / "lib", k6 / "lib")
         remote = sandbox / "deploy/lib/ack_remote_jkt_dev.sh"
         remote.parent.mkdir(parents=True)
-        remote.write_text('#!/bin/bash\ncat "$FIXTURE_LOG"\nexit 0\n')
+        remote.write_text('#!/bin/bash\n'
+                          'case "$(basename "$1")" in\n'
+                          '  perf_k6_install.*)\n'
+                          '    cm=$(sed -n "s/.*export K6JS_CM=\'\\([^\']*\\)\'.*/\\1/p" "$1")\n'
+                          '    echo "  configmap/$cm 就绪"; exit 0 ;;\n'
+                          'esac\n'
+                          'cat "$FIXTURE_LOG"\nexit 0\n')
         remote.chmod(0o700)
         fixture = self.log(summary())
         fixture.write_text(fixture.read_text()

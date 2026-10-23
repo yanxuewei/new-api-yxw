@@ -2,7 +2,7 @@
 # 依赖 header 注入：K6JS_B64 / TARGET_SVC / VUS / DUR
 # 输出约定：末尾先打 ===RUN_META=== 块（KEY=VALUE，供 report.py 解析），再打 k6 摘要原文
 NS=new-api-perf
-CM=k6-sse
+CM="${K6JS_CM:?缺少 K6JS_CM（脚本 ConfigMap）}"
 JOB="k6-stage-${VUS}"
 
 # TARGET_SVC：Service 名（集群内直连 ClusterIP）或完整 URL（走公网 ALB 路径）
@@ -30,9 +30,7 @@ if [ -n "${REQ_REPLICAS:-}" ] && [ "$MODE" = "clusterip" ]; then
 fi
 echo "=== 生效：mode=$MODE replicas=${REQ_REPLICAS:-auto}"
 
-echo "$K6JS_GZ" | base64 -d | gzip -d > /tmp/sse.js
-kubectl -n $NS create configmap $CM --from-file=sse.js=/tmp/sse.js --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-rm -f /tmp/sse.js
+kubectl -n $NS get configmap "$CM" >/dev/null 2>&1 || { echo "  [XX] 缺少脚本 ConfigMap：$CM"; exit 2; }
 
 kubectl -n $NS delete job "$JOB" --ignore-not-found >/dev/null 2>&1
 kubectl apply -f - >/dev/null <<YAML

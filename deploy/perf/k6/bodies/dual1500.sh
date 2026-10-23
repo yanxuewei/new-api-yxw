@@ -4,13 +4,11 @@
 #   - 不使用 perf-new-api-master（负责人 2026-10-20 裁定：双副本只扩 slave）
 #   - 一个 Job 打 Service，kube-proxy 天然按连接分摊到 2 个 Pod ⇒ 与线上多副本入口形态一致
 NS=new-api-perf
-CM=k6-sse
+CM="${K6JS_CM:?缺少 K6JS_CM（脚本 ConfigMap）}"
 JOB=k6-1500
 REPL_WANT=2
 
-echo "$K6JS_GZ" | base64 -d | gzip -d > /tmp/sse.js
-kubectl -n $NS create configmap $CM --from-file=sse.js=/tmp/sse.js --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-rm -f /tmp/sse.js
+kubectl -n $NS get configmap "$CM" >/dev/null 2>&1 || { echo "  [XX] 缺少脚本 ConfigMap：$CM"; exit 2; }
 
 REPL_BEFORE=$(kubectl -n $NS get deploy perf-new-api-slave -o jsonpath='{.status.readyReplicas}' 2>/dev/null)
 echo "=== 扩 perf-new-api-slave 到 $REPL_WANT 副本（压测前 ready=${REPL_BEFORE:-?}）"

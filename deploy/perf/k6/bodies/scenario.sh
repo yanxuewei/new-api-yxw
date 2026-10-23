@@ -1,12 +1,10 @@
 # bodies/scenario.sh —— 场景执行器（burst/admin/degrade/rolling/long），单 Job 模板
 # 依赖 header 注入：K6JS_GZ / MODE / VUS / DUR / RATE / BASE_URL
-NS=new-api-perf; CM=k6-scenario; JOB="k6-$MODE"
+NS=new-api-perf; CM="${K6JS_CM:?缺少 K6JS_CM（脚本 ConfigMap）}"; JOB="k6-$MODE"
 S5='{"first_token_delay_ms":300,"token_interval_ms":30,"tokens_per_response":50,"token_text_bytes":12,"error_rate":0.5,"error_status":500,"extra_latency_ms":5000}'
 LONG='{"first_token_delay_ms":300,"token_interval_ms":30,"tokens_per_response":24000,"token_text_bytes":12,"error_rate":0,"error_status":500,"extra_latency_ms":0}'
 
-echo "$K6JS_GZ" | base64 -d | gzip -d > /tmp/scen.js
-kubectl -n $NS create configmap $CM --from-file=scen.js=/tmp/scen.js --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-rm -f /tmp/scen.js
+kubectl -n $NS get configmap "$CM" >/dev/null 2>&1 || { echo "  [XX] 缺少脚本 ConfigMap：$CM"; exit 2; }
 IP=$(kubectl -n $NS get svc perf-new-api-slave -o jsonpath='{.spec.clusterIP}')
 if [ "$MODE" = "long" ]; then BASE="${BASE_URL:-https://perf.likha.hk}"; TGT="$BASE"; else BASE="http://$IP"; TGT="perf-new-api-slave"; fi
 echo "=== mode=$MODE base=$BASE vus=${VUS:-} dur=${DUR:-} rate=${RATE:-}"
@@ -33,7 +31,7 @@ spec:
         - name: k6
           image: grafana/k6:0.54.0
           imagePullPolicy: IfNotPresent
-          args: ["run", "/scripts/scen.js"]
+          args: ["run", "/scripts/sse.js"]
           env:
             - {name: VUS, value: "${VUS:-1}"}
             - {name: DUR, value: "${DUR:-60s}"}
