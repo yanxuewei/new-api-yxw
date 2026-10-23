@@ -1,0 +1,60 @@
+OmniTradeERP minimal 新增客户、供应商、仓储部署记录
+2026-10-23 16:55 北京时间
+服务器 ops / 8.212.176.207
+生效配置 /opt/OmniTradeERP/docker-compose.minimal.yml
+
+部署结果
+新增 customer-service、supplier-service、warehouse-service，现共11个容器。
+三个新增容器 healthy，RestartCount=0，OOMKilled=false。
+客户/供应商业务只读接口通过；仓储部署及Nacos注册通过，业务接口未通过：现有镜像与源码均无HTTP Controller，GET /api/warehouse/list 返回404。这不是内存或网关503问题。
+
+资源设置（MiB）
+服务       Xms  Xmx   元空间上限  容器上限  实占快照
+客户       32   112   96          256       177
+供应商     32   112   96          256       173
+仓储       32   144   96          320       263
+合计                             832       613
+新增应用均SerialGC、ActiveProcessorCount=1、CPU上限0.75核、PID上限160。
+代码缓存32MiB、直接内存16MiB、线程栈512KiB，Tomcat最多10线程/最少1，Hikari最多3连接/最少0。
+新增端口仅绑定127.0.0.1：客户8087、供应商8088、仓储8085，经原Gateway对外。
+全栈容器内存上限总和3424MiB，并非保留给容器的物理内存；主机还需系统和宝塔资源，不能保证所有服务同时吃满上限。
+16:53容器实占合计约2253MiB（2.20GiB），主机可用约551MiB，Swap已用约405MiB，后续约428MiB并有少量换页。
+该2核/3.48GiB主机当前适合低并发验证；高峰、批量导入或扩大业务需重新压测/增加内存，不能宣称生产容量充足。
+
+关键实现
+1. 复用已有镜像并打固定本地tag，未执行Maven或镜像构建。
+2. 客户/供应商镜像已包含MySQL驱动与Actuator，但没有Nacos客户端；Gateway通过SPRING_APPLICATION_JSON覆盖完整现有routes列表，仅将customer/supplier URI改为Docker服务名http直连，其他路由保留。
+3. 仓储保留Nacos发现，注册erp-warehouse-service:8085，实例healthy。
+4. 创建缺失erp_customer、erp_supplier数据库，按现有实体字段追加创建9张空表（客户5张、供应商4张），只CREATE IF NOT EXISTS，无DROP/ALTER/数据插入。
+5. 字符列宽和金额精度是部署时根据实体类型选定的默认值，不是上游正式迁移；未建立业务唯一约束/性能索引，写入与大数据场景仍需业务评审。
+6. 原MySQL/Redis/Nacos数据卷、旧部署数据卷均未删除，旧用户数据未迁移。
+
+验证
+客户list/stats/tag/list/group/list/follow/list：全部HTTP200。
+供应商list/stats/evaluation/list/purchase/list/purchase/stats：全部HTTP200。
+原商品/订单list：HTTP200。
+2并发60次空数据只读请求：60/60通过，P95 43.99ms，不含仓储404接口。
+服务器本机经HTTPS域名和正常证书校验访问客户、供应商列表均200。
+仓储：Actuator健康、Nacos注册healthy；业务/api/warehouse/list仍404，尚未解决。
+Compose dry-run再次up全部Running，无意外重建。
+尚未验证新增记录、采购流程、用户登录或浏览器界面兼容性。
+
+运行
+cd /opt/OmniTradeERP
+docker compose -f docker-compose.minimal.yml up -d --no-build
+docker compose -f docker-compose.minimal.yml ps
+
+资源紧张时应逐个启动新增服务：
+docker compose -f docker-compose.minimal.yml up -d --no-build --wait customer-service
+docker compose -f docker-compose.minimal.yml up -d --no-build --wait supplier-service
+docker compose -f docker-compose.minimal.yml up -d --no-build --wait warehouse-service
+
+备份与回滚
+/opt/OmniTradeERP/.ops-backups/extra-20261023-165012/
+目录权限700，含扩展前已验证Compose、数据库全备、客户供应商建表SQL、rollback.sh。
+回滚：sh /opt/OmniTradeERP/.ops-backups/extra-20261023-165012/rollback.sh
+脚本停止三新增服务，恢复扩展前Compose并重建Gateway；保留新建库表及所有数据卷，不回滚数据。
+建表SQL位于该目录customer-supplier-bootstrap.sql；未来全新数据卷部署需显式执行该SQL，Compose本身不自动完成本次追加建表。
+
+待解决
+仓储模块缺Controller；当前实体表名wms_*/erp_wh_*与已有数据库t_warehouse系列也不一致。需要独立补齐仓储API及正式数据库迁移后才能完成仓储业务验收，不能仅调Compose解决。

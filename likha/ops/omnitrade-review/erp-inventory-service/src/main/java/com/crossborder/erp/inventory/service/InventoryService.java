@@ -1,0 +1,33 @@
+package com.crossborder.erp.inventory.service;
+import com.crossborder.erp.inventory.entity.*;
+import com.crossborder.erp.inventory.enums.*;
+import com.crossborder.erp.inventory.vo.*;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.util.List;
+public interface InventoryService {
+    Inventory getInventory(Long productId, Long warehouseId);
+    Inventory getInventoryById(Long id);
+    List<Inventory> listInventories(InventoryQuery query);
+    void increaseInventory(Long productId, Long warehouseId, Integer quantity, String remark);
+    void decreaseInventory(Long productId, Long warehouseId, Integer quantity, String remark);
+    void transferInventory(Long productId, Long fromWarehouseId, Long toWarehouseId, Integer quantity, String remark);
+    void lockInventory(Long productId, Long warehouseId, Integer quantity, LockType lockType, String orderNo, String remark);
+    void releaseInventory(Long productId, Long warehouseId, Integer quantity, String remark);
+    void reserveInventory(Long productId, Long warehouseId, Integer quantity, String remark);
+    List<InventoryAlert> getAlerts(Long warehouseId, AlertStatus status);
+    void processAlert(Long alertId, String handler, String handleRemark);
+    InventoryAlertStats getAlertStats(Long warehouseId);
+    Long createCheck(InventoryCheck check);
+    void executeCheck(Long checkId, List<InventoryCheckDetail> details);
+    List<Inventory> getInventoryByWarehouse(Long warehouseId);
+    List<Inventory> getLowStockInventory(Integer threshold);
+    List<Inventory> getSlowMovingInventory(Integer days, Integer minSales);
+    List<InventoryTrend> getInventoryTrend(Long productId, Long warehouseId, LocalDate startDate, LocalDate endDate);
+    BatchOperationResult batchIncreaseInventory(List<InventoryBatchOperation> operations);
+    BatchOperationResult batchDecreaseInventory(List<InventoryBatchOperation> operations);
+    void batchUpdateSafetyStock(List<SafetyStockUpdate> updates);
+    List<InventoryLog> getInventoryLogs(Long inventoryId, int page, int size);
+    List<InventoryLog> getInventoryLogsByProduct(Long productId, LocalDateTime startTime, LocalDateTime endTime);
+    InventoryStatistics getStatistics(Long warehouseId, LocalDateTime startTime, LocalDateTime endTime);
+}

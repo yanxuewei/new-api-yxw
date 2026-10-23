@@ -1,0 +1,86 @@
+OmniTradeERP minimal 部署优化验收
+时间：2026-10-23 16:40（北京时间）
+主机：ops / 8.212.176.207 / newapi-ops-mnl
+项目：/opt/OmniTradeERP
+生效文件：/opt/OmniTradeERP/docker-compose.minimal.yml
+
+结果
+8 个容器健康运行：MySQL、Redis、Nacos、Gateway、用户、商品、订单、前端。
+业务保留官方 minimal 的范围；前端额外恢复，内存上限 32 MiB。
+修复应用重复重启，未删除数据卷，未重新构建应用镜像。
+
+资源预算（MiB）
+服务           最大 JVM 堆   容器内存上限  验收实占约值
+MySQL          -             448          153
+Redis          -             128           11
+Nacos          256           512          411
+Gateway        160           320          257
+用户           192           384          252
+商品           192           384          277
+订单           192           384          301
+前端           -              32            7
+合计                        2592         1667（约 1.63 GiB）
+上表为 16:37 附近 docker stats 快照，随负载变化。
+16:41 最终复核：MySQL 152、Redis 11、Nacos 415、Gateway 261、用户 268、商品 305、订单 327、前端 6 MiB，合计约 1745 MiB（1.70 GiB）；全部 healthy、重启数 0。
+机器物理内存 3563 MiB；16:41 MemAvailable 1027 MiB。
+之前七个容器快照合计约 2019 MiB；优化后八个约 1667–1745 MiB，减少约 14%–17%。
+之前应用处于重启循环、之后为空闲健康状态，不能视为同负载基准测试。
+1 分钟负载从 18.83 降至 0.03；低负载 vmstat CPU 空闲约 97%–98%。
+Swap 仍有约 254 MiB 历史占用，未强行 swapoff。
+
+主要配置变更
+1. JVM 应用使用 Xms64m、SerialGC、ActiveProcessorCount=1、元空间/直接内存/代码缓存限额。
+2. Nacos 保留当前 standalone/Derby 数据卷，Xms128m/Xmx256m/Xmn64m；修复旧 Xmn512m 与 Xmx256m 冲突。
+3. MySQL buffer pool=128 MiB、max_connections=60、performance_schema=OFF；保留事务持久化默认设置。
+4. Redis maxmemory=64 MiB，noeviction；达到上限将拒绝需要额外内存的写入，不随机淘汰会话。
+5. 数据源与 Redis 指向 Docker 服务名；Nacos 地址与 erp-dev 命名空间一致，补建缺失命名空间。
+6. 显式监听端口：gateway 8080、user 8081、product 8082、order 8083。
+7. 每应用 Hikari 最大连接数 5、最小空闲 1；Tomcat 最大线程 20、最小空闲 2。
+8. 应用镜像固定为本地带日期 tag、pull_policy=never，移除错误 build 引用。
+9. 日志轮转 max-size=10m、max-file=3；容器设置内存/CPU/PID 上限和自动重启。
+10. 用户镜像缺 Actuator，使用 TCP 健康探针，其 healthy 不等价于成功登录。
+11. 订单当前源码没有 RabbitMQ/Elasticsearch 业务引用，minimal 也没有部署两项；关闭其健康指示器与 Rabbit listener 自动启动，保留数据库/Redis 健康检查。未来启用消息队列或搜索功能时必须恢复对应配置并部署依赖。
+12. 恢复已有前端镜像，127.0.0.1:3000:80，增加 erp-gateway 网络别名，兼容前端镜像已有 Nginx 上游。
+
+验证
+- 8 容器 healthy，重建后的 RestartCount=0、OOMKilled=false。
+- Gateway、商品、订单 /actuator/health 为 HTTP 200 / UP。
+- Nacos 中四应用均注册为 healthy、端口一致。
+- /api/product/list、/api/order/list 经网关返回 HTTP 200、业务 code=200。
+- 服务器本机经域名/SNI及正常证书校验访问 HTTPS 首页、/login、商品/订单接口通过。
+- 未进行外部浏览器或公网多网络验收。
+- 4 并发、100 次空数据只读请求全部通过；耗时 0.91s，P50 34.3ms、P95 54.23ms、最大 65.93ms。
+- 最终 docker compose --dry-run up 显示所有容器 Running，无需重建。
+- 这是部署冒烟验收，不是生产容量测试，也不涵盖订单写入/登录完整流程。
+
+重要边界
+当前 minimal 数据库 erp_user.t_user / erp_order.t_order / erp_product.t_product 均为 0 行。
+这是用户此前启动的独立 mysql-minimal-data 卷；本轮没有清空表或导入初始化脚本。
+旧 omnitradeerp_mysql-data 及旧 Redis/Nacos 等卷全部保留，未合并或迁移数据。
+因此旧管理员账号尚未迁入，当前不能声明“登录与全部业务可用”。
+客户、供应商、仓储、库存、财务、物流、AI 不属于此 minimal 部署，相关界面不能据此认定可用。
+保留了既有数据库凭据及端口暴露方式；本轮不构成生产安全加固验收。
+
+日常运行（服务器执行）
+cd /opt/OmniTradeERP
+docker compose -f docker-compose.minimal.yml up -d --no-build
+docker compose -f docker-compose.minimal.yml ps
+docker stats --no-stream
+
+全停后低峰启动（每条完成后再执行下一条）
+docker compose -f docker-compose.minimal.yml up -d --no-build --wait mysql redis nacos
+docker compose -f docker-compose.minimal.yml up -d --no-build --wait user-service
+docker compose -f docker-compose.minimal.yml up -d --no-build --wait product-service
+docker compose -f docker-compose.minimal.yml up -d --no-build --wait order-service
+docker compose -f docker-compose.minimal.yml up -d --no-build --wait gateway frontend
+
+备份与回滚
+目录：/opt/OmniTradeERP/.ops-backups/minimal-20261023-162832/ （权限 700）
+包含：原 compose、所有原容器 inspect、mysql-all.sql（3,921,702 字节）、nacos-data.tar、调整中间版本。
+原配置回滚：sh /opt/OmniTradeERP/.ops-backups/minimal-20261023-162832/rollback.sh
+回滚仅恢复原配置，不覆盖数据库；会重新带回原连接/端口/资源问题，不建议常态使用。
+回滚脚本不删除新增前端容器；如确需回到原七容器形态，可在回滚后手动停止 erp-minimal-frontend。
+数据库备份未做恢复演练，不能宣称恢复验证通过。
+
+本地实施记录
+likha/ops/omnitrade_minimal_tune.py 为本次分阶段实施与核查脚本，部分阶段含本次备份路径，不能当作任意新机器的一键部署器。
