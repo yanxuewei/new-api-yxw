@@ -1638,3 +1638,6 @@ stdout 路不受影响（纳秒来自 runtime `_time_`）。属既有挂账 G8�
 **mock-upstream 迁出主仓库（2026-10-21）**：`deploy/perf/mock-upstream/` → **`~/git_code/service_ops/mock-upstream/`**（service_ops 作为多工具仓库；迁入时补独立 `go.mod`，module `mockupstream`）；编译产物 `mock-upstream` 二进制不再入库。
 镜像构建/推送统一走新增的 **`deploy/ops/push.sh`**：`push.sh <module> [tag] [--no-build]`，自动 Go 交叉编译 → 确保 ACR 仓库 → 临时口令登录 → build/push → 回显 digest（tag 默认 `日期-主仓短sha`）。实测 `bash deploy/ops/push.sh mock-upstream` 成功，产出 `newapi-dev/mock-upstream:20261021-e2dc9c5ee`（digest sha256:55d572fc…）。
 文档引用已同步（`deploy/perf/README.md`、`deploy/perf/k6/README.md`、`deploy/perf/cluster-service-dns.md`、`deploy/docs/k6详细指南-qw.md`、模块自身 README）；`deploy/ops/README.md` 记录模块契约（Dockerfile 必需、Go 自动构建、可选 build.sh）。
+
+**第三轮全场景（2026-10-21 晚，排除 admin/degrade）**：资源调整为 requests 1C/1Gi、limits 2C/2Gi（2 副本）后重测——S1 500VU→248.4rps/0%/P95 450ms；公网 600VU→288.4rps/0%/485ms；S2 1500VU→631.5rps/0%/789ms（上一轮 639.2/792，基本持平）；S3 突发→554.8rps/0%/769ms；S10 滚动发布**首跑 0.14%（28/19301）、复跑 0.00%（0/19348）**⇒ 存在抖动，仍需 preStop/maxUnavailable=0；S9 长流 12m04s 未切断。
+**采集缺陷修复**：执行体 `kubectl logs | head -12` 会把靠后的 `http_reqs` 截掉，导致报告缺行（本轮 S10 首跑因此未被解析）；已统一放宽到 20–24 行。

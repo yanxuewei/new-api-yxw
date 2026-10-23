@@ -22,6 +22,7 @@ import json
 import math
 import os
 import re
+import sys
 from datetime import datetime, timezone
 
 SLO_TTFB_P95 = 800.0     # ms
@@ -136,12 +137,24 @@ PHASE_KEYS = {
 
 
 def parse_phase_p90(text: str, metric: str) -> float | None:
-    """从 k6 摘要取某指标 p(90)（毫秒）。行形如：http_req_sending...: avg=.. min=.. med=.. p(90)=.. p(95)=.."""
-    m = re.search(re.escape(metric) + r"(?:\{[^}]*\})?\.+:\s*avg=\S+\s+(?:min=\S+\s+)?med=\S+\s+p\(90\)=(\S+)", text)
+    """从 k6 摘要取某指标 p(90)（毫秒）。
+
+    k6 输出格式因版本/指标不同，min= 字段有时省略，✓/✗ 前缀也可能存在；
+    这里宽松匹配：只要行里含该指标名且能找到 p(90)= 即可。
+    """
+    # 宽松匹配：找到含该指标的行，再从行内找 p(90)=<value>
+    line_pat = re.compile(
+        re.escape(metric) + r"(?:\{[^}]*\})?[^:\n]*:([^\n]+)"
+    )
+    m = line_pat.search(text)
     if not m:
         return None
+    segment = m.group(1)
+    pm = re.search(r"p\(90\)=(\S+)", segment)
+    if not pm:
+        return None
     try:
-        return _num(m.group(1))
+        return _num(pm.group(1))
     except ValueError:
         return None
 
@@ -198,7 +211,11 @@ def analyse(runs: list[dict], eip_mbps: float = 0.0) -> dict:
     adm = [r for r in passing if r.get("mode") == "admin"]
     a["best"] = max(sse, key=lambda r: r["rps"]) if sse else (max(passing, key=lambda r: r["rps"]) if passing else None)
     a["best_admin"] = max(adm, key=lambda r: r["rps"]) if adm else None
+    # 优先取有完整阶段数据（phase_receiving）的最优通过档用于 waterfall；
+    # 若无 phase_receiving 则退而用有任意阶段数据的，再退而用 best。
     phased = [r for r in sse if r.get("phase_receiving")]
+    if not phased:
+        phased = [r for r in sse if any(r.get(k) for k in ("phase_waiting", "phase_duration", "phase_sending"))]
     a["best_phase"] = max(phased, key=lambda r: r["rps"]) if phased else a["best"]
     a["worst"] = max(runs, key=lambda r: r["vus_i"])
     # 稳态容量档：只认内网直连（单副本/双副本），排除公网（带宽受限）、管理面、劣化、滚动、长流
@@ -297,46 +314,104 @@ def short_label(r: dict) -> str:
 
 
 def svg_line(runs: list[dict], key: str, title: str, unit: str, slo: float | None = None) -> str:
-    """按运行序号布点（保证每次运行都有一个可见点），每点带 hover 标题 + 可点击明细。"""
-    W, H, L, R, T, B = 760, 260, 64, 20, 22, 52
+    """横轴=并发数（VU），纵轴=指标值；每点标注时间戳+路径，支持 hover/点击明细。
+
+    横轴改用 VU 数值而非运行序号，使单点报告也能看出绝对位置，多点报告能看出并发-性能曲线。
+    """
+    W, H, L, R, T, B = 760, 280, 72, 20, 22, 68
     n = len(runs)
     if n == 0:
         return ""
-    xs = list(range(n))
+    vus = [r["vus_i"] for r in runs]
     ys = [float(r.get(key, 0) or 0) for r in runs]
+    x0 = 0.0
+    x1 = max(vus) * 1.1 or 1.0
     y0 = 0.0
     y1 = max(ys + ([slo] if slo else [])) * 1.15 or 1.0
 
-    def px(i: int) -> float:
-        return L if n == 1 else L + i / (n - 1) * (W - L - R)
+    def px(v: float) -> float:
+        # 单点时固定在图中央偏左，避免挤在左边框
+        if x1 <= 0:
+            return L + (W - L - R) * 0.5
+        return L + (v - x0) / max(1e-9, x1 - x0) * (W - L - R)
 
     def py(y: float) -> float:
         return H - B - (y - y0) / max(1e-9, (y1 - y0)) * (H - T - B)
 
-    pts = " ".join(f"{px(i):.1f},{py(y):.1f}" for i, y in enumerate(ys))
-    dots = "".join(
-        f'<circle class="pt" data-i="{i}" cx="{px(i):.1f}" cy="{py(y):.1f}" r="6" fill="#12b76a" '
-        f'stroke="#ffffff" stroke-width="2" style="cursor:pointer"/>'
-        for i, y in enumerate(ys))
+    # 折线只在同一模式内连线，否则只画散点（公网/内网混排连线无意义）
+    # 简化处理：按 mode 分组，同组内按 vus 排序后连线
+    from itertools import groupby
+    mode_order = ["clusterip", "clusterip-dual", "public-url", "burst", "rolling", "degrade", "long", "admin"]
+    mode_colors = {
+        "clusterip": "#0f9d58", "clusterip-dual": "#12b76a",
+        "public-url": "#f59e0b", "burst": "#6366f1",
+        "rolling": "#8b5cf6", "degrade": "#ef4444",
+        "long": "#06b6d4", "admin": "#64748b",
+    }
+    by_mode: dict[str, list[tuple[int, float, int]]] = {}
+    for idx, r in enumerate(runs):
+        m = r.get("mode", "")
+        by_mode.setdefault(m, []).append((r["vus_i"], float(r.get(key, 0) or 0), idx))
+
+    polylines = ""
+    for mode, pts_raw in by_mode.items():
+        pts_raw_s = sorted(pts_raw, key=lambda t: t[0])
+        color = mode_colors.get(mode, "#94a3b8")
+        if len(pts_raw_s) >= 2:
+            pts_str = " ".join(f"{px(v):.1f},{py(y):.1f}" for v, y, _ in pts_raw_s)
+            polylines += f'<polyline points="{pts_str}" fill="none" stroke="{color}" stroke-width="2" stroke-dasharray="none" opacity="0.7"/>'
+
+    dots = ""
+    for i, r in enumerate(runs):
+        v, y = r["vus_i"], float(r.get(key, 0) or 0)
+        mode = r.get("mode", "")
+        color = mode_colors.get(mode, "#94a3b8")
+        dots += (f'<circle class="pt" data-i="{i}" cx="{px(v):.1f}" cy="{py(y):.1f}" r="6" fill="{color}" '
+                 f'stroke="#ffffff" stroke-width="2" style="cursor:pointer"/>')
+
     slo_line = ""
     if slo:
         yy = py(slo)
         slo_line = (f'<line x1="{L}" y1="{yy:.1f}" x2="{W-R}" y2="{yy:.1f}" stroke="#e11d48" '
                     f'stroke-dasharray="6 4" stroke-width="1.4"/>'
                     f'<text x="{W-R}" y="{yy-6:.1f}" text-anchor="end" font-size="11" fill="#be123c" font-weight="600">SLO {slo:g}{unit}</text>')
+
     yticks = ""
-    for i in range(4):
-        yv = y0 + (y1 - y0) * i / 3
+    for i in range(5):
+        yv = y0 + (y1 - y0) * i / 4
         yy = py(yv)
         yticks += (f'<line x1="{L}" y1="{yy:.1f}" x2="{W-R}" y2="{yy:.1f}" stroke="#e6f4ec"/>'
                    f'<text x="{L-8}" y="{yy+4:.1f}" text-anchor="end" font-size="10.5" fill="#3f6152">{yv:.0f}</text>')
+
+    # X 轴刻度：取各 VU 值，最多显示 8 个，避免重叠
+    xtick_vals = sorted(set(vus))
+    if len(xtick_vals) > 8:
+        step = len(xtick_vals) // 8
+        xtick_vals = xtick_vals[::step]
+    xticks = ""
+    for v in xtick_vals:
+        xx = px(v)
+        xticks += (f'<line x1="{xx:.1f}" y1="{H-B}" x2="{xx:.1f}" y2="{H-B+4}" stroke="#94a3b8" stroke-width="1"/>'
+                   f'<text x="{xx:.1f}" y="{H-B+16}" text-anchor="middle" font-size="10" fill="#315244">{v}</text>')
+
+    # 每个点在点正下方标注时间+路径（旋转，避免重叠）
     xlabels = ""
     for i, r in enumerate(runs):
-        xlabels += (f'<text x="{px(i):.1f}" y="{H-30}" text-anchor="end" font-size="10" fill="#315244" '
-                    f'transform="rotate(-32 {px(i):.1f} {H-30})">{esc(short_label(r))}</text>')
-    return f'''<figure class="chart"><figcaption>{esc(title)}（横轴=运行序号，括号内为场景@并发；纵轴 {esc(unit)}）</figcaption>
+        v = r["vus_i"]
+        ts_short = (r.get("ts", "") or "")[:16].replace("T", " ")
+        tgt = r.get("target", "") or r.get("base", "") or ""
+        # 只取 hostname 部分，避免太长
+        tgt_short = re.sub(r"https?://", "", tgt).split("/")[0][:20]
+        label = f"{ts_short} {tgt_short}".strip()
+        xlabels += (f'<text x="{px(v):.1f}" y="{H-B+34}" text-anchor="end" font-size="9.5" fill="#315244" '
+                    f'transform="rotate(-38 {px(v):.1f} {H-B+34})">{esc(label)}</text>')
+
+    # X 轴标签
+    xlabel = f'<text x="{L + (W-L-R)/2:.1f}" y="{H-2}" text-anchor="middle" font-size="10.5" fill="#3f6152">并发 VU</text>'
+
+    return f'''<figure class="chart"><figcaption>{esc(title)}（横轴=并发 VU；纵轴 {esc(unit)}；颜色区分路径类型）</figcaption>
 <svg viewBox="0 0 {W} {H}" role="img" aria-label="{esc(title)}">
-{yticks}{slo_line}<polyline points="{pts}" fill="none" stroke="#0f9d58" stroke-width="2.4"/>{dots}{xlabels}
+{yticks}{xticks}{slo_line}{polylines}{dots}{xlabels}{xlabel}
 </svg></figure>'''
 
 
@@ -345,6 +420,10 @@ def svg_waterfall(best: dict | None) -> str:
 
     口径优先级：k6 客户端阶段指标（实测 p90）> 已知 mock 参数 > 差值；
     网关+链路（含 DNS/NAT/ALB/Ingress）与"客户端接收余量"用差值推导，并在表格里标注来源。
+
+    「网关+链路」= waiting_p90 − mock首字300ms，它包含了 NAT/ALB/Ingress/鉴权/限流/连接池等
+    所有非 mock 延迟。公网路径（https://perf.likha.hk）比内网 ClusterIP 多经过 NAT+EIP+ALB，
+    通常多出 30~150ms，因此不同报告该值差异大属于正常——取决于所用路径，不代表网关自身性能差异。
     """
     if not best:
         return ""
@@ -360,6 +439,16 @@ def svg_waterfall(best: dict | None) -> str:
     recv_tail = max(0.0, recv - stream)
     used = send + conn + tls + gw + mock_first + stream + recv_tail
     tail = max(0.0, total - used)
+
+    # 标注路径类型，帮助理解跨报告耗时差异
+    mode = best.get("mode", "")
+    tgt = best.get("target", "") or best.get("base", "") or ""
+    path_note = ""
+    if "public" in mode or "http" in tgt:
+        path_note = "公网路径（k6→NAT→EIP→ALB→Ingress→Pod）"
+    elif "clusterip" in mode or (tgt and not tgt.startswith("http")):
+        path_note = "内网直连路径（k6 Pod→kube-proxy→Pod）"
+
     segs = [
         ("k6 发送", send, "#0b7a45", "实测 http_req_sending p90"),
         ("DNS/TCP 连接", conn, "#116b3a", "实测 http_req_connecting p90（复用连接时为 0）"),
@@ -390,25 +479,29 @@ def svg_waterfall(best: dict | None) -> str:
     rows = "".join(
         f'<tr><td>{esc(name)}</td><td>{v:.1f} ms</td><td>{v/sumv*100:.1f}%</td><td class="src">{esc(src)}</td></tr>'
         for name, v, _, src in segs)
+    path_info = f'<div class="note" style="margin-top:6px">本次链路路径：<b>{esc(path_note or tgt or mode)}</b>（{esc(tgt)}）· VU={best.get("vus_i","")} · {esc(best.get("ts","")[:16])}</div>' if (path_note or tgt) else ""
     return f'''<figure class="chart"><figcaption>一次请求的模块耗时（{esc(short_label(best))}，按 k6 客户端阶段实测 p90 分解，合计 {sumv:.0f} ms）</figcaption>
 <svg viewBox="0 0 {W} {H}" role="img" aria-label="请求链路模块耗时">
 <text x="{L}" y="20" font-size="10.5" fill="#3f6152">0 ms</text>
 <text x="{W-R}" y="20" text-anchor="end" font-size="10.5" fill="#3f6152">{sumv:.0f} ms</text>
 {rects}
 </svg></figure>
+{path_info}
 <table class="mini" style="margin-top:10px"><thead><tr><th>模块</th><th>耗时</th><th>占比</th><th>数据来源</th></tr></thead><tbody>{rows}</tbody></table>
-<div class="note" style="margin-top:8px">说明：<b>NAT / ALB / Ingress / 鉴权 / 渠道选择 / 连接池</b> 目前没有逐跳埋点，全部落在「网关+链路」这一段（等待首字节减去 mock 首字）；
-若需把它们再拆开，需要给入口接 SLS 访问日志或 OpenTelemetry trace（本次未做，不做假数据填充）。</div>'''
+<div class="note" style="margin-top:8px">说明：<b>NAT / ALB / Ingress / 鉴权 / 渠道选择 / 连接池</b> 目前没有逐跳埋点，全部落在「网关+链路」这一段（等待首字节减去 mock 首字）。
+<b>不同报告该值差异大的原因</b>：公网路径（https://...）比内网 ClusterIP 多经过 NAT+EIP+ALB，通常多出 30~150ms，属于路径差异而非网关性能差异。
+若需把各跳再拆开，需要给入口接 SLS 访问日志或 OpenTelemetry trace（本次未做，不做假数据填充）。</div>'''
 
 
 def render(runs: list[dict], a: dict, out_path: str, eip_mbps: float = 0.0) -> None:
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     rows = ""
     for r in runs:
+        tgt_url = r.get("target", "") or r.get("base", "") or ""
         rows += f'''<tr>
 <td>{r["job"]}<div class="sub">{esc(r.get("ts", ""))}</div></td>
 <td>{r["vus_i"]}<div class="sub">{r["replicas_i"]} 副本</div></td>
-<td>{esc(r.get("mode", ""))}<div class="sub">{esc(r.get("target", ""))}</div></td>
+<td>{esc(r.get("mode", ""))}<div class="sub"><a href="{esc(tgt_url)}" target="_blank" style="color:#0b7a45;word-break:break-all">{esc(tgt_url)}</a></div></td>
 <td>{fmt(r["rps"], 1)}</td>
 <td>{fmt(r.get("ttfb_med", 0), 0)}</td>
 <td><b>{fmt(r.get("ttfb_p95", 0), 0)}</b></td>
@@ -436,12 +529,14 @@ def render(runs: list[dict], a: dict, out_path: str, eip_mbps: float = 0.0) -> N
     detail = ""
     if runs:
         heads = "".join("<th>VU=%d</th>" % r["vus_i"] for r in runs)
+        r_rep = "".join("<td>%d</td>" % r["replicas_i"] for r in runs)
         r_rps = "".join("<td>%s</td>" % fmt(r["rps"], 1) for r in runs)
         r_p95 = "".join("<td>%s</td>" % fmt(r.get("ttfb_p95"), 0) for r in runs)
         r_err = "".join("<td>%s%%</td>" % fmt(r.get("err_pct"), 3) for r in runs)
         r_cpu = "".join("<td>%s</td>" % fmt(r["cpu_cores"], 2) for r in runs)
         r_cpr = "".join("<td>%s</td>" % (fmt(r["cpu_per_rps"] * 1000, 2) if r.get("cpu_per_rps") else "—") for r in runs)
         detail = ('<table class="mini"><thead><tr><th>指标</th>' + heads + '</tr></thead><tbody>'
+                  '<tr><td>副本数</td>' + r_rep + '</tr>'
                   '<tr><td>RPS</td>' + r_rps + '</tr>'
                   '<tr><td>P95 首字 (ms)</td>' + r_p95 + '</tr>'
                   '<tr><td>错误率</td>' + r_err + '</tr>'
@@ -689,10 +784,25 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--log-dir", action="append", help="可重复；多个目录一起聚合")
     ap.add_argument("--logs", nargs="*")
-    ap.add_argument("--out", required=True)
+    ap.add_argument("--out", help="HTML 输出路径（--check 时可省略）")
     ap.add_argument("--eip-mbps", type=float, default=0.0, help="公网路径的 EIP 标称带宽（Mbps），用于带宽利用率判定")
+    ap.add_argument("--check", metavar="LOG",
+                    help="仅判定该日志是否满足 SLO：pass 退出 0，fail 退出 1（供阶梯压测自动找瓶颈）")
     args = ap.parse_args()
 
+    if args.check:
+        runs = load_runs([args.check], args.eip_mbps)
+        if not runs:
+            print(f"[check] FAIL 无法解析日志：{args.check}")
+            sys.exit(1)
+        r = runs[0]
+        verdict = "PASS" if r["pass"] else "FAIL"
+        print(f'[check] {verdict} vu={r["vus_i"]} replicas={r["replicas_i"]} '
+              f'rps={fmt(r["rps"], 1)} p95={fmt(r.get("ttfb_p95"), 0)}ms err={fmt(r.get("err_pct"), 3)}%')
+        sys.exit(0 if r["pass"] else 1)
+
+    if not args.out:
+        ap.error("--out 必填（除非使用 --check）")
     paths = []
     if args.logs:
         paths = list(args.logs)

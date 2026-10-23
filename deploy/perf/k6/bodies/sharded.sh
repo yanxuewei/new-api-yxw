@@ -103,5 +103,5 @@ rm -f /tmp/c_shard /tmp/m_shard
 # 拼接各分片摘要（report.py 会聚合：RPS/请求数求和，P95 取最差）
 for i in $(seq 0 $((SHARDS - 1))); do
   echo "----- shard-$i"
-  kubectl -n $NS logs job/k6-shard-$i 2>&1 | grep -E "http_reqs|http_req_failed|http_req_waiting|http_req_duration|http_req_connecting|http_req_tls_handshaking|http_req_sending|http_req_receiving|\{ type:sse \}|checks|vus_max|✗" | head -10
+  kubectl -n $NS logs job/k6-shard-$i 2>&1 | grep -E "http_reqs|http_req_failed|http_req_waiting|http_req_duration|http_req_connecting|http_req_tls_handshaking|http_req_sending|http_req_receiving|\{ type:sse \}|checks|vus_max|✗" | head -20
 done

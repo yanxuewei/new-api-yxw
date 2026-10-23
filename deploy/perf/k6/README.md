@@ -9,16 +9,27 @@
 |---|---|---|
 | `sse.js` | 集群内 k6 | SSE 打流；`VUS`/`DUR`/`BASE`/`MODEL`/`TOKEN` 全走 env；首字用 `http_req_waiting`(TTFB) 代理 |
 | `run.sh` | 本机 | 入口：打包 `sse.js` + 动作体，投递到节点执行 |
-| `bodies/stage.sh` | 节点 | 单副本阶梯（恒定 VU × DUR），采 CPU 峰值并打印摘要 |
+| `bodies/stage.sh` | 节点 | 单档压测（恒定 VU × DUR），采 CPU 峰值并打印摘要；`REQ_REPLICAS` 可先 scale 再压 |
 | `bodies/dual1500.sh` | 节点 | 双副本并行（master/slave 各 `VUS_EACH`，默认 750+750=1500） |
+| `bodies/scale.sh` | 节点 | 只调副本数并等就绪（压测后恢复现场） |
 | `bodies/summary.sh` | 节点 | 打印 k6 Job 摘要（不传参=最近 3 个） |
 | `bodies/readback.sh` | 节点 | 只读回读：副本/CPU/mock 指标/Service 端点/DNS 自检 |
 
 ## 用法
 
 ```bash
-# 单副本阶梯（100/300/600/900/1200 依次跑，找拐点）
+# 单档定点
 bash deploy/perf/k6/run.sh stage perf-new-api-slave 300 120s
+
+# 阶梯递增找瓶颈（自动破线即停）
+bash deploy/perf/k6/run.sh ramp perf-new-api-slave            # 300→3000，步长300，每档90s
+
+# 副本阶梯：先 1 副本压到瓶颈，再扩到 2 副本用同一套参数重压
+bash deploy/perf/k6/run.sh ladder perf-new-api-slave          # 默认 1,2 副本
+bash deploy/perf/k6/run.sh ladder perf-new-api-slave 600 600 6000 90s 1,2,3
+
+# 压完恢复现场
+bash deploy/perf/k6/run.sh scale 2
 
 # 1500 并发验收（双副本并行）
 bash deploy/perf/k6/run.sh dual1500            # 默认 750+750 × 120s
@@ -58,10 +69,10 @@ bash deploy/perf/k6/run.sh readback
 ```bash
 # 手动重生成（例如补了历史日志、或改了 EIP 带宽口径）
 python3 deploy/perf/k6/report.py --log-dir deploy/perf/perf_reports \
-  --out deploy/perf/perf_reports/index.html --eip-mbps 5
+  --out deploy/perf/perf_reports/index.html --eip-mbps 100
 ```
 
-**带宽判定**：公网路径（k6→NAT→EIP→ALB）先撞 EIP 带宽时，表现为「RPS 塌陷 + 连接级失败 + 应用侧无 5xx + CPU 很低」。`run.sh` 用 `EIP_MBPS`（默认 5，雅加达 dev 现网实测 5 Mbps）把这条写进报告；此时**首个破线档不参与拐点插值**，卡片明确标注“拐点不可用，改用内网直连档位”。
+**带宽判定**：公网路径（k6→NAT→EIP→ALB）先撞 EIP 带宽时，表现为「RPS 塌陷 + 连接级失败 + 应用侧无 5xx + CPU 很低」。`run.sh` 用 `EIP_MBPS`（默认 100，雅加达 dev 现网实测 100 Mbps）把这条写进报告；此时**首个破线档不参与拐点插值**，卡片明确标注"拐点不可用，改用内网直连档位"。
 
 **已知边界**：2026-10-20 17:22 之前的 3 条日志因抓取过滤漏了 `http_req_duration`，明细表「P95 端到端」显示 0；新日志已含该行。
 
@@ -82,9 +93,23 @@ python3 deploy/perf/k6/report.py --log-dir deploy/perf/perf_reports \
 1. **浮层可读性**：全局 `table{background:#fff}` 会盖掉 `.tip-t` 的深底，导致白底浅字；已加 `.tip table{background:transparent!important}` 与 `td{color:#f4fff9!important}`，标签列改亮绿加粗。
 2. **链路耗时改为模块级**：用 k6 客户端阶段指标（`http_req_sending / connecting / tls_handshaking / waiting / receiving`）按 **p90** 实测分解；
    模块表：k6 发送 · DNS/TCP 连接 · TLS 握手 · **网关+链路（NAT/ALB/Ingress/鉴权/限流/选渠道）** · mock 首字(300ms) · mock 流式吐字(1500ms) · 客户端接收余量。
-   NAT/ALB/Ingress 目前无逐跳埋点，合并为“网关+链路”= waiting_p90 − 300ms；要再拆需接 SLS 访问日志或 trace（未做，不填假数据）。
-3. **标签遮挡**：去掉条形图内的长标签，改为图下表格（模块/耗时/占比/数据来源），彻底避免“上游首字”和“网关+链路”文字重叠。
+   NAT/ALB/Ingress 目前无逐跳埋点，合并为"网关+链路"= waiting_p90 − 300ms；要再拆需接 SLS 访问日志或 trace（未做，不填假数据）。
+3. **标签遮挡**：去掉条形图内的长标签，改为图下表格（模块/耗时/占比/数据来源），彻底避免"上游首字"和"网关+链路"文字重叠。
 4. 每个 body 的日志过滤已包含四个阶段指标；`report.py` 取**有阶段数据的最优档**画链路图（`best_phase`）。
+
+## 副本阶梯（`ladder`，2026-10-22）
+
+**为什么要分副本跑**：副本数不一致的档位不可比。历史数据里 VU=300 是 2 副本（156.4 RPS）、VU=600 是 1 副本（52.2 RPS、错误率 14.368%），混在一张表里会得出错误的拐点。报告的「副本数」行就是用来识别这件事。
+
+`ladder` 的流程：
+
+1. `scale deploy/perf-new-api-slave --replicas=1` → `rollout status` 等就绪；
+2. 在该副本数下从 `start` 逐档加压，**每档用 `report.py --check` 判定 SLO**（P95 TTFB ≤800ms 且错误率 ≤0.05%）；
+3. 首次破线即停（破线档仍入报告，作为拐点上限）；若跑到 `max` 仍未破线，提示加大 `max`；
+4. 等 30s 排空连接，扩到下一副本数，用**完全相同的 VU 梯子**重跑；
+5. 全部阶段聚合为一份报告，同一 VU 档横向对比即扩容收益。
+
+判定用 `report.py --check <log>` 而非 k6 退出码：`stage.sh` 末尾是 `kubectl logs | grep | head`，rc 不可靠。
 
 ## 多 Job 分片并行（`shard`，2026-10-21）
 
@@ -96,6 +121,6 @@ EIP_MBPS=100 bash deploy/perf/k6/run.sh shard 1500 120s 4    # 4 片 × 375 VU�
 
 - 执行体 `bodies/sharded.sh`：按 `SHARDS` 均分 VU（余数给前几片），每片一个 Job（`k6-shard-N`），全部打同一个 `ClusterIP`；
 - `sse.js` 支持 `SHARD` env → `tags:{type:'sse',shard:N}`，可按分片切片指标；
-- 日志聚合：N 个摘要写进同一份日志，`report.py` 按“RPS 求和、错误率合并、P95 取最差分片”处理；
+- 日志聚合：N 个摘要写进同一份日志，`report.py` 按"RPS 求和、错误率合并、P95 取最差分片"处理；
 - 实测样例（3×80 VU）：分片 42.1/42.8/42.9 RPS → 聚合 **127.9 RPS**、P95 345.9ms；
 - 注意：客户端总资源 = 分片数 × 单 Job limits；重跑前先删同名 Job；配额/限流是共池的。

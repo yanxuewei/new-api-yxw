@@ -88,4 +88,4 @@ echo "ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo "images="
 echo "===END_META==="
 rm -f /tmp/cpu_1500.txt /tmp/mem_1500.txt
-kubectl -n $NS logs job/$JOB 2>&1 | grep -E "http_reqs|http_req_failed|http_req_waiting|http_req_duration|http_req_connecting|http_req_tls_handshaking|http_req_sending|http_req_receiving|\{ type:sse \}|checks|vus_max|✗" | head -10
+kubectl -n $NS logs job/$JOB 2>&1 | grep -E "http_reqs|http_req_failed|http_req_waiting|http_req_duration|http_req_connecting|http_req_tls_handshaking|http_req_sending|http_req_receiving|\{ type:sse \}|checks|vus_max|✗" | head -20

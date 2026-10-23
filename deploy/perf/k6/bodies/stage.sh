@@ -15,6 +15,19 @@ case "$TARGET_SVC" in
 esac
 echo "=== target=$TARGET_SVC ($MODE, BASE=$BASE)  vus=$VUS dur=$DUR"
 
+# 可选：REQ_REPLICAS 指定本次压测的副本数。起 Job 前先 scale 到该值并等就绪，
+# 保证同一阶梯内副本口径固定（HPA/人工改动不会混进同一档）。
+if [ -n "${REQ_REPLICAS:-}" ] && [ "$MODE" = "clusterip" ]; then
+  echo "=== 目标副本数=$REQ_REPLICAS，先 scale deploy/$TARGET_SVC"
+  kubectl -n $NS scale deploy "$TARGET_SVC" --replicas="$REQ_REPLICAS" 2>&1 | sed 's/^/  /'
+  kubectl -n $NS rollout status deploy/"$TARGET_SVC" --timeout=240s 2>&1 | sed 's/^/  /'
+  READY=$(kubectl -n $NS get deploy "$TARGET_SVC" -o jsonpath='{.status.readyReplicas}' 2>/dev/null)
+  echo "  ready=${READY:-0}/$REQ_REPLICAS"
+  [ "${READY:-0}" -ge "$REQ_REPLICAS" ] || { echo "  [XX] 副本未就绪，终止本档"; exit 2; }
+  [ "$REQ_REPLICAS" -gt 1 ] && MODE="clusterip-dual"
+fi
+echo "=== 生效：mode=$MODE replicas=${REQ_REPLICAS:-auto}"
+
 echo "$K6JS_GZ" | base64 -d | gzip -d > /tmp/sse.js
 kubectl -n $NS create configmap $CM --from-file=sse.js=/tmp/sse.js --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 rm -f /tmp/sse.js
@@ -76,6 +89,8 @@ MEMM=$(sort -n /tmp/mem_${VUS}.txt 2>/dev/null | tail -1)
 REPL=$(kubectl -n $NS get deploy "$TARGET_SVC" -o jsonpath='{.status.readyReplicas}' 2>/dev/null)
 [ -n "$REPL" ] && [ "$REPL" != "0" ] || REPL=$(kubectl -n $NS get deploy perf-new-api-slave -o jsonpath='{.status.readyReplicas}' 2>/dev/null)
 [ -n "$REPL" ] || REPL=$(echo $LABELS | wc -w)
+# 实际副本数 >1 时口径必须是 clusterip-dual，否则报告会把多副本档混进单副本容量曲线
+case "$REPL" in ''|*[!0-9]*) : ;; *) [ "$REPL" -gt 1 ] && [ "$MODE" = "clusterip" ] && MODE="clusterip-dual" ;; esac
 IMG=$(kubectl -n $NS get deploy -o jsonpath='{range .items[*]}{.metadata.name}={.spec.template.spec.containers[0].image}{","}{end}' 2>/dev/null | tr ',' '\n' | grep -E "perf-new-api" | head -2 | tr '\n' ';')
 echo "--- job_succeeded=${S:-?} cpu_peak=${CPUM:-?}m mem_peak=${MEMM:-?}Mi"
 echo "===RUN_META==="
@@ -91,5 +106,5 @@ echo "job=$JOB"
 echo "ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo "images=$IMG"
 echo "===END_META==="
-kubectl -n $NS logs job/$JOB 2>&1 | grep -E "http_reqs|http_req_failed|http_req_waiting|\{ type:sse \}|checks|iterations\.\.\.|data_received|vus_max|http_req_duration|http_req_connecting|http_req_tls_handshaking|http_req_sending|http_req_receiving|✗" | head -12
+kubectl -n $NS logs job/$JOB 2>&1 | grep -E "http_reqs|http_req_failed|http_req_waiting|\{ type:sse \}|checks|iterations\.\.\.|data_received|vus_max|http_req_duration|http_req_connecting|http_req_tls_handshaking|http_req_sending|http_req_receiving|✗" | head -24
 rm -f /tmp/cpu_${VUS}.txt /tmp/mem_${VUS}.txt
