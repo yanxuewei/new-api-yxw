@@ -16,8 +16,9 @@ try: print(run(cmd))
 except subprocess.CalledProcessError as e: print(e.stdout);raise
 with zipfile.ZipFile(io.BytesIO(jar)) as source,zipfile.ZipFile(str(BUILD/'warehouse-service.jar'),'w',compression=zipfile.ZIP_STORED) as out:
  for item in source.infolist():
-  if not item.filename.startswith('BOOT-INF/classes/com/crossborder/erp/warehouse/repair/'):out.writestr(item,source.read(item.filename))
- for path in classes.rglob('*.class'):out.write(str(path),'BOOT-INF/classes/'+str(path.relative_to(classes)))
+  if not item.filename.startswith('BOOT-INF/classes/com/crossborder/erp/warehouse/repair/') and item.filename!='BOOT-INF/classes/PasswordHash.class':out.writestr(item,source.read(item.filename))
+ for path in classes.rglob('*.class'):
+  if path.name!='PasswordHash.class':out.write(str(path),'BOOT-INF/classes/'+str(path.relative_to(classes)))
 base='omnitrade-local/warehouse-service:repair-base';print(run(['docker','tag',info['Image'],base]));stamp=datetime.datetime.now().strftime('%Y%m%d-%H%M%S');tag='omnitrade-local/warehouse-service:modules-'+stamp
 (BUILD/'Dockerfile').write_text('FROM '+base+'\nCOPY warehouse-service.jar /app/warehouse-service.jar\n')
 try: print(run(['docker','build','--network=none','--pull=false','-t',tag,str(BUILD)]))

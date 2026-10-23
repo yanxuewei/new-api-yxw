@@ -12,10 +12,10 @@ import java.util.zip.ZipOutputStream;
 import static com.crossborder.erp.warehouse.repair.RepairSupport.*;
 
 @RestController
-@RequestMapping("/api")
 public class InventoryRepairController {
     private final RepairSupport s;
-    public InventoryRepairController(RepairSupport s) { this.s = s; }
+    private final InventoryAlertRepairController alerts;
+    public InventoryRepairController(RepairSupport s, InventoryAlertRepairController alerts) { this.s = s; this.alerts = alerts; }
     private static final String INVENTORY = """
         SELECT i.id,i.sku_code skuCode,COALESCE(p.product_name,sk.sku_name,i.sku_code) productName,
         i.warehouse_id warehouseId,w.warehouse_name warehouseName,il.location_id locationId,l.location_code locationCode,
@@ -111,6 +111,7 @@ public class InventoryRepairController {
             long amount=qty(b.get("quantity")),old=qty(i.get("available_qty"));
             long value=switch(str(b.get("type"))) { case "increase" -> old+amount; case "decrease" -> old-amount; case "set" -> amount; default -> throw bad("未知调整类型"); };
             change(i,value,"REPAIR-ADJ-"+s.id(),text(b.get("reason"),100)+" "+text(b.get("remark"),390));
+            alerts.checkInventory(number(i.get("id")));
             return detail(number(i.get("id")));
         });
     }
@@ -140,6 +141,8 @@ public class InventoryRepairController {
             String order="REPAIR-TR-"+s.id(),remark=text(b.get("remark"),450);
             change(from,number(from.get("available_qty"))-amount,order,"调拨出库 "+remark);
             change(to,number(to.get("available_qty"))+amount,order,"调拨入库 "+remark);
+            alerts.checkInventory(number(from.get("id")));
+            alerts.checkInventory(number(to.get("id")));
             return map("orderNo",order,"fromInventoryId",from.get("id"),"toInventoryId",to.get("id"),"quantity",amount);
         });
     }
@@ -157,6 +160,7 @@ public class InventoryRepairController {
                 long value=b.containsKey("availableQty")?qty(b.get("availableQty")):qty(b.get("totalQty"))-qty(i.get("locked_qty"));
                 change(i,value,order,"导入库存 "+text(b.get("remark"),450));
                 if(b.containsKey("safetyStock")) s.db.update("UPDATE erp_inventory.t_inventory SET safety_stock=? WHERE id=?",qty(b.get("safetyStock")),i.get("id"));
+                alerts.checkInventory(number(i.get("id")));
             }
             return map("imported",records.size(),"orderNo",order);
         });

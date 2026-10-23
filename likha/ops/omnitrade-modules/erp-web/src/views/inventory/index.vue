@@ -58,7 +58,7 @@
       </el-col>
       <el-col :span="12">
         <el-card>
-          <template #header><span>各仓库库存占比</span></template>
+          <template #header><span>当前页各仓库库存数量</span></template>
           <div ref="warehouseChartRef" class="chart-container"></div>
         </el-card>
       </el-col>
@@ -383,8 +383,11 @@ const loadInventory = async () => {
     inventoryList.value = pageData.records || []
     pagination.total = pageData.total || 0
   } catch (error) {
+    inventoryList.value = []
+    pagination.total = 0
     console.error('加载库存列表失败:', error)
   } finally {
+    updateWarehouseChart()
     loading.value = false
   }
 }
@@ -401,8 +404,10 @@ const updateStatusChart = () => {
   
   statusChart.setOption({
     tooltip: { trigger: 'item' },
+    title: { text: stats.value.totalSku ? '' : '无数据', left: 'center', top: 'center' },
     series: [{
       type: 'pie',
+      stillShowZeroSum: false,
       radius: ['40%', '70%'],
       data: [
         { value: stats.value.normalStock, name: '正常', itemStyle: { color: '#67c23a' } },
@@ -425,6 +430,7 @@ const updateWarehouseChart = () => {
   })
   
   warehouseChart.setOption({
+    title: { text: inventoryList.value.length ? '' : '无数据', left: 'center', top: 'center' },
     tooltip: { trigger: 'axis' },
     xAxis: { type: 'category', data: Object.keys(warehouseData) },
     yAxis: { type: 'value' },
@@ -568,16 +574,15 @@ const handleDetail = async (row: Inventory) => {
 }
 
 // 工具函数
-const getStockStatus = (row: any) => {
-  if (row.availableQty < row.safetyStock) return 'danger'
-  if (row.availableQty < row.safetyStock * 2) return 'warning'
+const getStockStatus = (row: Inventory) => {
+  if (row.availableQty <= 0) return 'danger'
+  if (row.availableQty < row.safetyStock) return 'warning'
   return 'success'
 }
 
-const getStockStatusText = (row: any) => {
-  if (row.availableQty < row.safetyStock) return '缺货'
-  if (row.availableQty < row.safetyStock * 2) return '不足'
-  if (row.availableQty < row.safetyStock * 3) return '预警'
+const getStockStatusText = (row: Inventory) => {
+  if (row.availableQty <= 0) return '缺货'
+  if (row.availableQty < row.safetyStock) return '预警'
   return '正常'
 }
 

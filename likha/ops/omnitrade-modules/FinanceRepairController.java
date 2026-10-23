@@ -98,7 +98,8 @@ public class FinanceRepairController {
     @DeleteMapping("/account/{id}")
     public void deleteAccount(@PathVariable long id) {
         s.atomic(()->{
-            s.one("SELECT id FROM erp_finance.t_finance_account WHERE id=? FOR UPDATE",id);
+            Map<String,Object> locked=s.one("SELECT id,balance FROM erp_finance.t_finance_account WHERE id=? FOR UPDATE",id);
+            if(new BigDecimal(str(locked.get("balance"))).signum()!=0) throw bad("账户余额不为零，不能删除，请停用账户");
             if(s.count("SELECT COUNT(*) FROM erp_finance.t_finance_flow_meta WHERE account_id=?",id)>0) throw bad("存在流水的账户不能删除，请停用账户");
             s.changed(s.db.update("DELETE FROM erp_finance.t_finance_account WHERE id=?",id)); return null;
         });

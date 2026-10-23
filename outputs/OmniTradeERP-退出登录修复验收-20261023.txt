@@ -1,0 +1,47 @@
+OmniTradeERP 退出登录修复验收
+日期：2026-10-23
+服务器：8.212.176.207 /opt/OmniTradeERP
+
+一、根因
+线上前端右上角“退出登录”原来只有 el-dropdown-item 文本，没有 command 事件，也没有注销函数，因此点击不会发请求、不会清理登录状态、不会跳转登录页。
+
+二、已实施
+1. 文件：likha/ops/omnitrade-modules/erp-web/src/layout/index.vue
+2. el-dropdown 绑定 @command="handleUserCommand"。
+3. 退出项绑定 command="logout"，请求期间禁用并显示“正在退出…”。
+4. 调用 POST /api/auth/logout，携带 Authorization: Bearer <token>，超时10秒。
+5. 仅将响应业务 code=200 视为服务端注销已确认。
+6. 无论请求成功、业务失败或网络异常，finally 清理 localStorage/sessionStorage 中 token、userInfo、refreshToken，并跳转 /login。
+7. 失败时提示“已退出本机登录，但服务器端注销未确认”，不虚报服务端已注销。
+8. 重复点击和非 logout command 均被阻止。
+
+三、自动化结果
+| 验收项 | 结果 |
+|---|---|
+| 成功注销分支 | PASS |
+| 业务失败分支仍清理本地状态 | PASS |
+| 网络异常分支仍清理本地状态 | PASS |
+| 无 token 分支不发无效请求 | PASS |
+| 重复点击防护 | PASS |
+| 非 logout command 不触发注销 | PASS |
+| Vite 生产构建 | PASS，2301 modules，约5.97秒 |
+
+四、生产发布
+- 新镜像：omnitrade-local/frontend:modules-20261023-184249
+- 线上容器：erp-minimal-frontend
+- 健康状态：healthy
+- 重启次数：0
+- OOMKilled：false
+- HTTPS 首页：HTTP 200
+- 已发布 JS 与本地构建产物内容校验：PASS
+- 前端源码 SHA256（本地/线上）：52b8fb73c693d825aeb8a8f8246e437e43aa95f830994cff9b06319b345ce030
+- 发布前备份：/opt/OmniTradeERP/.ops-backups/frontend-modules-20261023-184249/
+- 旧镜像保留：omnitrade-local/frontend:modules-20261023-181047
+
+五、未完成边界
+使用服务器保存的 erpadmin.credentials 尝试真实 HTTPS 登录时，/api/auth/login 返回 HTTP 500，user-service 日志明确为“密码错误”。未重置密码，也未修改账号或业务数据。因此“登录→点击退出→旧 token 访问受保护接口返回401”的端到端回归尚未完成；需要有效的当前管理员登录凭据后再执行。浏览器逐页点击验收同样尚未完成。
+
+六、回滚
+恢复备份中的 docker-compose.minimal.yml 后执行：
+cd /opt/OmniTradeERP && docker compose -f docker-compose.minimal.yml up -d --no-build frontend
+备份目录保留旧Compose和前端src归档；旧前端镜像仍在本机。

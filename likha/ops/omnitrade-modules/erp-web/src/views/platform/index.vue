@@ -51,9 +51,9 @@
             <el-option label="Shopee" value="shopee" />
             <el-option label="Lazada" value="lazada" />
             <el-option label="TikTok Shop" value="tiktok" />
-            <el-option label="Temu" value="temu" />
-            <el-option label="速卖通" value="aliexpress" />
-            <el-option label="Wish" value="wish" />
+            <el-option label="Temu（暂未支持）" value="temu" disabled />
+            <el-option label="速卖通（暂未支持）" value="aliexpress" disabled />
+            <el-option label="Wish（暂未支持）" value="wish" disabled />
           </el-select>
         </el-form-item>
         <el-form-item label="店铺ID" prop="shopId">

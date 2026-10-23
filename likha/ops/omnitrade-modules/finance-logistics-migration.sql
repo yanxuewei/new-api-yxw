@@ -57,8 +57,18 @@ CREATE TABLE IF NOT EXISTS erp_logistics.t_logistics_channel (
  features JSON NOT NULL,
  avg_delivery_days INT NOT NULL,
  tracking_support TINYINT NOT NULL DEFAULT 1,
+ status TINYINT NOT NULL DEFAULT 1,
  create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
+-- 兼容已执行早期版本迁移的数据库，只增补渠道状态列。
+SET @channel_status_ddl = IF(
+ (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='erp_logistics' AND table_name='t_logistics_channel' AND column_name='status')=0,
+ 'ALTER TABLE erp_logistics.t_logistics_channel ADD COLUMN status TINYINT NOT NULL DEFAULT 1',
+ 'SELECT 1'
+);
+PREPARE channel_status_stmt FROM @channel_status_ddl;
+EXECUTE channel_status_stmt;
+DEALLOCATE PREPARE channel_status_stmt;
 CREATE TABLE IF NOT EXISTS erp_logistics.t_logistics_rate (
  id BIGINT NOT NULL PRIMARY KEY,
  channel_code VARCHAR(60) NOT NULL,

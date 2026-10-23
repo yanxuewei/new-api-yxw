@@ -72,14 +72,15 @@
       </div>
     </el-card>
 
+    <el-empty v-if="calculated && !rateResults.length && !calculating" description="无数据" />
     <!-- 计算结果 -->
     <el-card v-if="rateResults.length > 0" class="result-card" shadow="never">
       <template #header>
-        <span>运费计算结果</span>
+        <span>运费计算结果（配置费率估算，非承运商实时报价）</span>
       </template>
       
       <el-radio-group v-model="sortBy" style="margin-bottom: 15px">
-        <el-radio label="price">按价格</el-radio>
+        <el-radio label="price">按币种及价格</el-radio>
         <el-radio label="days">按时效</el-radio>
       </el-radio-group>
       
@@ -335,6 +336,7 @@ import { DataAnalysis, Refresh, Plus } from '@element-plus/icons-vue'
 import { logisticsApi, type LogisticsChannel, type LogisticsRate, type ShippingRateQuery, type ShippingRateResult } from '@/api/inventory-alert'
 
 const calculating = ref(false)
+const calculated = ref(false)
 const sortBy = ref('price')
 
 // 运费计算器
@@ -378,7 +380,7 @@ const rateForm = reactive({
 const sortedResults = computed(() => {
   const results = [...rateResults.value]
   if (sortBy.value === 'price') {
-    return results.sort((a, b) => a.totalPrice - b.totalPrice)
+    return results.sort((a, b) => a.currency.localeCompare(b.currency) || a.totalPrice - b.totalPrice)
   } else {
     return results.sort((a, b) => a.estimatedDays - b.estimatedDays)
   }
@@ -392,6 +394,7 @@ const calculateRates = async () => {
   }
   
   calculating.value = true
+  calculated.value = true
   try {
     const res = await logisticsApi.calculateRate(calculator)
     rateResults.value = res
@@ -409,11 +412,12 @@ const resetCalculator = () => {
   calculator.fromPostalCode = ''
   calculator.toPostalCode = ''
   rateResults.value = []
+  calculated.value = false
 }
 
 // 选择渠道
 const selectChannel = (rate: ShippingRateResult) => {
-  ElMessage.success(`已选择 ${rate.channelName}，运费 $${rate.totalPrice.toFixed(2)}`)
+  ElMessage.info(`当前报价：${rate.channelName}，运费 ${rate.currency} ${rate.totalPrice.toFixed(2)}，尚未创建运单`)
 }
 
 // 加载渠道
@@ -472,7 +476,7 @@ const handleAddChannel = async () => {
 
 const toggleChannelStatus = async (channel: LogisticsChannel) => {
   try {
-    await logisticsApi.updateChannelStatus(channel.id, channel.status)
+    await logisticsApi.updateChannelStatus(channel.code, channel.status)
   } catch (error) {
     channel.status = channel.status === 1 ? 0 : 1
   }

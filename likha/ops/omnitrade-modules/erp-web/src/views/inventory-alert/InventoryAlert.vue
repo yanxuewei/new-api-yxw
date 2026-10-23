@@ -142,7 +142,7 @@
         </el-card>
 
         <el-card class="table-card" shadow="never">
-          <el-table v-loading="alertLoading" :data="alertList" stripe>
+          <el-table v-loading="alertLoading" :data="alertList" stripe @selection-change="selectedAlerts = $event">
             <el-table-column type="selection" width="55" />
             <el-table-column prop="sku" label="SKU" width="140" />
             <el-table-column prop="productName" label="产品名称" min-width="200" show-overflow-tooltip />
@@ -264,8 +264,8 @@
             </el-form-item>
             <el-form-item label="默认通知方式">
               <el-checkbox-group v-model="systemSettings.defaultNotifyTypes">
-                <el-checkbox label="EMAIL">邮件</el-checkbox>
-                <el-checkbox label="SMS">短信</el-checkbox>
+                <el-checkbox label="EMAIL" disabled>邮件（尚未接入）</el-checkbox>
+                <el-checkbox label="SMS" disabled>短信（尚未接入）</el-checkbox>
                 <el-checkbox label="SYSTEM">系统消息</el-checkbox>
               </el-checkbox-group>
             </el-form-item>
@@ -273,7 +273,7 @@
               <el-input v-model="systemSettings.defaultNotifyTo" placeholder="多个用逗号分隔" />
             </el-form-item>
             <el-form-item>
-              <el-button type="primary" @click="handleSaveSettings">保存设置</el-button>
+              <el-button type="primary" :loading="savingSettings" @click="handleSaveSettings">保存设置</el-button>
             </el-form-item>
           </el-form>
         </el-card>
@@ -309,8 +309,8 @@
         </el-form-item>
         <el-form-item label="通知方式">
           <el-checkbox-group v-model="ruleForm.notifyTypes">
-            <el-checkbox label="EMAIL">邮件</el-checkbox>
-            <el-checkbox label="SMS">短信</el-checkbox>
+            <el-checkbox label="EMAIL" disabled>邮件（尚未接入）</el-checkbox>
+            <el-checkbox label="SMS" disabled>短信（尚未接入）</el-checkbox>
             <el-checkbox label="SYSTEM">系统消息</el-checkbox>
           </el-checkbox-group>
         </el-form-item>
@@ -384,6 +384,7 @@ const ruleList = ref<InventoryAlertRule[]>([])
 const ruleSearchForm = reactive({ warehouseId: '', enabled: undefined as boolean | undefined })
 const rulePagination = reactive({ current: 1, size: 20, total: 0 })
 const ruleFormVisible = ref(false)
+const ruleFormRef = ref()
 const isEditRule = ref(false)
 const ruleForm = reactive({
   id: 0, sku: '', productName: '', warehouseId: '', warehouseName: '',
@@ -398,6 +399,7 @@ const ruleFormRules = {
 
 // 预警记录
 const alertList = ref<InventoryAlert[]>([])
+const selectedAlerts = ref<InventoryAlert[]>([])
 const alertSearchForm = reactive({ warehouseId: '', alertType: '', status: '' })
 const alertPagination = reactive({ current: 1, size: 20, total: 0 })
 const handleAlertVisible = ref(false)
@@ -437,10 +439,12 @@ const loadRules = async () => {
       warehouseId: ruleSearchForm.warehouseId || undefined,
       enabled: ruleSearchForm.enabled
     })
-    const pageData = res.data || {}
+    const pageData = res
     ruleList.value = pageData.records || []
     rulePagination.total = pageData.total || 0
   } catch (error) {
+    ruleList.value = []
+    rulePagination.total = 0
     console.error('加载规则失败', error)
   } finally {
     ruleLoading.value = false
@@ -458,10 +462,12 @@ const loadAlerts = async () => {
       alertType: alertSearchForm.alertType || undefined,
       status: alertSearchForm.status || undefined
     })
-    const pageData = res.data || {}
+    const pageData = res
     alertList.value = pageData.records || []
     alertPagination.total = pageData.total || 0
   } catch (error) {
+    alertList.value = []
+    alertPagination.total = 0
     console.error('加载预警记录失败', error)
   } finally {
     alertLoading.value = false
@@ -478,10 +484,12 @@ const loadReplenishments = async () => {
       warehouseId: replenishSearchForm.warehouseId || undefined,
       status: replenishSearchForm.status || undefined
     })
-    const pageData = res.data || {}
+    const pageData = res
     replenishmentList.value = pageData.records || []
     replenishPagination.total = pageData.total || 0
   } catch (error) {
+    replenishmentList.value = []
+    replenishPagination.total = 0
     console.error('加载补货建议失败', error)
   } finally {
     replenishLoading.value = false
@@ -510,6 +518,7 @@ const handleEditRule = (rule: InventoryAlertRule) => {
 
 // 提交规则
 const handleSubmitRule = async () => {
+  if (!await ruleFormRef.value?.validate().catch(() => false)) return
   ruleForm.notifyType = ruleForm.notifyTypes.join(',')
   try {
     if (isEditRule.value) {
@@ -544,6 +553,7 @@ const handleToggleRule = async (rule: InventoryAlertRule) => {
   try {
     await inventoryAlertApi.updateRule(rule.id, rule)
   } catch (error) {
+    rule.enabled = !rule.enabled
     console.error('更新失败', error)
   }
 }
@@ -560,11 +570,10 @@ const handleAlert = (alert: InventoryAlert) => {
 const confirmHandleAlert = async () => {
   if (!currentAlert.value) return
   try {
-    const handlerId = 1, handlerName = 'admin'
     if (handleAlertForm.action === 'handle') {
-      await inventoryAlertApi.handleAlert(currentAlert.value.id, handlerId, handlerName, handleAlertForm.remark)
+      await inventoryAlertApi.handleAlert(currentAlert.value.id, handleAlertForm.remark)
     } else {
-      await inventoryAlertApi.ignoreAlert(currentAlert.value.id, handlerId, handlerName, handleAlertForm.remark)
+      await inventoryAlertApi.ignoreAlert(currentAlert.value.id, handleAlertForm.remark)
     }
     ElMessage.success('处理成功')
     handleAlertVisible.value = false
@@ -584,19 +593,46 @@ const handleIgnoreAlert = (alert: InventoryAlert) => {
 }
 
 // 批量处理
-const handleBatchHandle = () => {
-  ElMessage.info('请先选择要处理的预警记录')
+const handleBatchHandle = async () => {
+  const pending = selectedAlerts.value.filter(alert => alert.status === 'PENDING')
+  if (!pending.length) {
+    ElMessage.warning('请先选择待处理的预警记录')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(`确定处理选中的 ${pending.length} 条预警吗？`, '批量处理', { type: 'warning' })
+    const results = await Promise.allSettled(pending.map(alert => inventoryAlertApi.handleAlert(alert.id)))
+    const succeeded = results.filter(result => result.status === 'fulfilled').length
+    if (succeeded === pending.length) ElMessage.success(`已处理 ${succeeded} 条预警`)
+    else ElMessage.warning(`成功 ${succeeded} 条，失败 ${pending.length - succeeded} 条，请刷新后重试`)
+    await Promise.all([loadAlerts(), loadStats()])
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') console.error('批量处理失败', error)
+  }
 }
 
 // 创建补货
-const handleCreateReplenishment = (alert: InventoryAlert) => {
-  ElMessage.info('补货功能需要跳转到补货页面')
+const handleCreateReplenishment = async (alert: InventoryAlert) => {
+  try {
+    const { value } = await ElMessageBox.prompt(`为 ${alert.sku} 创建补货建议，请输入数量`, '创建补货', {
+      inputPattern: /^[1-9]\d{0,8}$/,
+      inputErrorMessage: '请输入1至999999999之间的整数',
+      confirmButtonText: '创建',
+      cancelButtonText: '取消'
+    })
+    await inventoryAlertApi.createReplenishment(alert.id, Number(value))
+    ElMessage.success('补货建议已创建')
+    await loadReplenishments()
+    activeTab.value = 'replenishments'
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') console.error('创建补货失败', error)
+  }
 }
 
 // 确认补货
 const handleConfirmReplenishment = async (item: ReplenishmentSuggestion) => {
   try {
-    await inventoryAlertApi.confirmReplenishment(item.id, 1, 'admin')
+    await inventoryAlertApi.confirmReplenishment(item.id)
     ElMessage.success('确认成功')
     loadReplenishments()
     loadStats()
@@ -616,9 +652,25 @@ const handleCancelReplenishment = async (item: ReplenishmentSuggestion) => {
   }
 }
 
-// 保存设置
-const handleSaveSettings = () => {
-  ElMessage.success('设置已保存')
+const loadSettings = async () => {
+  try {
+    Object.assign(systemSettings, await inventoryAlertApi.getSettings())
+  } catch (error) {
+    console.error('加载设置失败', error)
+  }
+}
+
+const savingSettings = ref(false)
+const handleSaveSettings = async () => {
+  savingSettings.value = true
+  try {
+    await inventoryAlertApi.saveSettings(systemSettings)
+    ElMessage.success('设置已保存')
+  } catch (error) {
+    console.error('保存设置失败', error)
+  } finally {
+    savingSettings.value = false
+  }
 }
 
 // 工具函数
@@ -664,6 +716,7 @@ onMounted(() => {
   loadRules()
   loadAlerts()
   loadReplenishments()
+  loadSettings()
 })
 </script>
 

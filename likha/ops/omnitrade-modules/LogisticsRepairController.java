@@ -10,7 +10,7 @@ import static com.crossborder.erp.warehouse.repair.RepairSupport.*;
 @RequestMapping("/logistics")
 public class LogisticsRepairController {
     private final RepairSupport s;
-    private static final String CHANNEL="SELECT code,name,carrier,type,coverage,features,avg_delivery_days avgDeliveryDays,tracking_support trackingSupport FROM erp_logistics.t_logistics_channel";
+    private static final String CHANNEL="SELECT code,name,carrier,type,coverage,features,avg_delivery_days avgDeliveryDays,tracking_support trackingSupport,status FROM erp_logistics.t_logistics_channel";
     private static final String RATE="SELECT r.id,r.channel_code channelCode,c.name channelName,c.carrier,r.shipping_method shippingMethod,r.from_country fromCountry,r.to_country toCountry,r.weight_range_min weightRangeMin,r.weight_range_max weightRangeMax,r.base_price basePrice,r.price_per_kg pricePerKg,r.volumetric_divisor volumetricDivisor,r.estimated_days estimatedDays,r.currency,r.is_active isActive,r.create_time createTime FROM erp_logistics.t_logistics_rate r JOIN erp_logistics.t_logistics_channel c ON c.code=r.channel_code";
     public LogisticsRepairController(RepairSupport s){this.s=s;}
 
@@ -45,15 +45,22 @@ public class LogisticsRepairController {
         if(update&&input.containsKey("code")&&!channelCode.equals(input.get("code")))throw bad("渠道代码不可修改");
         s.required(b,"name","carrier","type");String type=str(b.get("type"));if(!Set.of("EXPRESS","SPECIAL","POST","SEA","AIR").contains(type))throw bad("渠道类型无效");
         String coverage=arrayJson(b.getOrDefault("coverage",List.of())),features=arrayJson(b.getOrDefault("features",List.of()));
-        if(update)s.db.update("UPDATE erp_logistics.t_logistics_channel SET name=?,carrier=?,type=?,coverage=?,features=?,avg_delivery_days=?,tracking_support=? WHERE code=?",text(b,"name",150),text(b,"carrier",100),type,coverage,features,days(b.getOrDefault("avgDeliveryDays",7)),bool(b.getOrDefault("trackingSupport",true)),channelCode);
+        long status=number(b.getOrDefault("status",1));if(status!=0&&status!=1)throw bad("渠道状态必须为0或1");
+        if(update)s.db.update("UPDATE erp_logistics.t_logistics_channel SET name=?,carrier=?,type=?,coverage=?,features=?,avg_delivery_days=?,tracking_support=?,status=? WHERE code=?",text(b,"name",150),text(b,"carrier",100),type,coverage,features,days(b.getOrDefault("avgDeliveryDays",7)),bool(b.getOrDefault("trackingSupport",true)),status,channelCode);
         else{
             if(s.count("SELECT COUNT(*) FROM erp_logistics.t_logistics_channel WHERE code=?",channelCode)>0)throw bad("渠道代码已存在");
-            s.db.update("INSERT INTO erp_logistics.t_logistics_channel(code,name,carrier,type,coverage,features,avg_delivery_days,tracking_support) VALUES(?,?,?,?,?,?,?,?)",channelCode,text(b,"name",150),text(b,"carrier",100),type,coverage,features,days(b.getOrDefault("avgDeliveryDays",7)),bool(b.getOrDefault("trackingSupport",true)));
+            s.db.update("INSERT INTO erp_logistics.t_logistics_channel(code,name,carrier,type,coverage,features,avg_delivery_days,tracking_support,status) VALUES(?,?,?,?,?,?,?,?,?)",channelCode,text(b,"name",150),text(b,"carrier",100),type,coverage,features,days(b.getOrDefault("avgDeliveryDays",7)),bool(b.getOrDefault("trackingSupport",true)),status);
         }
         return channel(channelCode);
     });}
     @PostMapping({"/channel","/channels"}) public Map<String,Object> createChannel(@RequestBody Map<String,Object>b){return saveChannel(null,b);}
     @PutMapping("/channel/{code}") public Map<String,Object> updateChannel(@PathVariable String code,@RequestBody Map<String,Object>b){return saveChannel(code,b);}
+    @PutMapping("/channel/{code}/status")
+    public Map<String,Object> updateChannelStatus(@PathVariable String code,@RequestBody Map<String,Object>b){
+        s.required(b,"status");long status=number(b.get("status"));
+        if(status!=0&&status!=1)throw bad("渠道状态必须为0或1");
+        return saveChannel(code,map("status",status));
+    }
     @DeleteMapping("/channel/{code}") public void deleteChannel(@PathVariable String code){s.atomic(()->{
         s.one("SELECT code FROM erp_logistics.t_logistics_channel WHERE code=? FOR UPDATE",code(code));
         if(s.count("SELECT COUNT(*) FROM erp_logistics.t_logistics_rate WHERE channel_code=?",code)>0)throw bad("渠道存在费率，请先删除关联费率");
@@ -88,7 +95,7 @@ public class LogisticsRepairController {
         String from=country(b.get("fromCountry")),to=country(b.get("toCountry")),cur=currency(b.get("currency")),method=text(b,"shippingMethod",50);
         boolean active=bool(b.getOrDefault("isActive",true));
         // 重量区间为(min,max]，同渠道、运输方式、路线和币种禁止启用重叠区间。
-        if(active&&s.count("SELECT COUNT(*) FROM erp_logistics.t_logistics_rate WHERE channel_code=? AND from_country=? AND to_country=? AND currency=? AND shipping_method=? AND is_active=1 AND weight_range_min<? AND weight_range_max>? AND id<>?",channelCode,from,to,cur,method,max,min,id==null?-1:id)>0)throw bad("存在重叠的启用费率区间，请调整重量范围或停用旧费率");
+        if(active&&!s.rows("SELECT id FROM erp_logistics.t_logistics_rate WHERE channel_code=? AND from_country=? AND to_country=? AND currency=? AND shipping_method=? AND is_active=1 AND weight_range_min<? AND weight_range_max>? AND id<>? FOR UPDATE",channelCode,from,to,cur,method,max,min,id==null?-1:id).isEmpty())throw bad("存在重叠的启用费率区间，请调整重量范围或停用旧费率");
         long rid=id==null?s.id():id;
         if(id==null)s.db.update("INSERT INTO erp_logistics.t_logistics_rate(id,channel_code,shipping_method,from_country,to_country,weight_range_min,weight_range_max,base_price,price_per_kg,volumetric_divisor,estimated_days,currency,is_active) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",rid,channelCode,method,from,to,min,max,base,perKg,divisor,days(b.get("estimatedDays")),cur,active);
         else s.db.update("UPDATE erp_logistics.t_logistics_rate SET channel_code=?,shipping_method=?,from_country=?,to_country=?,weight_range_min=?,weight_range_max=?,base_price=?,price_per_kg=?,volumetric_divisor=?,estimated_days=?,currency=?,is_active=? WHERE id=?",channelCode,method,from,to,min,max,base,perKg,divisor,days(b.get("estimatedDays")),cur,active,rid);
@@ -103,7 +110,7 @@ public class LogisticsRepairController {
         s.required(b,"fromCountry","toCountry","weight");String from=country(b.get("fromCountry")),to=country(b.get("toCountry"));BigDecimal weight=decimal(b.get("weight"),3,true);
         BigDecimal length=decimal(b.getOrDefault("length",0),3,false),width=decimal(b.getOrDefault("width",0),3,false),height=decimal(b.getOrDefault("height",0),3,false);
         int dimensions=(length.signum()>0?1:0)+(width.signum()>0?1:0)+(height.signum()>0?1:0);if(dimensions!=0&&dimensions!=3)throw bad("长宽高必须同时填写正数，或全部留空");
-        List<Map<String,Object>>rates=s.rows(RATE+" WHERE r.from_country=? AND r.to_country=? AND r.is_active=1 ORDER BY r.currency,r.id",from,to);
+        List<Map<String,Object>>rates=s.rows(RATE+" WHERE r.from_country=? AND r.to_country=? AND r.is_active=1 AND c.status=1 ORDER BY r.currency,r.id",from,to);
         List<Map<String,Object>>result=new ArrayList<>();
         for(Map<String,Object>r:rates){
             if(b.containsKey("currency")&&!str(b.get("currency")).isBlank()&&!currency(b.get("currency")).equals(r.get("currency")))continue;

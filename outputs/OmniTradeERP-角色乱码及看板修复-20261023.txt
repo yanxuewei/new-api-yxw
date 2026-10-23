@@ -1,0 +1,37 @@
+OmniTradeERP 角色乱码及看板多余字符修复
+日期：2026-10-23 18:59（北京时间）
+
+一、角色名称乱码
+实际数据：t_role中id=1、role_code=admin的role_name已经存成错误转码文本，而字段字符集为utf8mb4。
+修复：备份旧值，以主键、编码和旧HEX值匹配，精确更新1行，名称恢复为“系统管理员”。
+验证：HEX(role_name)=E7B3BBE7BB9FE7AEA1E79086E59198，UTF-8字节正确。
+预防：bootstrap_admin.py的mysql调用增加--default-character-set=utf8mb4。
+未改密码、角色权限、用户角色关系及当前用户真实姓名；未重跑初始化。
+
+二、看板多余字符
+根因：erp-web/src/views/Dashboard.vue第31行存在“< <el-col :span=\"6\">”。
+修复：删除多余“<”。
+验证：Vue模板AST确认统计行只有四个span=6列，没有游离文本节点；生产构建成功。
+
+三、线上发布验收
+镜像：omnitrade-local/frontend:modules-20261023-185842
+容器：erp-minimal-frontend
+状态：healthy；重启0次；OOMKilled=false。
+HTTPS首页：200，与新构建index.html哈希一致。
+线上看板脚本assets/Dashboard-Bp2OA3GJ.js：200，与新构建哈希一致。
+上一轮退出登录修复保留。
+尚未进行真实浏览器登录点击验收，请强制刷新页面检查显示。
+
+四、备份
+数据旧值及rollback.sql：/opt/OmniTradeERP/.ops-backups/display-fix-20261023-185647/
+前端旧Compose及src归档：/opt/OmniTradeERP/.ops-backups/frontend-modules-20261023-185842/
+旧前端镜像：omnitrade-local/frontend:modules-20261023-184249
+
+五、相关文件
+本地工作目录：E:/git_code/new-api-yxw/likha/ops/omnitrade-modules/
+修改：erp-web/src/views/Dashboard.vue、bootstrap_admin.py
+新增核查/修复：repair_display.py、verify_dashboard.cjs
+线上源码：/opt/OmniTradeERP/erp-web/src/views/Dashboard.vue
+
+六、额外发现
+Dashboard.vue中的123笔订单、45678.90销售额等仍为上游硬编码模拟数据，并非真实经营统计。本次仅修复显示字符，未将这些示例数据改接真实接口，也不应把它们当作实际经营数据。

@@ -134,13 +134,13 @@
       <el-header>
         <div class="header-title">{{ pageTitle }}</div>
         <div class="header-user">
-          <el-dropdown>
+          <el-dropdown @command="handleUserCommand">
             <span class="el-dropdown-link">
               管理员 <el-icon class="el-icon--right"><arrow-down /></el-icon>
             </span>
             <template #dropdown>
               <el-dropdown-menu>
-                <el-dropdown-item>退出登录</el-dropdown-item>
+                <el-dropdown-item command="logout" :disabled="loggingOut">{{ loggingOut ? '正在退出…' : '退出登录' }}</el-dropdown-item>
               </el-dropdown-menu>
             </template>
           </el-dropdown>
@@ -155,11 +155,50 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
-import { useRoute } from 'vue-router'
+import { computed, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import axios from 'axios'
+import { ElMessage } from 'element-plus'
 import { DataAnalysis, Document, Goods, User, OfficeBuilding, Box, House, Van, Setting, Money, UserFilled, ArrowDown, DataLine, MagicStick, ShoppingCart, Share, Key } from '@element-plus/icons-vue'
 
 const route = useRoute()
+const router = useRouter()
+const loggingOut = ref(false)
+
+const handleUserCommand = async (command: string) => {
+  if (command !== 'logout' || loggingOut.value) return
+  loggingOut.value = true
+  const token = localStorage.getItem('token')
+  let serverLogoutConfirmed = !token
+
+  try {
+    if (token) {
+      const { data } = await axios.post('/api/auth/logout', null, {
+        headers: { Authorization: `Bearer ${token}` },
+        timeout: 10000
+      })
+      serverLogoutConfirmed = data?.code === 200
+    }
+  } catch {
+    // A failed request does not prove that the server session was revoked.
+    serverLogoutConfirmed = false
+  } finally {
+    for (const key of ['token', 'userInfo', 'refreshToken']) {
+      localStorage.removeItem(key)
+      sessionStorage.removeItem(key)
+    }
+    try {
+      await router.replace('/login')
+      if (serverLogoutConfirmed) {
+        ElMessage.success('已退出登录')
+      } else {
+        ElMessage.warning('已退出本机登录，但服务器端注销未确认，请检查网络后重新登录。')
+      }
+    } finally {
+      loggingOut.value = false
+    }
+  }
+}
 
 const activeMenu = computed(() => route.path)
 const pageTitle = computed(() => route.meta.title || '首页')
