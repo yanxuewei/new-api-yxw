@@ -80,6 +80,7 @@ def parse_summary(text: str) -> dict:
         out["reqs"] = sum(int(a) for a, _ in reqs)
         out["rps"] = sum(float(b) for _, b in reqs)
         out["streams"] = len(reqs)
+    out["dropped_iterations"] = sum(int(n) for n in re.findall(r"dropped_iterations\.+:\s*(\d+)\s", text))
     fails = re.findall(pats["failed"], text)
     if fails:
         err_n = sum(int(a[1]) for a in fails)
@@ -109,9 +110,13 @@ def parse_summary(text: str) -> dict:
         out["dur_p90"] = max(_num(d[2]) for d in durs)
         out["dur_p95"] = max(_num(d[3]) for d in durs)
         out["dur_p99"] = max(_num(d[4]) for d in durs)
-    m = re.search(pats["checks"], text)
-    if m:
-        out["checks_pct"] = float(m.group(1))
+    for key, metric in (("checks", "checks"), ("complete", "sse_complete")):
+        counts = [(int(p), int(n)) for p, n in re.findall(
+            re.escape(metric) + r"\.+:\s*[\d.]+%\s+(\d+) out of (\d+)", text)]
+        out[key + "_counts"] = counts
+        total = sum(n for _, n in counts)
+        if total:
+            out[key + "_pct"] = sum(p for p, _ in counts) / total * 100.0
     m = re.search(pats["data_recv"], text)
     if m:
         out["data_mb"] = float(m.group(1))
@@ -123,7 +128,124 @@ def parse_summary(text: str) -> dict:
     m = re.search(pats["vus_max"], text)
     if m:
         out["vus_max"] = int(m.group(1))
+    out["request_counts"] = [int(n) for n, _ in reqs]
+    out["error_counts"] = [(int(row[1]), int(row[2])) for row in fails]
+    trends = {}
+    current = None
+    for line in text.splitlines():
+        named = re.search(r"\b(http_req_[a-z_]+)(?:\s*\{([^}]+)\})?\.+:\s*(.*)", line)
+        if named:
+            current = named.group(1)
+            tag, values = named.group(2), named.group(3)
+        else:
+            tagged = re.search(r"\{\s*([^}]+)\s*\}\.+:\s*(.*)", line)
+            if not tagged or current is None:
+                current = None
+                continue
+            tag, values = tagged.groups()
+        p95 = re.search(r"p\(95\)=(\S+)", values)
+        if p95:
+            key = current + ("{" + tag.replace(" ", "") + "}" if tag else "")
+            try:
+                value = _num(p95.group(1))
+            except ValueError:
+                continue
+            if math.isfinite(value) and value >= 0:
+                trends.setdefault(key, []).append(value)
+    out["p95_values"] = trends
+    admin = trends.get("http_req_duration{type:admin}")
+    if admin:
+        out["admin_p95"] = max(admin)
     return out
+
+
+STEADY_MODES = {"clusterip", "clusterip-dual", "clusterip-shard", "public-url"}
+CAPACITY_MODES = STEADY_MODES - {"public-url"}
+
+
+def evaluate_run(run: dict, text: str) -> None:
+    """缺失证据不等于 SLO 失败；每个分片必须独立满足相同脚本阈值。"""
+    run["pass"] = False
+    run["verdict"] = "INCOMPLETE"
+    run["failure_reasons"] = []
+    run["evidence_complete"] = False
+    mode = run.get("mode", "")
+    if not run.get("metadata_valid", True):
+        run["verdict_reason"] = "元数据缺失或格式错误"
+        return
+    if any(int(rc) != 0 for rc in re.findall(r"(?:remote_rc|runner_rc)=(-?\d+)", text)):
+        run["verdict_reason"] = "执行失败，不能用作容量边界"
+        return
+    if mode not in STEADY_MODES | {"burst", "admin"}:
+        run["verdict"] = "UNASSESSED"
+        run["verdict_reason"] = "该场景未定义验收标准，仅展示观测值"
+        return
+    requests = run["request_counts"]
+    errors = run["error_counts"]
+    count = len(requests)
+    expected = run.get("shards", "")
+    if mode == "clusterip-shard" and not expected:
+        jobs = re.fullmatch(r"k6-shard-0\.\.(\d+)", run.get("job", ""))
+        expected = str(int(jobs.group(1)) + 1) if jobs else "unknown"
+    if expected and (not expected.isdigit() or int(expected) != count):
+        run["verdict_reason"] = "分片摘要数量不完整"
+        return
+    if (not requests or any(n <= 0 for n in requests) or len(errors) != count
+            or any(n != requests[i] or not 0 <= e <= n for i, (e, n) in enumerate(errors))):
+        run["verdict_reason"] = "请求数或失败计数缺失/不一致"
+        return
+    exit_codes = []
+    if run.get("summary_schema") == "2":
+        exit_codes = run.get("k6_exit_codes", "").split(",")
+        if len(exit_codes) != count or any(code not in {"0", "99"} for code in exit_codes):
+            run["verdict_reason"] = "k6 未正常结束或退出状态缺失"
+            return
+    is_admin = mode == "admin"
+    error_limit = 0.01 if mode in {"burst", "admin"} else SLO_ERR_RATE
+    latency_limit = 1000.0 if is_admin else (1500.0 if mode == "burst" else SLO_TTFB_P95)
+    trends = run["p95_values"]
+    metric = "http_req_duration{type:admin}" if is_admin else "http_req_waiting{type:sse}"
+    latencies = trends.get(metric)
+    if latencies is None and not is_admin:
+        latencies = trends.get("http_req_waiting", [])
+    if not latencies or len(latencies) != count:
+        run["verdict_reason"] = "场景 P95 指标缺失或分片不完整"
+        return
+    if not is_admin:
+        run["ttfb_p95"] = max(latencies)
+    reasons = run["failure_reasons"]
+    if any(e / n >= error_limit for e, n in errors):
+        reasons.append("error_rate")
+    if any(v >= latency_limit for v in latencies):
+        reasons.append("latency")
+    if is_admin and run["dropped_iterations"] > 0:
+        reasons.append("dropped_iterations")
+    integrity = run["checks_counts"] if is_admin else run["complete_counts"]
+    integrity_valid = (len(integrity) == count
+                       and all(n > 0 and 0 <= p <= n for p, n in integrity)
+                       and (is_admin or all(n == requests[i] for i, (_, n) in enumerate(integrity))))
+    if integrity_valid and any((n - p) / n >= error_limit for p, n in integrity):
+        reasons.append("checks" if is_admin else "integrity")
+    run["evidence_complete"] = integrity_valid and run.get("summary_schema") == "2"
+    if not run["evidence_complete"]:
+        run["verdict_reason"] = "缺少新版完整流/业务成功计数或执行状态，旧 checks 不能证明完整性"
+        if reasons:
+            run["verdict"] = "FAIL"
+            run["verdict_reason"] = ", ".join(reasons) + "；" + run["verdict_reason"]
+        return
+    if not reasons and "99" in exit_codes:
+        run["evidence_complete"] = False
+        run["verdict_reason"] = "k6 阈值退出与摘要不一致，需核对完整日志"
+        return
+    if mode == "clusterip-shard":
+        run["evidence_complete"] = False
+        if not reasons:
+            run["verdict"] = "UNASSESSED"
+            run["verdict_reason"] = "各分片阈值通过，但缺少共同运行窗口证据，不能验证总并发"
+            return
+    run["verdict"] = "FAIL" if reasons else "PASS"
+    run["pass"] = not reasons
+    run["verdict_reason"] = ", ".join(reasons) if reasons else "脚本阈值通过"
 
 
 PHASE_KEYS = {
@@ -163,28 +285,48 @@ def load_runs(paths: list[str], eip_mbps: float = 0.0) -> list[dict]:
     runs = []
     for p in paths:
         try:
-            text = open(p, encoding="utf-8", errors="replace").read()
+            with open(p, encoding="utf-8", errors="replace") as source:
+                text = source.read()
         except OSError:
             continue
         meta = parse_meta(text)
-        if not meta or "vus" not in meta:
-            continue
-        s = parse_summary(text)
-        if "rps" not in s:
+        if not meta:
             continue
         run = dict(meta)
-        run.update(s)
-        run["vus_i"] = int(float(meta.get("vus", 0)))
-        run["replicas_i"] = max(1, int(float(meta.get("replicas", 1) or 1)))
-        run["cpu_cores"] = float(meta.get("cpu_peak_m", 0) or 0) / 1000.0
-        run["mem_mi"] = float(meta.get("mem_peak_mi", 0) or 0)
-        run["dur_s"] = float(re.sub(r"[^0-9.]", "", meta.get("dur", "0")) or 0)
+        run.update(parse_summary(text))
+        run.setdefault("rps", 0.0)
+        required = ("job", "ts", "mode", "target", "base", "vus", "replicas", "dur")
+        run["metadata_valid"] = all(meta.get(key) for key in required)
+        for key in required:
+            run.setdefault(key, "")
+        for source_key, key, default in (("vus", "vus_i", "0"), ("replicas", "replicas_i", "0"),
+                                         ("cpu_peak_m", "cpu_cores", "0"), ("mem_peak_mi", "mem_mi", "0")):
+            try:
+                value = float(meta.get(source_key, default))
+                if not math.isfinite(value) or value < 0:
+                    raise ValueError("invalid numeric metadata")
+                if key in {"vus_i", "replicas_i"}:
+                    if not value.is_integer() or value <= 0:
+                        raise ValueError("invalid topology metadata")
+                    value = int(value)
+                run[key] = value / 1000 if key == "cpu_cores" else value
+            except ValueError:
+                run["metadata_valid"] = False
+                run[key] = 1 if key == "replicas_i" else 0
+        duration = meta.get("dur", "")
+        if re.fullmatch(r"(?:\d+(?:\.\d+)?(?:ms|s|m|h))+", duration):
+            run["dur_s"] = sum(float(n) * {"ms": 0.001, "s": 1, "m": 60, "h": 3600}[unit]
+                               for n, unit in re.findall(r"(\d+(?:\.\d+)?)(ms|s|m|h)", duration))
+        else:
+            run["dur_s"] = 0
+        if not math.isfinite(run["dur_s"]) or run["dur_s"] <= 0:
+            run["metadata_valid"] = False
         run["source"] = os.path.basename(p)
         for k, metric in PHASE_KEYS.items():
             v = parse_phase_p90(text, metric)
             if v is not None:
                 run[k] = v
-        run["pass"] = (s.get("err_pct", 100) <= SLO_ERR_RATE * 100) and (s.get("ttfb_p95", 1e9) <= SLO_TTFB_P95)
+        evaluate_run(run, text)
         # 派生量
         if run["rps"] > 0:
             run["cpu_per_rps"] = run["cpu_cores"] / run["rps"]
@@ -207,9 +349,9 @@ def analyse(runs: list[dict], eip_mbps: float = 0.0) -> dict:
     if not runs:
         return a
     passing = [r for r in runs if r["pass"]]
-    sse = [r for r in passing if r.get("mode") != "admin"]
+    sse = [r for r in passing if r.get("mode") in STEADY_MODES]
     adm = [r for r in passing if r.get("mode") == "admin"]
-    a["best"] = max(sse, key=lambda r: r["rps"]) if sse else (max(passing, key=lambda r: r["rps"]) if passing else None)
+    a["best"] = max(sse, key=lambda r: r["rps"]) if sse else None
     a["best_admin"] = max(adm, key=lambda r: r["rps"]) if adm else None
     # 优先取有完整阶段数据（phase_receiving）的最优通过档用于 waterfall；
     # 若无 phase_receiving 则退而用有任意阶段数据的，再退而用 best。
@@ -218,60 +360,60 @@ def analyse(runs: list[dict], eip_mbps: float = 0.0) -> dict:
         phased = [r for r in sse if any(r.get(k) for k in ("phase_waiting", "phase_duration", "phase_sending"))]
     a["best_phase"] = max(phased, key=lambda r: r["rps"]) if phased else a["best"]
     a["worst"] = max(runs, key=lambda r: r["vus_i"])
-    # 稳态容量档：只认内网直连（单副本/双副本），排除公网（带宽受限）、管理面、劣化、滚动、长流
-    cap_runs = [r for r in runs if r.get("mode") in ("clusterip", "clusterip-dual")]
-    cap_runs.sort(key=lambda r: r.get("vus_per_replica") or 0)
-    cap_pass = [r for r in cap_runs if r["pass"]]
-    fail = next((r for r in cap_runs if not r["pass"]), None)
-    a["first_fail"] = fail
-    knee_vus = knee_rps = None
-    note = ""
-    if cap_pass and fail:
-        p1 = cap_pass[-1]
-        v1, y1 = p1["vus_per_replica"], p1["ttfb_p95"]
-        v2, y2 = fail["vus_per_replica"], fail["ttfb_p95"]
-        if y2 > y1 and v2 > v1 and y1 < SLO_TTFB_P95:
-            ratio = (SLO_TTFB_P95 - y1) / (y2 - y1)
-            knee_vus = v1 + ratio * (v2 - v1)
-            knee_rps = p1["rps_per_replica"] + ratio * (fail["rps_per_replica"] - p1["rps_per_replica"])
-            note = "实测破线档插值"
-    if knee_vus is None and len(cap_pass) >= 2:
-        # 去掉冷启动畸变：保留 P95 最低点之后的点（低并发首跑常因副本未热身而 P95 偏高）
-        ys_all = [r["ttfb_p95"] for r in cap_pass]
-        k = ys_all.index(min(ys_all))
-        cap_use = cap_pass[k:]
-        if len(cap_use) >= 2:
-            cap_pass = cap_use
-        # 最小二乘：P95 = a + b * VU_per_replica，解 P95=800
-        xs = [r["vus_per_replica"] for r in cap_pass]
-        ys = [r["ttfb_p95"] for r in cap_pass]
-        n = len(xs)
-        mx, my = sum(xs) / n, sum(ys) / n
-        denom = sum((x - mx) ** 2 for x in xs)
-        if denom > 0:
-            b = sum((x - mx) * (y - my) for x, y in zip(xs, ys)) / denom
-            if b > 0 and my + b * (max(xs) - mx) < SLO_TTFB_P95:
-                knee_vus = mx + (SLO_TTFB_P95 - my) / b
-                rps_x = [r["rps_per_replica"] for r in cap_pass]
-                rps_b = sum((x - mx) * (y - my) for x, y in zip(xs, rps_x)) / denom
-                knee_rps = sum(rps_x) / n + rps_b * (knee_vus - mx)
-                note = "无破线档：内网稳态点最小二乘外推到 800ms（外推值）"
-    a["knee_vus_per_replica"] = knee_vus
-    a["knee_rps_per_replica"] = knee_rps
-    if knee_vus and knee_vus > 0:
-        a["replicas_for_target"] = math.ceil(TARGET_VUS / knee_vus)
-    a["knee_note"] = note
-    # 瓶颈判定（事实 + 推测分开写）
+    cap_runs = [r for r in runs if r.get("mode") in CAPACITY_MODES]
+    config_fields = ("mode", "target", "base", "images", "dur", "load_config", "mock_config")
+    grouped = {}
+    for r in cap_runs:
+        key = tuple(r.get(k, "") for k in config_fields) + (r["replicas_i"], r.get("shards", "1"))
+        grouped.setdefault(key, []).append(r)
+    groups = []
+    for group_runs in grouped.values():
+        first = group_runs[0]
+        complete = all(first.get(k) for k in config_fields)
+        accepted = [r for r in group_runs if r["pass"]]
+        rejected = [r for r in group_runs if r.get("verdict") == "FAIL"]
+        best = max(accepted, key=lambda r: r["vus_i"]) if accepted else None
+        fail = min(rejected, key=lambda r: r["vus_i"]) if rejected else None
+        contradictory = bool(best and fail and fail["vus_i"] <= best["vus_i"])
+        missing = any(not r.get("evidence_complete") for r in group_runs)
+        target_verified = any(r["vus_i"] == TARGET_VUS for r in accepted) and not contradictory and not missing
+        group = {
+            "runs": group_runs, "config_complete": complete, "best": best, "first_fail": fail,
+            "target_verified": target_verified, "knee_vus": None, "knee_rps": None,
+            "note": "仅有实测通过下限；无有效失败档，不外推",
+        }
+        if not complete:
+            group["note"] = "配置证据缺失（镜像/负载/mock/时长等），禁止拟合"
+        elif missing:
+            group["note"] = "存在不完整运行，补齐数据后再估计边界"
+        elif contradictory:
+            group["note"] = "低档失败或同档结果冲突，需复测，不拟合"
+        elif not best:
+            group["note"] = "无通过档，不能估计合格容量"
+        elif fail:
+            # 重复实验取通过侧和失败侧较差的延迟，避免挑选有利样本。
+            lower = max((r for r in accepted if r["vus_i"] == best["vus_i"]), key=lambda r: r["ttfb_p95"])
+            upper_runs = [r for r in rejected if r["vus_i"] == fail["vus_i"]]
+            upper = max(upper_runs, key=lambda r: r["ttfb_p95"])
+            y1, y2 = lower["ttfb_p95"], upper["ttfb_p95"]
+            if (all(r["failure_reasons"] == ["latency"] for r in upper_runs)
+                    and y1 < SLO_TTFB_P95 <= y2):
+                ratio = (SLO_TTFB_P95 - y1) / (y2 - y1)
+                group["knee_vus"] = lower["vus_i"] + ratio * (upper["vus_i"] - lower["vus_i"])
+                group["knee_rps"] = lower["rps"] + ratio * (upper["rps"] - lower["rps"])
+                group["note"] = "同配置延迟边界插值，仅为估计，不是实测通过容量"
+            else:
+                group["note"] = "失败涉及错误率或流完整性，不以延迟插值代替容量判定"
+        groups.append(group)
+    a["capacity_groups"] = groups
+    a["verified_replicas"] = sorted({g["runs"][0]["replicas_i"] for g in groups if g["target_verified"]})
     facts, guesses = [], []
-    if a["first_fail"]:
-        f = a["first_fail"]
-        facts.append(f"VU={f['vus_i']} 时 P95={f.get('ttfb_p95', 0):.0f}ms、错误率={f.get('err_pct', 0):.3f}%，超出 SLO")
-        if f.get("err_pct", 0) > SLO_ERR_RATE * 100 and (f.get("bw_util") or 0) < 0.85:
-            guesses.append("错误率抬升先于延迟劣化 ⇒ 优先怀疑连接/上游/DB 连接池，而非 CPU")
-        elif f["cpu_cores"] >= 0.8 * 2.0:
-            guesses.append("CPU 峰值已 ≥ 80% 上限（2 核）且延迟同步劣化 ⇒ 主要瓶颈在网关 CPU")
-        else:
-            guesses.append("CPU 未触顶但延迟劣化 ⇒ 更可能是排队（连接数/DB 池/上游 mock 调度），需下钻进程指标")
+    for i, group in enumerate(groups, 1):
+        if group["best"]:
+            facts.append(f"容量组 {i}：实测通过最高 VU={group['best']['vus_i']}（不代表容量上限）")
+        if group["first_fail"]:
+            f = group["first_fail"]
+            facts.append(f"容量组 {i}：VU={f['vus_i']} 未通过，原因：{f['verdict_reason']}")
     if eip_mbps and runs:
         peak = max((r.get("data_mbps") or 0) for r in runs)
         a["eip_mbps"] = eip_mbps
@@ -281,7 +423,7 @@ def analyse(runs: list[dict], eip_mbps: float = 0.0) -> dict:
         if peak >= 0.85 * eip_mbps:
             guesses.append(f"带宽利用率 ≥85% ⇒ 公网路径（NAT→EIP {eip_mbps:.0f}Mbps）先于网关饱和；"
                            "继续加并发只会放大超时/重置，需先抬带宽或改内网路径再测")
-    if passing:
+    if a["best"]:
         b = a["best"]
         facts.append(f"最优通过档 VU={b['vus_i']}：RPS={b['rps']:.1f}、P95={b.get('ttfb_p95', 0):.0f}ms、错误率={b.get('err_pct', 0):.3f}%")
         if b.get("cpu_cores"):
@@ -302,9 +444,10 @@ def fmt(x, n=1, suffix=""):
         return "—"
 
 
-def badge(ok: bool, text_pass="PASS", text_fail="FAIL") -> str:
-    cls = "ok" if ok else "bad"
-    return f'<span class="badge {cls}">{text_pass if ok else text_fail}</span>'
+def badge(verdict: str) -> str:
+    cls = {"PASS": "ok", "FAIL": "bad"}.get(verdict, "pending")
+    label = {"INCOMPLETE": "数据不完整", "UNASSESSED": "待评估"}.get(verdict, verdict)
+    return f'<span class="badge {cls}">{esc(label)}</span>'
 
 
 def short_label(r: dict) -> str:
@@ -503,25 +646,34 @@ def render(runs: list[dict], a: dict, out_path: str, eip_mbps: float = 0.0) -> N
 <td>{r["vus_i"]}<div class="sub">{r["replicas_i"]} 副本</div></td>
 <td>{esc(r.get("mode", ""))}<div class="sub"><a href="{esc(tgt_url)}" target="_blank" style="color:#0b7a45;word-break:break-all">{esc(tgt_url)}</a></div></td>
 <td>{fmt(r["rps"], 1)}</td>
-<td>{fmt(r.get("ttfb_med", 0), 0)}</td>
-<td><b>{fmt(r.get("ttfb_p95", 0), 0)}</b></td>
-<td>{fmt(r.get("ttfb_p99", 0), 0)}</td>
-<td>{fmt(r.get("dur_p95", 0), 0)}</td>
-<td>{fmt(r.get("err_pct", 0), 3)}%</td>
-<td>{fmt(r.get("checks_pct", 0), 2)}%</td>
+<td>{fmt(r.get("ttfb_med"), 0)}</td>
+<td><b>{fmt(r.get("ttfb_p95"), 0)}</b></td>
+<td>{fmt(r.get("ttfb_p99"), 0)}</td>
+<td>{fmt(r.get("admin_p95") if r["mode"] == "admin" else r.get("dur_p95"), 0)}</td>
+<td>{fmt(r.get("err_pct"), 3)}%</td>
+<td>{fmt(r.get("complete_pct") if r["mode"] != "admin" else r.get("checks_pct"), 3)}%</td>
 <td>{fmt(r["cpu_cores"], 2)}</td>
 <td>{fmt(r["mem_mi"], 0)}</td>
 <td>{fmt(r.get("data_mbps", 0), 2)}</td>
-<td>{badge(r["pass"])}</td>
+<td>{badge(r["verdict"])}<div class="sub">{esc(r["verdict_reason"])}</div></td>
 </tr>'''
-    best = a.get("best") or (runs[-1] if runs else None)
-    first_fail = a.get("first_fail")
+    best = a.get("best")
+    verified = "、".join(str(n) for n in a.get("verified_replicas", []))
     cards = f'''
-<div class="card"><div class="k">本次运行数</div><div class="v">{a["n"]}</div><div class="s">由同一目录日志聚合</div></div>
-<div class="card"><div class="k">SSE 最优通过档</div><div class="v">{fmt(best["rps"], 1) if best else "—"}<small> req/s</small></div><div class="s">VU={best["vus_i"] if best else "—"} · P95={fmt(best.get("ttfb_p95"), 0) if best else "—"}ms</div></div>
-{f'<div class="card"><div class="k">管理面峰值（读接口）</div><div class="v">{fmt(a["best_admin"]["rps"],1)}<small> req/s</small></div><div class="s">P95 时延 {fmt((a["best_admin"].get("dur_p95") or 0),1)}ms</div></div>' if a.get("best_admin") else ''}
-<div class="card"><div class="k">单副本拐点（线性插值到 800ms）</div><div class="v">{fmt(a.get("knee_vus_per_replica"), 0) if a.get("knee_vus_per_replica") else "—"}<small> 并发流/副本</small></div><div class="s">{esc(a.get("knee_note") or ("≈ %s req/s/副本" % fmt(a.get("knee_rps_per_replica"), 1) if a.get("knee_rps_per_replica") else "数据不足"))}</div></div>
-<div class="card"><div class="k">{TARGET_VUS} 并发所需副本</div><div class="v">{a.get("replicas_for_target", "—")}</div><div class="s">ceil({TARGET_VUS} ÷ 单副本拐点)</div></div>'''
+<div class="card"><div class="k">本次运行数</div><div class="v">{a["n"]}</div><div class="s">由所选日志聚合</div></div>
+<div class="card"><div class="k">SSE 最优通过档</div><div class="v">{fmt(best["rps"], 1) if best else "无通过档"}<small>{" req/s" if best else ""}</small></div><div class="s">VU={best["vus_i"] if best else "—"} · P95={fmt(best.get("ttfb_p95"), 0) if best else "—"}ms</div></div>
+{f'<div class="card"><div class="k">管理面最优通过档（读接口）</div><div class="v">{fmt(a["best_admin"]["rps"],1)}<small> req/s</small></div><div class="s">管理面 P95 {fmt(a["best_admin"].get("admin_p95"),1)}ms</div></div>' if a.get("best_admin") else ''}
+<div class="card"><div class="k">可比容量分组</div><div class="v">{len(a.get("capacity_groups", []))}</div><div class="s">固定路径、副本及配置；分别展示实测与估计</div></div>
+<div class="card"><div class="k">{TARGET_VUS} VU 实测通过副本配置</div><div class="v">{verified or "尚未验证"}</div><div class="s">仅对应本报告中的测试条件，不推算最少所需副本</div></div>'''
+    capacity_rows = ""
+    for i, group in enumerate(a.get("capacity_groups", []), 1):
+        first = group["runs"][0]
+        config = " · ".join(f"{k}={first.get(k) or '缺失'}" for k in ("images", "dur", "load_config", "mock_config"))
+        capacity_rows += f'''<tr><td>{i} · {esc(first.get("mode", ""))}<div class="sub">{esc(first.get("target", ""))} · {first["replicas_i"]} 副本<br>{esc(config)}</div></td>
+<td>{fmt(group["best"]["vus_i"], 0) if group["best"] else "无通过档"}</td>
+<td>{fmt(group["first_fail"]["vus_i"], 0) if group["first_fail"] else "—"}</td>
+<td>{fmt(group["knee_vus"], 0)} VU / {fmt(group["knee_rps"], 1)} req/s</td>
+<td>{esc(group["note"])}</td></tr>'''
 
     facts = "".join(f"<li>{esc(x)}</li>" for x in a.get("facts", [])) or "<li>（数据不足）</li>"
     guesses = "".join(f"<li>{esc(x)}</li>" for x in a.get("guesses", [])) or "<li>（数据不足，暂不推断）</li>"
@@ -548,9 +700,11 @@ def render(runs: list[dict], a: dict, out_path: str, eip_mbps: float = 0.0) -> N
         "replicas": r["replicas_i"], "mode": r.get("mode", ""), "target": r.get("target", ""),
         "rps": r.get("rps", 0), "ttfb_p50": r.get("ttfb_med", 0),
         "ttfb_p95": r.get("ttfb_p95", 0), "ttfb_p99": r.get("ttfb_p99", 0),
-        "dur_p95": r.get("dur_p95", 0), "err_pct": r.get("err_pct", 0),
-        "checks_pct": r.get("checks_pct", 0), "cpu": r.get("cpu_cores", 0),
+        "dur_p95": r.get("dur_p95"), "err_pct": r.get("err_pct"),
+        "admin_p95": r.get("admin_p95"), "complete_pct": r.get("complete_pct"),
+        "checks_pct": r.get("checks_pct"), "cpu": r.get("cpu_cores", 0),
         "mem": r.get("mem_mi", 0), "bw": r.get("data_mbps", 0), "pass": bool(r.get("pass")),
+        "verdict": r["verdict"], "verdict_reason": r["verdict_reason"],
     } for r in runs], ensure_ascii=False).replace("</", "<\\/")
 
     doc = f'''<!DOCTYPE html>
@@ -610,10 +764,15 @@ pre{{background:#06281a;color:#d9ffe9;border:1px solid #14532d;padding:14px 16px
 
 <h2>每次运行明细</h2>
 <table>
-<thead><tr><th>Job / 时间</th><th>VU</th><th>路径</th><th>RPS</th><th>P50 首字</th><th>P95 首字</th><th>P99 首字</th><th>P95 端到端</th><th>错误率</th><th>checks</th><th>CPU 峰值(核)</th><th>内存峰值(Mi)</th><th>下行(Mbps)</th><th>判定</th></tr></thead>
-<tbody>{rows or "<tr><td colspan=13>无数据</td></tr>"}</tbody>
+<thead><tr><th>Job / 时间</th><th>VU</th><th>路径</th><th>RPS</th><th>P50 首字</th><th>P95 首字</th><th>P99 首字</th><th>P95 端到端（管理面按标签）</th><th>错误率</th><th>完整流成功率 / 管理面 checks</th><th>CPU 峰值(核)</th><th>内存峰值(Mi)</th><th>下行(Mbps)</th><th>判定</th></tr></thead>
+<tbody>{rows or "<tr><td colspan=14>无数据</td></tr>"}</tbody>
 </table>
-<div class="lim">首字用 k6 <code>http_req_waiting</code>（TTFB 代理）；端到端为 <code>http_req_duration</code>；CPU 为压测期间 <code>kubectl top pod</code> 峰值（URL 模式取各副本最大值）。SLO：P95 首字 ≤ {SLO_TTFB_P95:.0f}ms 且错误率 ≤ {SLO_ERR_RATE*100:.2f}%。</div>
+<div class="lim">首字使用 k6 <code>http_req_waiting</code>（TTFB 代理）。稳态：P95 &lt; {SLO_TTFB_P95:.0f}ms、请求失败率 &lt; {SLO_ERR_RATE*100:.2f}%、完整流成功率 &gt; 99.95%；突发：P95 &lt; 1500ms、失败率 &lt; 1%、完整流成功率 &gt; 99%；管理面：标签端到端 P95 &lt; 1000ms、失败率 &lt; 1%、业务成功 checks &gt; 99%、丢弃迭代为 0。旧日志只能确认已有指标是否失败，不能凭 checks 宣告通过或用于容量插值；新日志须有完整流/业务成功计数及 k6 退出状态。故障注入、滚动及长流待定义专属标准；分片缺少共同运行窗口证据时待评估。突发汇总阈值通过不代表已验证恢复时间。</div>
+
+<h2>可比配置容量边界</h2>
+<table><thead><tr><th>分组 / 配置</th><th>实测最高通过 VU</th><th>最小失败 VU</th><th>延迟边界估计（总量）</th><th>说明</th></tr></thead>
+<tbody>{capacity_rows or '<tr><td colspan="5">无可用于稳态容量分析的内网运行</td></tr>'}</tbody></table>
+<div class="lim">镜像、负载或 mock 配置未知时只展示观测结果，不插值、不外推；不同副本不得按每副本并发混合拟合。</div>
 
 <h2>趋势</h2>
 {svg_line(runs, "ttfb_p95", "P95 首字延迟 vs 并发", "ms", SLO_TTFB_P95)}
@@ -638,7 +797,7 @@ pre{{background:#06281a;color:#d9ffe9;border:1px solid #14532d;padding:14px 16px
 （{("单副本" if best and best["replicas_i"]==1 else (str(best["replicas_i"])+" 副本") if best else "")}，VU={best["vus_i"] if best else "—"}）。
 单副本资源效率：<b>{fmt(best["cpu_per_rps"]*1000,2) if best and best.get("cpu_per_rps") else "—"} 核 / 千 RPS</b>，
 即约 <b>{fmt(best["reqs_per_core_h"],0) if best and best.get("reqs_per_core_h") else "—"} 请求 / 核·小时</b>。
-按 {TARGET_VUS} 并发目标，需 <b>{a.get("replicas_for_target","—")} 个副本</b>（公式见下）。
+{TARGET_VUS} VU 目标只有相同负载下的实际通过运行才能验证，插值不能替代验收，也不能证明最少副本数。
 </div>
 
 <h2>公式与口径（完整）</h2>
@@ -673,15 +832,21 @@ pre{{background:#06281a;color:#d9ffe9;border:1px solid #14532d;padding:14px 16px
    每核小时可服务请求    Q_coreh = RPS × 3600 / CPU_peak_cores
    每百万请求 CPU 小时   H_1M = C_req × 1,000,000 / 3600
 
-5) SLO 余量          margin = 1 − TTFB_p95 / 800ms
-6) 单副本拐点（线性插值）
+5) 稳态 SLO 余量     margin = 1 − TTFB_p95 / 800ms
+6) 同配置延迟边界估计（不是实测通过容量）
    VU_knee = VU_pass + (800 − P95_pass) / (P95_fail − P95_pass) × (VU_fail − VU_pass)
-   其中 pass 为最后一个满足 SLO 的档，fail 为第一个破线的档；RPS_knee 同法按 RPS 插值。
-7) 目标副本数        Replicas = ceil(Target_VU / VU_knee_per_replica)
-   本项目 Target_VU = 1500（S2）；未额外乘 1.5 余量，若要求峰值×1.5 则再乘 1.5 后向上取整。
+   只使用相同路径、目标、副本、镜像、时长、负载及 mock 配置的观测。
+   pass 为最高通过档，fail 为其上方最小失败档，且只能因延迟超标失败。
+   配置缺失、低档失败、高低档冲突、证据不足或无破线档时不拟合，不外推。
+7) 目标验收
+   只记录实际 {TARGET_VUS} VU 通过的副本配置；不得从插值推算最少副本数。
 
 8) 判定口径
-   PASS ⇔ 错误率 ≤ 0.05% 且 P95 首字 ≤ 800ms
+   稳态：错误率 &lt; 0.05%、P95 TTFB &lt; 800ms、完整流成功率 &gt; 99.95%。
+   突发：错误率 &lt; 1%、P95 TTFB &lt; 1500ms、完整流成功率 &gt; 99%。
+   管理面：错误率 &lt; 1%、管理面标签 P95 &lt; 1000ms、业务成功 checks &gt; 99%、丢弃迭代为 0。
+   分片逐一判定，不能用加权平均掩盖某分片失败；执行异常/缺数据为 INCOMPLETE。
+   未定义专属验收标准的场景为 UNASSESSED，不计入通过容量。
    注意：本环境 mock 上游无真实厂商延迟，且部分档位未含 ALB（clusterip 模式）；
    URL 模式（https://perf.likha.hk）含 NAT+ALB 入口开销，两种模式不可直接混比。
 
@@ -717,12 +882,14 @@ const RUNS = __RUNS__;
 const tip = document.getElementById('tip');
 let pinned = false;
 function f(v, n, suf) {
-  if (v === null || v === undefined || v === 0) return '\u2014';
+  if (v === null || v === undefined) return '\u2014';
   return Number(v).toFixed(n) + (suf || '');
 }
 function head(r) {
-  return '<div class="tip-h">' + r.job + ' <span class="badge ' + (r.pass ? 'ok' : 'bad') + '">'
-    + (r.pass ? 'PASS' : 'FAIL') + '</span></div>';
+  const cls = r.verdict === 'PASS' ? 'ok' : (r.verdict === 'FAIL' ? 'bad' : 'pending');
+  const label = { INCOMPLETE: '数据不完整', UNASSESSED: '待评估' }[r.verdict] || r.verdict;
+  return '<div class="tip-h">' + r.job + ' <span class="badge ' + cls + '">'
+    + label + '</span></div>';
 }
 function card(i) {
   const r = RUNS[i];
@@ -735,9 +902,7 @@ function card(i) {
 }
 function detail(i) {
   const r = RUNS[i];
-  return '<div class="tip-h">' + r.job + ' <span class="badge ' + (r.pass ? 'ok' : 'bad') + '">'
-    + (r.pass ? 'PASS' : 'FAIL') + '</span><span class="tip-x" onclick="document.getElementById(&quot;tip&quot;).hidden=true">\u00d7</span></div>'
-    + '<table class="tip-t">'
+  return head(r) + '<table class="tip-t">'
     + '<tr><td>\u8fd0\u884c\u65f6\u95f4</td><td>' + r.ts + '</td></tr>'
     + '<tr><td>\u573a\u666f / \u8def\u5f84</td><td>' + r.mode + ' \u00b7 ' + r.target + '</td></tr>'
     + '<tr><td>\u5e76\u53d1 / \u526f\u672c</td><td>' + r.vus + ' VU / ' + r.replicas + ' \u526f\u672c</td></tr>'
@@ -787,19 +952,19 @@ def main() -> None:
     ap.add_argument("--out", help="HTML 输出路径（--check 时可省略）")
     ap.add_argument("--eip-mbps", type=float, default=0.0, help="公网路径的 EIP 标称带宽（Mbps），用于带宽利用率判定")
     ap.add_argument("--check", metavar="LOG",
-                    help="仅判定该日志是否满足 SLO：pass 退出 0，fail 退出 1（供阶梯压测自动找瓶颈）")
+                    help="按场景判定：PASS 退出 0，FAIL 退出 1，数据不完整/待评估退出 2")
     args = ap.parse_args()
 
     if args.check:
         runs = load_runs([args.check], args.eip_mbps)
         if not runs:
-            print(f"[check] FAIL 无法解析日志：{args.check}")
-            sys.exit(1)
+            print(f"[check] INCOMPLETE 无法解析日志：{args.check}")
+            sys.exit(2)
         r = runs[0]
-        verdict = "PASS" if r["pass"] else "FAIL"
-        print(f'[check] {verdict} vu={r["vus_i"]} replicas={r["replicas_i"]} '
-              f'rps={fmt(r["rps"], 1)} p95={fmt(r.get("ttfb_p95"), 0)}ms err={fmt(r.get("err_pct"), 3)}%')
-        sys.exit(0 if r["pass"] else 1)
+        print(f'[check] {r["verdict"]} vu={r["vus_i"]} replicas={r["replicas_i"]} '
+              f'rps={fmt(r["rps"], 1)} p95={fmt(r.get("admin_p95") if r["mode"] == "admin" else r.get("ttfb_p95"), 0)}ms '
+              f'err={fmt(r.get("err_pct"), 3)}% reason={r["verdict_reason"]}')
+        sys.exit({"PASS": 0, "FAIL": 1}.get(r["verdict"], 2))
 
     if not args.out:
         ap.error("--out 必填（除非使用 --check）")

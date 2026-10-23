@@ -12,5 +12,5 @@ fi
 for J in $LIST; do
   echo "===== $J"
   kubectl -n $NS get job $J -o jsonpath='  status: succeeded={.status.succeeded} failed={.status.failed} start={.status.startTime}{"\n"}' 2>&1
-  kubectl -n $NS logs job/$J 2>&1 | grep -E "http_reqs|http_req_failed|http_req_waiting|\{ type:sse \}|checks|iterations\.\.\.|✗" | head -8
+  kubectl -n $NS logs job/$J 2>&1 | grep -E "http_reqs|http_req_failed|http_req_waiting|http_req_duration|\{ type:|checks|sse_complete|iterations\.\.\.|✗"
 done

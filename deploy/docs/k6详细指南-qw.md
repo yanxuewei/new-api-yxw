@@ -231,7 +231,7 @@ k6 run hello.js
        └──────────────▶ https://perf.likha.hk ──▶ 172.23.x.x:80
 ```
 
-- **mock 上游**：`~/git_code/service_ops/mock-upstream/`（Go，OpenAI 兼容，可配首字延迟/token 间隔/错误注入；`mock_ctl.sh` 做全副本广播；镜像用 `deploy/ops/push.sh mock-upstream` 构建）。
+- **mock 上游**：`~/git_code/service_ops/mock-upstream/`（Go，OpenAI 兼容，可配首字延迟/token 间隔/错误注入；`mock_ctl.sh` 做全副本广播；镜像用 `deploy/ops/push.sh -n dev --module ~/git_code/service_ops/mock-upstream` 构建）。
 - **被测入口**：`svc/perf-new-api-slave`（内网）或 `https://perf.likha.hk`（公网，经 EIP）。
 - **执行器**：`deploy/perf/k6/run.sh`（本机入口）+ `bodies/*.sh`（节点侧，经云助手投递 kubectl）。
 
@@ -681,7 +681,7 @@ A：不能。公网多一跳 NAT/EIP + ALB，且受 EIP 带宽限制。报告里
 | `deploy/perf/k6/bodies/*.sh` | 节点侧执行体（`sharded.sh` = 多 Job 分片并行） |
 | `deploy/perf/k6/report.py` | 单文件 HTML 报告生成 |
 | `~/git_code/service_ops/mock-upstream/` | mock 上游与 `mock_ctl.sh`（已移出本仓库） |
-| `deploy/ops/push.sh` | 通用镜像构建推送（service_ops 任意模块） |
+| `deploy/ops/push.sh` | 通用镜像构建推送（主应用 `-n`；service_ops 任意模块 `--module`） |
 | `deploy/perf/perf_reports/` | 报告与日志 |
 | `deploy/perf/README.md` / `deploy/perf/k6/README.md` | 目录索引与用法 |
 | `deploy/jakarta_dev_ledger.md` §23/§24 | 本轮压测台账 |

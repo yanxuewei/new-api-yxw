@@ -97,11 +97,19 @@ echo "replicas=${REPL:-1}"
 echo "job=k6-shard-0..$((SHARDS - 1))"
 echo "ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo "images="
+echo "summary_schema=2"
+echo "shards=$SHARDS"
+EXIT_CODES=""
+for i in $(seq 0 $((SHARDS - 1))); do
+  CODE=$(kubectl -n "$NS" get pods -l job-name="k6-shard-$i" -o jsonpath='{range .items[*].status.containerStatuses[?(@.name=="k6")]}{.state.terminated.exitCode}{","}{end}' 2>/dev/null | sed 's/,$//')
+  EXIT_CODES+="${EXIT_CODES:+,}${CODE:-unknown}"
+done
+echo "k6_exit_codes=$EXIT_CODES"
 echo "===END_META==="
 rm -f /tmp/c_shard /tmp/m_shard
 
-# 拼接各分片摘要（report.py 会聚合：RPS/请求数求和，P95 取最差）
 for i in $(seq 0 $((SHARDS - 1))); do
   echo "----- shard-$i"
-  kubectl -n $NS logs job/k6-shard-$i 2>&1 | grep -E "http_reqs|http_req_failed|http_req_waiting|http_req_duration|http_req_connecting|http_req_tls_handshaking|http_req_sending|http_req_receiving|\{ type:sse \}|checks|vus_max|✗" | head -20
+  kubectl -n $NS logs job/k6-shard-$i 2>&1 | grep -E "http_reqs|http_req_failed|http_req_waiting|http_req_duration|http_req_connecting|http_req_tls_handshaking|http_req_sending|http_req_receiving|\{ type:sse \}|checks|sse_complete|vus_max|✗"
 done
+

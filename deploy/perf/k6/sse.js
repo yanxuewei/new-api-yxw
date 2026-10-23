@@ -8,6 +8,9 @@
 //     绝不出现在命令行/仓库里。
 import http from 'k6/http';
 import { check } from 'k6';
+import { Rate } from 'k6/metrics';
+
+const sseComplete = new Rate('sse_complete');
 
 const VUS = Number(__ENV.VUS || 50);
 const DUR = __ENV.DUR || '120s';
@@ -26,7 +29,8 @@ export const options = {
     },
   },
   thresholds: {
-    http_req_failed: ['rate<0.0005'],          // 5xx ≤ 0.05%（S1/S2 判据）
+    http_req_failed: ['rate<0.0005'],
+    sse_complete: ['rate>0.9995'],
     'http_req_waiting{type:sse}': ['p(95)<800'], // P95 首字（TTFB 代理）
   },
   summaryTrendStats: ['avg', 'min', 'med', 'p(90)', 'p(95)', 'p(99)', 'max'],
@@ -46,8 +50,31 @@ export default function () {
     timeout: '120s',
     tags: { type: 'sse', shard: SHARD },
   });
+  let done = false;
+  let finished = false;
+  let valid = true;
+  const events = typeof res.body === 'string' ? res.body.split(/\r?\n\r?\n/) : [];
+  for (const event of events.slice(0, -1)) {
+    const payload = event.split(/\r?\n/).filter((line) => line.startsWith('data:'))
+      .map((line) => line.slice(5).replace(/^ /, '')).join('\n');
+    if (!payload) continue;
+    if (done) { valid = false; break; }
+    if (payload === '[DONE]') { done = finished; break; }
+    try {
+      const chunk = JSON.parse(payload);
+      if (!chunk || chunk.error) { valid = false; break; }
+      if (Array.isArray(chunk.choices) && chunk.choices.some((choice) =>
+        choice.index === 0 && ['stop', 'length', 'tool_calls', 'function_call'].includes(choice.finish_reason))) {
+        finished = true;
+      }
+    } catch (_) {
+      valid = false;
+      break;
+    }
+  }
+  sseComplete.add(res.status === 200 && valid && done);
   check(res, {
     'status 200': (r) => r.status === 200,
-    'has [DONE]': (r) => typeof r.body === 'string' && r.body.includes('[DONE]'),
+    'has [DONE]': () => done,
   });
 }

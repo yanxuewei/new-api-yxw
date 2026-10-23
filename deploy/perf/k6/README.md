@@ -46,7 +46,9 @@ bash deploy/perf/k6/run.sh readback
 ## 口径与已知边界
 
 - **首字延迟 = `http_req_waiting`（TTFB 代理）**：k6 不做半流式读取，SSE 下响应头+首块几乎同时到达，可作近似；毫秒级 P95 由 k6 统计，节点侧只做秒级粗验。
-- **判据**：`http_req_failed < 0.05%`、`P95 TTFB < 800ms`（S1/S2）。1200 VU 单副本实测 P95 949ms ⇒ 单副本 C≈1000–1100。
+- **稳态判据**：请求失败率 `< 0.05%`、`P95 TTFB < 800ms`、完整流成功率 `> 99.95%`，等于边界也不通过。完整流须 HTTP 200、包含成功 `finish_reason`、随后收到完整 `[DONE]` 事件，不能只有网关补发的结束标记。
+- **其他场景**：突发场景为 P95 `< 1500ms`、失败率 `< 1%`、完整流成功率 `> 99%`；管理面为 `type:admin` 端到端 P95 `< 1000ms`、失败率 `< 1%`、业务成功 checks `> 99%`，且不能丢弃计划迭代。突发汇总通过不代表已验证恢复时间。
+- **四态判定**：`PASS`（通过）、`FAIL`（已知指标失败）、`INCOMPLETE`（执行异常/数据不完整）、`UNASSESSED`（尚无专属验收标准）。旧日志只可确认已有指标失败，不凭旧 checks 证明完整流或业务成功；`degrade`、`rolling`、`long` 暂为待评估。
 - **token 不进命令行**：Job 里用 `secretKeyRef` 取 `perf-load-test-credentials/token_key`；脚本自己拼 `sk-` 前缀。
 - **mock 参数切换**：用 `~/git_code/service_ops/mock-upstream/mock_ctl.sh`（全副本广播），不要直接打 Service 的 `/__ctrl`（只命中一个 Pod）。
 - **窗口上限**：单次云助手命令 900s；两档 120s 串跑会踩线，必要时分两次调用。
@@ -64,7 +66,7 @@ bash deploy/perf/k6/run.sh readback
 1. 把远端输出落盘到 `deploy/perf/perf_reports/<时间戳>-<tag>.log`（报告的数据源）；
 2. 调 `report.py` 生成**本次运行**的单文件报告：`deploy/perf/perf_reports/perf_report_<参数摘要>_<启动时刻>.html`（如 `perf_report_stage-public-vu100-dur15s_20261020-175609.html`）。
 
-报告内容：摘要卡（最优通过档 / 单副本拐点 / 1500 并发所需副本）、每次运行明细表（RPS、P50/P95/P99 首字、端到端 P95、错误率、checks、CPU/内存峰值、下行 Mbps、PASS/FAIL）、两张内联 SVG 趋势图（P95 vs VU、RPS vs VU）、瓶颈判定（事实/推断分开）、理想 QPS 与资源效率、完整公式段。
+报告内容：摘要卡（稳态 SSE 最优通过档 / 可比容量分组 / 1500 VU 实测通过副本配置）、逐运行指标与四态判定及原因、分组容量边界表、趋势图和资源参考指标。没有通过记录时明确显示“无通过档”，不使用失败记录或管理面记录补值。1500 VU 是否通过只认对应档位的实际测试，不推算最少副本数。
 
 ```bash
 # 手动重生成（例如补了历史日志、或改了 EIP 带宽口径）

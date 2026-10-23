@@ -16,16 +16,20 @@
 
 ## push.sh
 
+`push.sh` 支持双模式：主应用 `new-api`（模式 A，`-n <ns>`）和 service_ops 任意模块（模式 B，`-n <ns> --module <dir>`）。当前目录下有 `Dockerfile` 即可推送，与语言无关。
+
 ```bash
 # 列出 service_ops 下所有模块（有 Dockerfile 的会标记）
 bash deploy/ops/push.sh --list
 
 # 构建并推送（tag 默认 = 日期-主仓 git 短 sha）
-bash deploy/ops/push.sh mock-upstream
+bash deploy/ops/push.sh -n dev --module ~/git_code/service_ops/mock-upstream
 # 指定 tag
-bash deploy/ops/push.sh mock-upstream 20261021-hotfix
-# 跳过二进制构建（CI 已构建好）
-bash deploy/ops/push.sh mock-upstream --no-build
+bash deploy/ops/push.sh -n dev --module ~/git_code/service_ops/mock-upstream -t 20261021-hotfix
+# 跳过二进制构建（镜像已在本地）
+bash deploy/ops/push.sh -n dev --module ~/git_code/service_ops/mock-upstream --no-build
+# 简写 -m
+bash deploy/ops/push.sh -n dev -m ~/git_code/service_ops/mock-upstream
 ```
 
 环境变量（都可覆盖）：
@@ -58,7 +62,7 @@ mkdir my-tool && cd my-tool
 # 3) 需要特殊构建时加 build.sh（可执行）
 # 4) 部署清单（如需）<tool>.yaml，镜像处用 __IMAGE_TAG__ 占位
 cd /home/fanyan/git_code/new-api-yxw
-bash deploy/ops/push.sh my-tool
+bash deploy/ops/push.sh -n dev --module ~/git_code/service_ops/my-tool
 ```
 
 ## 为什么要独立 go.mod

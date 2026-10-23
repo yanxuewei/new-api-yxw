@@ -57,11 +57,12 @@ run_body() {
   echo "[perf-k6] 本次输出目录：$run_dir"
   # 捕获远端输出：一边打屏，一边落盘（报告的数据源），跑完自动渲染 HTML
   local out rc log safe
-  out=$(bash "$REMOTE" "$full" 2>&1); rc=$?
+  rc=0
+  out=$(bash "$REMOTE" "$full" 2>&1) || rc=$?
   printf '%s\n' "$out"
   rm -f "$full"
   log="$run_dir/${run_ts}-${tag}.log"
-  printf '%s\n' "$out" > "$log"
+  printf '%s\nrunner_rc=%s\n' "$out" "$rc" > "$log"
   LAST_LOG="$log"   # 供调用方（ramp/ladder）做 SLO 判定
   echo "[perf-k6] 日志：$log"
   case "$tag" in
@@ -80,15 +81,27 @@ run_body() {
       cp -f "$AGG" "$REPORT_DIR/perf_report_ALL_latest.html" 2>/dev/null || true
       echo "[perf-k6] 完整报告：$AGG（副本 $REPORT_DIR/perf_report_ALL_latest.html）" ;;
   esac
-  return $rc
+  case "$body" in
+    stage.sh|dual1500.sh|sharded.sh|scenario.sh)
+      local verdict check_rc=0
+      verdict=$(python3 "$HERE/report.py" --check "$log" --eip-mbps "${EIP_MBPS:-100}" 2>&1) || check_rc=$?
+      printf '%s\n' "$verdict"
+      case "$check_rc:$verdict" in
+        '0:[check] PASS '*) return 0 ;;
+        '1:[check] FAIL '*) return 1 ;;
+        *) return 2 ;;
+      esac ;;
+
+  esac
+  return "$rc"
 }
 
 # 阶梯压测核心：固定副本数，VU 从 start 递增到 max，SLO 破线即停。
-# 用 report.py --check 判定（不依赖 k6 退出码：stage.sh 末尾是 grep，rc 不可靠）。
+# report.py 同时检查场景阈值、k6 退出状态与采集完整性。
 # 累加到 RAMP_DIRS 供调用方出汇总报告。
 run_ramp() {
   local tgt="$1" start="$2" step="$3" max="$4" dur="$5" rep="${6:-}" pfx="${7:-ramp}"
-  local p rtag="" v chk chkrc tag hit=0
+  local p rtag="" v chkrc tag hit=0
   case "$tgt" in *://*) p=public ;; *) p=clusterip ;; esac
   [ -n "$rep" ] && rtag="r${rep}-"
   echo "[perf-k6] ${pfx} 开始：target=$tgt  ${start}→${max} 步长${step} 每阶段${dur}${rep:+ 副本=$rep}"
@@ -101,21 +114,18 @@ run_ramp() {
     LAST_RUN_DIR=""; LAST_LOG=""
     local args=("TARGET_SVC=$tgt" "VUS=$v" "DUR=$dur")
     [ -n "$rep" ] && args+=("REQ_REPLICAS=$rep")
-    run_body stage.sh "$tag" "${args[@]}"
+    chkrc=0
+    run_body stage.sh "$tag" "${args[@]}" || chkrc=$?
     [ -n "$LAST_RUN_DIR" ] && RAMP_DIRS+=("$LAST_RUN_DIR")
-    # SLO 判定：破线即视为到达该副本数的容量上限
     if [ -s "${LAST_LOG:-}" ]; then
-      chk=$(python3 "$HERE/report.py" --check "$LAST_LOG" --eip-mbps "${EIP_MBPS:-100}" 2>&1); chkrc=$?
-      echo "  $chk"
-      if [ "$chkrc" -ne 0 ]; then
-        echo "[perf-k6] VU=$v 破线 ⇒ 该副本数下容量上限已确认，停止递增。"
-        hit=1
-        break
-      fi
+      case "$chkrc" in
+        0) ;;
+        1) echo "[perf-k6] VU=$v 未通过 SLO，停止递增；仅记录失败档，不宣称精确容量上限。"; hit=1; break ;;
+        *) echo "[perf-k6] VU=$v 数据不完整或无法评估，停止递增；不能用作容量边界。"; return 2 ;;
+      esac
     else
-      echo "[perf-k6] VU=$v 未产出日志，判定失败，停止递增。"
-      hit=1
-      break
+      echo "[perf-k6] VU=$v 未产出日志，停止递增；不能用作容量边界。"
+      return 2
     fi
     v=$((v + step))
     if [ "$v" -le "$max" ]; then
@@ -123,8 +133,8 @@ run_ramp() {
       sleep 15
     fi
   done
-  [ "$hit" -eq 0 ] && echo "[perf-k6] [!] 跑到 max=${max} 仍未破线${rep:+（${rep} 副本）}⇒ 容量高于本阶梯上限，请加大 max 重跑"
-  return 0
+  [ "$hit" -eq 0 ] && echo "[perf-k6] 跑到 max=${max} 仍未破线${rep:+（${rep} 副本）}；仅证明该实测档通过，尚未找到失败边界。"
+  return "$hit"
 }
 
 # 把一组 run_dir 聚合成一份 HTML，并刷新根目录 latest 副本
@@ -176,8 +186,10 @@ case "$ACTION" in
     K6JS_FILE="$HERE/sse.js"
     TGT="${1:?ramp 需要 <target-svc|url>}"
     RAMP_DIRS=()
-    run_ramp "$TGT" "${2:-300}" "${3:-300}" "${4:-3000}" "${5:-90s}" "" "ramp"
-    emit_report "ramp" "${RAMP_DIRS[@]}" ;;
+    RC=0
+    run_ramp "$TGT" "${2:-300}" "${3:-300}" "${4:-3000}" "${5:-90s}" "" "ramp" || RC=$?
+    emit_report "ramp" "${RAMP_DIRS[@]}"
+    exit "$RC" ;;
   ladder)
     # 副本阶梯：先在 1 副本下压到瓶颈，再扩到 2 副本用同参数重压，直接看扩容收益
     # usage: ladder <target-svc> [start=300] [step=300] [max=3000] [dur=90s] [replicas=1,2]
@@ -187,19 +199,24 @@ case "$ACTION" in
     L_REPS="${6:-1,2}"
     case "$TGT" in *://*) echo "[!] ladder 只用于集群内直连（需要能 scale），不支持 URL"; exit 2 ;; esac
     LADDER_DIRS=()
+    LADDER_RC=0
     IFS=',' read -r -a REP_ARR <<< "$L_REPS"
     for R in "${REP_ARR[@]}"; do
       echo ""
       echo "[perf-k6] ########## 副本数 = $R ##########"
       RAMP_DIRS=()
-      run_ramp "$TGT" "$L_START" "$L_STEP" "$L_MAX" "$L_DUR" "$R" "ladder"
+      RC=0
+      run_ramp "$TGT" "$L_START" "$L_STEP" "$L_MAX" "$L_DUR" "$R" "ladder" || RC=$?
       LADDER_DIRS+=("${RAMP_DIRS[@]}")
+      [ "$RC" -gt "$LADDER_RC" ] && LADDER_RC=$RC
+      [ "$RC" -ge 2 ] && break
       # 副本之间留出稳定窗口，避免上一轮残留连接影响扩容后的基线
       echo "[perf-k6] 副本 $R 测完，等待 30s 待连接排空..."
       sleep 30
     done
     emit_report "ladder" "${LADDER_DIRS[@]}"
-    echo "[perf-k6] 提示：报告「副本数」行可区分 1/2 副本；同 VU 档横向对比即为扩容收益。" ;;
+    echo "[perf-k6] 提示：仅比较配置完整且相同的同 VU 档，不跨副本拟合容量。"
+    exit "$LADDER_RC" ;;
   scale)
     # 仅调整副本数（不带压测），用于压测后恢复现场
     # usage: scale <replicas> [deploy=perf-new-api-slave]

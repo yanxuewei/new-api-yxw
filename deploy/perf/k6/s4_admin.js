@@ -20,6 +20,8 @@ export const options = {
   },
   thresholds: {
     http_req_failed: ['rate<0.01'],
+    checks: ['rate>0.99'],
+    dropped_iterations: ['count==0'],
     'http_req_duration{type:admin}': ['p(95)<1000'],
   },
   summaryTrendStats: ['avg', 'med', 'p(90)', 'p(95)', 'p(99)', 'max'],
@@ -38,5 +40,12 @@ export default (data) => {
     headers: { Authorization: `Bearer ${data.token}` },
     tags: { type: 'admin' }, timeout: '10s',
   });
-  check(res, { 'status 200': (r) => r.status === 200 });
+  let success = false;
+  try {
+    const body = res.json();
+    success = res.status === 200 && body !== null && body.success === true;
+  } catch (_) {
+    success = false;
+  }
+  check(res, { 'admin success': () => success });
 };

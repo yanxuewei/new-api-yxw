@@ -71,6 +71,9 @@ echo "target=$TGT"; echo "base=$BASE"; echo "mode=$MODE"; echo "vus=${VUS:-1}"; 
 echo "cpu_peak_m=${CP:-0}"; echo "mem_peak_mi=${MP:-0}"
 echo "replicas=$(kubectl -n $NS get deploy perf-new-api-slave -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo 1)"
 echo "job=$JOB"; echo "ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)"; echo "images="
+echo "summary_schema=2"
+echo "shards=1"
+echo "k6_exit_codes=$(kubectl -n "$NS" get pods -l job-name="$JOB" -o jsonpath='{range .items[*].status.containerStatuses[?(@.name=="k6")]}{.state.terminated.exitCode}{","}{end}' 2>/dev/null | sed 's/,$//')"
 echo "===END_META==="
 rm -f /tmp/c_$MODE /tmp/m_$MODE
-kubectl -n $NS logs job/$JOB 2>&1 | grep -E "http_reqs|http_req_failed|http_req_waiting|http_req_duration|http_req_connecting|http_req_tls_handshaking|http_req_sending|http_req_receiving|\{ type:|checks|vus_max|✗|data_received" | head -24
+kubectl -n $NS logs job/$JOB 2>&1 | grep -E "http_reqs|http_req_failed|http_req_waiting|http_req_duration|http_req_connecting|http_req_tls_handshaking|http_req_sending|http_req_receiving|\{ type:|checks|sse_complete|dropped_iterations|vus_max|✗|data_received"

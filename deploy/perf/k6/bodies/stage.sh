@@ -105,6 +105,9 @@ echo "replicas=$REPL"
 echo "job=$JOB"
 echo "ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo "images=$IMG"
+echo "summary_schema=2"
+echo "shards=1"
+echo "k6_exit_codes=$(kubectl -n "$NS" get pods -l job-name="$JOB" -o jsonpath='{range .items[*].status.containerStatuses[?(@.name=="k6")]}{.state.terminated.exitCode}{","}{end}' 2>/dev/null | sed 's/,$//')"
 echo "===END_META==="
-kubectl -n $NS logs job/$JOB 2>&1 | grep -E "http_reqs|http_req_failed|http_req_waiting|\{ type:sse \}|checks|iterations\.\.\.|data_received|vus_max|http_req_duration|http_req_connecting|http_req_tls_handshaking|http_req_sending|http_req_receiving|✗" | head -24
+kubectl -n $NS logs job/$JOB 2>&1 | grep -E "http_reqs|http_req_failed|http_req_waiting|\{ type:sse \}|checks|sse_complete|iterations\.\.\.|data_received|vus_max|http_req_duration|http_req_connecting|http_req_tls_handshaking|http_req_sending|http_req_receiving|✗"
 rm -f /tmp/cpu_${VUS}.txt /tmp/mem_${VUS}.txt
