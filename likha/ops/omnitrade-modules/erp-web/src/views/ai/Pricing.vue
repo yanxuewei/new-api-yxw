@@ -1,93 +1,100 @@
 <template>
-  <div class="pricing-page">
+  <div class="ai-page">
     <el-card shadow="never">
-      <template #header>
-        <div class="card-head">
-          <span>智能定价（基于竞品 + 库存 + 利润率）</span>
-          <el-input v-model="sku" placeholder="输入 SKU 查询" style="width: 280px" @keyup.enter="load" clearable>
-            <template #append><el-button @click="load">查询</el-button></template>
-          </el-input>
-        </div>
-      </template>
-
-      <el-row v-if="current" :gutter="16" class="current-block">
-        <el-col :span="6">
-          <el-statistic title="当前价格" :value="current.currentPrice" :precision="2" prefix="$" />
-        </el-col>
-        <el-col :span="6">
-          <el-statistic title="建议价格" :value="current.suggestedPrice" :precision="2" prefix="$" :value-style="{ color: '#67c23a' }" />
-        </el-col>
-        <el-col :span="6">
-          <el-statistic title="竞品均价" :value="current.competitorAvg" :precision="2" prefix="$" />
-        </el-col>
-        <el-col :span="6">
-          <el-statistic title="预期利润" :value="current.expectedProfit" :precision="2" prefix="$" :value-style="{ color: '#409eff' }" />
-        </el-col>
-      </el-row>
-
-      <el-table :data="list" v-loading="loading" stripe class="task-table">
-        <el-table-column prop="sku"          label="SKU" width="180" />
-        <el-table-column prop="productName"  label="商品" />
-        <el-table-column prop="strategy"     label="定价策略" width="120" />
-        <el-table-column label="建议幅度" width="120">
-          <template #default="{ row }">
-            <el-tag size="small" :type="row.suggestedPrice > row.currentPrice ? 'success' : 'danger'">
-              {{ ((row.suggestedPrice - row.currentPrice) / row.currentPrice * 100).toFixed(1) }}%
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="180" fixed="right">
-          <template #default="{ row }">
-            <el-button link type="primary" size="small" @click="showDetail(row)">查看</el-button>
-            <el-button link type="success" size="small" @click="apply(row)" :disabled="row.applied">采纳</el-button>
-          </template>
-        </el-table-column>
+      <template #header><div class="toolbar"><strong>智能定价</strong><el-button :loading="loading" :disabled="busy" @click="load">重新加载</el-button></div></template>
+      <el-alert title="建议仅依据已有业务数据，不包含外部竞品价格。币种未设置时请先核对商品计价口径。" type="info" :closable="false" />
+      <el-alert v-if="error" :title="error" type="error" :closable="false" />
+      <el-input v-model="keyword" clearable placeholder="筛选 SKU 或商品名称" class="search" />
+      <el-table v-loading="loading" :data="filtered" stripe empty-text="暂无商品，请先录入商品 SKU">
+        <el-table-column prop="sku" label="SKU" min-width="150" />
+        <el-table-column prop="productName" label="商品" min-width="150" />
+        <el-table-column label="当前价格" min-width="180"><template #default="{ row }">{{ formatAmount(row.currentPrice, row.currency) }}</template></el-table-column>
+        <el-table-column label="成本价" min-width="180"><template #default="{ row }">{{ formatAmount(row.costPrice, row.currency) }}</template></el-table-column>
+        <el-table-column label="建议价格" min-width="180"><template #default="{ row }">{{ formatAmount(row.suggestedPrice, row.currency) }}</template></el-table-column>
+        <el-table-column label="预期毛利率" width="120"><template #default="{ row }">{{ row.expectedMargin == null ? '数据不足' : `${row.expectedMargin}%` }}</template></el-table-column>
+        <el-table-column prop="strategy" label="策略" min-width="120" />
+        <el-table-column prop="basis" label="依据" min-width="220" />
+        <el-table-column label="操作" width="150" fixed="right"><template #default="{ row }">
+          <el-button link type="primary" :disabled="busy || loading || historyLoading" @click="showHistory(row)">历史</el-button>
+          <el-button link type="success" :disabled="busy || loading || row.suggestedPrice == null || row.suggestedPrice === row.currentPrice" @click="apply(row)">采纳</el-button>
+        </template></el-table-column>
       </el-table>
+      <div class="toolbar pager"><span>第 {{ page }} 页，每页最多 100 个 SKU；筛选仅作用于本页。</span><div><el-button :disabled="loading || busy || page === 1" @click="page--; load()">上一页</el-button><el-button :disabled="loading || busy || list.length < 100" @click="page++; load()">下一页</el-button></div></div>
     </el-card>
+    <el-dialog v-model="historyVisible" :title="`${historySku} 调价历史`" width="760px">
+      <el-alert v-if="historyError" :title="historyError" type="error" :closable="false" />
+      <el-button v-if="historyError" :loading="historyLoading" @click="loadHistory">重试</el-button>
+      <p>显示最近 100 条调价记录。</p>
+      <el-table v-loading="historyLoading" :data="history" empty-text="暂无调价记录">
+        <el-table-column prop="createTime" label="时间" min-width="170" />
+        <el-table-column label="原价格" min-width="180"><template #default="{ row }">{{ formatAmount(row.previousPrice, row.currency) }}</template></el-table-column>
+        <el-table-column label="新价格" min-width="180"><template #default="{ row }">{{ formatAmount(row.newPrice, row.currency) }}</template></el-table-column>
+      </el-table>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
-import { pricingApi } from '@/api/ai'
+import { computed, onMounted, ref } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { aiCenterApi, aiError, formatAmount, type PriceSuggest } from '@/api/ai'
 
-const sku = ref('')
-const current = ref<any>(null)
-const list = ref<any[]>([])
+const list = ref<PriceSuggest[]>([])
+const keyword = ref('')
+const page = ref(1)
 const loading = ref(false)
-
-onMounted(load)
+const busy = ref(false)
+const error = ref('')
+const historyVisible = ref(false)
+const historyLoading = ref(false)
+const historyError = ref('')
+const historySku = ref('')
+const history = ref<any[]>([])
+const filtered = computed(() => list.value.filter(row => `${row.sku} ${row.productName}`.toLowerCase().includes(keyword.value.trim().toLowerCase())))
 
 async function load() {
   loading.value = true
-  try {
-    list.value = await pricingApi.listTasks({})
-    if (sku.value) current.value = await pricingApi.suggest(sku.value)
-  } catch {
-    // mock
-    list.value = [
-      { sku: 'SKU-BLU-001-BLK', productName: '蓝牙耳机 Pro', strategy: '跟随竞品', currentPrice: 299, suggestedPrice: 315, applied: false },
-      { sku: 'SKU-WAT-002-BLK', productName: '智能手表 X1',  strategy: '提升毛利', currentPrice: 599, suggestedPrice: 619, applied: false },
-      { sku: 'SKU-USB-003-US',  productName: '65W GaN 充电器', strategy: '保持原价', currentPrice: 89,  suggestedPrice: 89,  applied: true  },
-      { sku: 'SKU-PWB-005-BLK', productName: '20000mAh 充电宝', strategy: '清理库存', currentPrice: 199, suggestedPrice: 179, applied: false },
-      { sku: 'SKU-STN-004',     productName: '便携手机支架',     strategy: '跟随竞品', currentPrice: 39,  suggestedPrice: 45,  applied: false },
-    ]
-    if (sku.value === 'SKU-BLU-001-BLK') {
-      current.value = list.value[0]
-      current.value.competitorAvg = 312.5
-      current.value.expectedProfit = 65.2
-    }
-  } finally { loading.value = false }
+  error.value = ''
+  try { list.value = await aiCenterApi.pricing({ limit: 100, offset: (page.value - 1) * 100 }) }
+  catch (e) { list.value = []; error.value = aiError(e) }
+  finally { loading.value = false }
 }
 
-function showDetail(row: any) { current.value = row; row.competitorAvg = (Math.random() * 30 + row.currentPrice * 0.9).toFixed(2); row.expectedProfit = (row.suggestedPrice - row.currentPrice * 0.4).toFixed(2) }
-function apply(row: any) { row.applied = true; ElMessage.success(`已采纳 ${row.sku} 的建议价`) }
+async function apply(row: PriceSuggest) {
+  if (busy.value || row.suggestedPrice == null) return
+  busy.value = true
+  try {
+    await ElMessageBox.confirm(`将 ${row.sku} 从 ${formatAmount(row.currentPrice, row.currency)} 调整为 ${formatAmount(row.suggestedPrice, row.currency)}？这会修改商品价格。`, '确认采纳建议', { type: 'warning' })
+    await aiCenterApi.applyPrice(row.sku, row.suggestedPrice, row.currentPrice)
+    ElMessage.success('价格已保存')
+    await load()
+  } catch (e) {
+    if (e !== 'cancel' && e !== 'close') { const message = aiError(e); await load(); error.value = message }
+  } finally { busy.value = false }
+}
+
+async function showHistory(row: PriceSuggest) {
+  historySku.value = row.sku
+  historyVisible.value = true
+  await loadHistory()
+}
+
+async function loadHistory() {
+  historyLoading.value = true
+  historyError.value = ''
+  history.value = []
+  try { history.value = await aiCenterApi.priceHistory(historySku.value) }
+  catch (e) { historyError.value = aiError(e) }
+  finally { historyLoading.value = false }
+}
+
+onMounted(load)
 </script>
 
 <style scoped>
-.pricing-page { padding: 16px; }
-.card-head { display: flex; justify-content: space-between; align-items: center; }
-.current-block { margin-bottom: 24px; padding: 16px; background: #fafafa; border-radius: 4px; }
-.task-table { margin-top: 12px; }
+.ai-page { padding: 16px; }
+.toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.el-alert { margin-bottom: 12px; }
+.search { max-width: 420px; margin-bottom: 16px; }
+.pager { margin-top: 16px; flex-wrap: wrap; }
 </style>

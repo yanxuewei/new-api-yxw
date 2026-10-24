@@ -1,0 +1,335 @@
+SERVICES customer-service,frontend,gateway,mysql,nacos,order-service,product-service,redis,supplier-service,user-service,warehouse-service
+ROUTES [{"id": "refresh-disabled", "uri": "http://warehouse-service:8085", "predicates": ["Path=/api/auth/refresh"], "filters": ["StripPrefix=1"]}, {"id": "auth", "uri": "http://user-service:8081", "predicates": ["Path=/api/auth/**"], "filters": ["StripPrefix=1"]}, {"id": "order", "uri": "http://order-service:8083", "predicates": ["Path=/api/order/**"], "filters": ["StripPrefix=1"]}, {"id": "product", "uri": "http://product-service:8082", "predicates": ["Path=/api/product/**"], "filters": ["StripPrefix=1"]}, {"id": "customer", "uri": "http://customer-service:8087", "predicates": ["Path=/api/customer/**"], "filters": ["StripPrefix=1"]}, {"id": "supplier", "uri": "http://supplier-service:8088", "predicates": ["Path=/api/supplier/**"], "filters": ["StripPrefix=1"]}, {"id": "repair", "uri": "http://warehouse-service:8085", "predicates": ["Path=/api/inventory/**,/api/warehouse/**,/api/logistics/**,/api/finance/**,/api/platform/**,/api/user/**,/api/role/**,/api/department/**,/api/permission/**"], "filters": ["StripPrefix=1"]}]
+MODEL_FILE erp-ai-assistant-service/src/main/resources/application.yml .llm.enabled placeholder 
+MODEL_FILE erp-ai-assistant-service/src/main/resources/application.yml .llm.api-key placeholder 
+MODEL_FILE erp-ai-assistant-service/src/main/resources/application.yml .llm.base-url placeholder 
+MODEL_FILE erp-ai-assistant-service/src/main/resources/application.yml .llm.model placeholder 
+MODEL_FILE erp-ai-assistant-service/src/main/resources/application.yml .llm.timeout placeholder 
+MODEL_FILE erp-ai-assistant-service/src/main/resources/application.yml .llm.max-tokens placeholder 
+MODEL_FILE erp-ai-assistant-service/src/main/resources/application.yml .llm.temperature placeholder 
+MODEL_FILE erp-ai-assistant-service/src/main/resources/application.yml .llm.provider placeholder 
+MODEL_FILE erp-product-description-service/src/main/resources/application.yml .llm.enabled placeholder 
+MODEL_FILE erp-product-description-service/src/main/resources/application.yml .llm.api-key placeholder 
+MODEL_FILE erp-product-description-service/src/main/resources/application.yml .llm.base-url placeholder 
+MODEL_FILE erp-product-description-service/src/main/resources/application.yml .llm.model placeholder 
+MODEL_FILE erp-product-description-service/src/main/resources/application.yml .llm.timeout placeholder 
+MODEL_FILE erp-product-description-service/src/main/resources/application.yml .llm.max-tokens placeholder 
+MODEL_FILE erp-product-description-service/src/main/resources/application.yml .llm.temperature placeholder 
+MODEL_FILE erp-product-description-service/src/main/resources/application.yml .llm.provider placeholder 
+DATABASES
+erp
+erp_customer
+erp_finance
+erp_inventory
+erp_logistics
+erp_order
+erp_platform
+erp_product
+erp_supplier
+erp_user
+erp_warehouse
+information_schema
+mysql
+performance_schema
+sys
+
+TABLES
+erp_customer	t_customer	1
+erp_customer	t_customer_follow_record	0
+erp_customer	t_customer_group	0
+erp_customer	t_customer_tag	0
+erp_customer	t_customer_tag_relation	0
+erp_finance	t_finance_account	0
+erp_finance	t_finance_category	0
+erp_finance	t_finance_flow	0
+erp_finance	t_finance_flow_meta	0
+erp_inventory	t_inventory	0
+erp_inventory	t_inventory_log	0
+erp_inventory	t_repair_alert_quantity_override	0
+erp_inventory	t_repair_alert_record	0
+erp_inventory	t_repair_alert_replenishment	0
+erp_inventory	t_repair_alert_rule	0
+erp_inventory	t_repair_alert_settings	0
+erp_inventory	t_repair_inventory_guard	0
+erp_inventory	t_repair_inventory_location	0
+erp_logistics	t_logistics_channel	0
+erp_logistics	t_logistics_rate	0
+erp_order	t_order	0
+erp_order	t_order_item	0
+erp_platform	t_platform_config	4
+erp_platform	t_sync_log	0
+erp_product	t_platform_product_mapping	0
+erp_product	t_product	0
+erp_product	t_product_category	0
+erp_product	t_product_sku	0
+erp_supplier	t_purchase_order	0
+erp_supplier	t_purchase_order_item	0
+erp_supplier	t_supplier	0
+erp_supplier	t_supplier_evaluation	0
+erp_user	t_department	0
+erp_user	t_permission	0
+erp_user	t_role	1
+erp_user	t_role_permission	0
+erp_user	t_user	5
+erp_user	t_user_department	0
+erp_user	t_user_role	1
+erp_warehouse	t_repair_warehouse_extra	2
+erp_warehouse	t_repair_warehouse_location	0
+erp_warehouse	t_warehouse	2
+erp_warehouse	t_warehouse_in_out	0
+erp_warehouse	t_warehouse_in_out_item	0
+
+BUSINESS_COLUMNS
+erp_inventory	t_inventory	id	bigint
+erp_inventory	t_inventory	sku_code	varchar(100)
+erp_inventory	t_inventory	warehouse_id	bigint
+erp_inventory	t_inventory	available_qty	int
+erp_inventory	t_inventory	locked_qty	int
+erp_inventory	t_inventory	total_qty	int
+erp_inventory	t_inventory	safety_stock	int
+erp_inventory	t_inventory	min_stock	int
+erp_inventory	t_inventory	max_stock	int
+erp_inventory	t_inventory	create_time	datetime
+erp_inventory	t_inventory	update_time	datetime
+erp_inventory	t_inventory_log	id	bigint
+erp_inventory	t_inventory_log	sku_code	varchar(100)
+erp_inventory	t_inventory_log	warehouse_id	bigint
+erp_inventory	t_inventory_log	change_type	varchar(50)
+erp_inventory	t_inventory_log	change_qty	int
+erp_inventory	t_inventory_log	before_qty	int
+erp_inventory	t_inventory_log	after_qty	int
+erp_inventory	t_inventory_log	order_no	varchar(100)
+erp_inventory	t_inventory_log	remark	varchar(500)
+erp_inventory	t_inventory_log	create_time	datetime
+erp_inventory	t_repair_alert_quantity_override	suggestion_id	bigint
+erp_inventory	t_repair_alert_quantity_override	quantity	int
+erp_inventory	t_repair_alert_record	id	bigint
+erp_inventory	t_repair_alert_record	rule_id	bigint
+erp_inventory	t_repair_alert_record	inventory_id	bigint
+erp_inventory	t_repair_alert_record	product_id	bigint
+erp_inventory	t_repair_alert_record	sku	varchar(100)
+erp_inventory	t_repair_alert_record	product_name	varchar(255)
+erp_inventory	t_repair_alert_record	warehouse_id	bigint
+erp_inventory	t_repair_alert_record	warehouse_name	varchar(200)
+erp_inventory	t_repair_alert_record	current_stock	int
+erp_inventory	t_repair_alert_record	alert_stock	int
+erp_inventory	t_repair_alert_record	safe_stock	int
+erp_inventory	t_repair_alert_record	alert_type	varchar(20)
+erp_inventory	t_repair_alert_record	message	varchar(1000)
+erp_inventory	t_repair_alert_record	status	varchar(20)
+erp_inventory	t_repair_alert_record	handler_id	bigint
+erp_inventory	t_repair_alert_record	handler_name	varchar(200)
+erp_inventory	t_repair_alert_record	handle_time	datetime
+erp_inventory	t_repair_alert_record	handle_remark	varchar(1000)
+erp_inventory	t_repair_alert_record	notified	tinyint
+erp_inventory	t_repair_alert_record	create_time	datetime
+erp_inventory	t_repair_alert_record	update_time	datetime
+erp_inventory	t_repair_alert_record	pending_slot	tinyint
+erp_inventory	t_repair_alert_replenishment	id	bigint
+erp_inventory	t_repair_alert_replenishment	alert_id	bigint
+erp_inventory	t_repair_alert_replenishment	rule_id	bigint
+erp_inventory	t_repair_alert_replenishment	inventory_id	bigint
+erp_inventory	t_repair_alert_replenishment	product_id	bigint
+erp_inventory	t_repair_alert_replenishment	sku	varchar(100)
+erp_inventory	t_repair_alert_replenishment	product_name	varchar(255)
+erp_inventory	t_repair_alert_replenishment	warehouse_id	bigint
+erp_inventory	t_repair_alert_replenishment	warehouse_name	varchar(200)
+erp_inventory	t_repair_alert_replenishment	current_stock	int
+erp_inventory	t_repair_alert_replenishment	safe_stock	int
+erp_inventory	t_repair_alert_replenishment	suggested_quantity	bigint
+erp_inventory	t_repair_alert_replenishment	estimated_price	decimal(18,2)
+erp_inventory	t_repair_alert_replenishment	status	varchar(20)
+erp_inventory	t_repair_alert_replenishment	confirm_user_id	bigint
+erp_inventory	t_repair_alert_replenishment	confirm_user_name	varchar(200)
+erp_inventory	t_repair_alert_replenishment	confirm_time	datetime
+erp_inventory	t_repair_alert_replenishment	remark	varchar(1000)
+erp_inventory	t_repair_alert_replenishment	suggested_date	datetime
+erp_inventory	t_repair_alert_replenishment	expected_arrival_date	datetime
+erp_inventory	t_repair_alert_replenishment	create_time	datetime
+erp_inventory	t_repair_alert_replenishment	update_time	datetime
+erp_inventory	t_repair_alert_rule	id	bigint
+erp_inventory	t_repair_alert_rule	product_id	bigint
+erp_inventory	t_repair_alert_rule	sku	varchar(100)
+erp_inventory	t_repair_alert_rule	product_name	varchar(255)
+erp_inventory	t_repair_alert_rule	warehouse_id	bigint
+erp_inventory	t_repair_alert_rule	warehouse_name	varchar(200)
+erp_inventory	t_repair_alert_rule	safe_stock	int
+erp_inventory	t_repair_alert_rule	alert_stock	int
+erp_inventory	t_repair_alert_rule	min_stock	int
+erp_inventory	t_repair_alert_rule	alert_type	varchar(20)
+erp_inventory	t_repair_alert_rule	advance_days	int
+erp_inventory	t_repair_alert_rule	notify_type	varchar(100)
+erp_inventory	t_repair_alert_rule	notify_to	varchar(1000)
+erp_inventory	t_repair_alert_rule	email_list	varchar(1000)
+erp_inventory	t_repair_alert_rule	phone_list	varchar(1000)
+erp_inventory	t_repair_alert_rule	enabled	tinyint
+erp_inventory	t_repair_alert_rule	remark	varchar(1000)
+erp_inventory	t_repair_alert_rule	deleted	tinyint
+erp_inventory	t_repair_alert_rule	create_time	datetime
+erp_inventory	t_repair_alert_rule	update_time	datetime
+erp_inventory	t_repair_alert_settings	id	int
+erp_inventory	t_repair_alert_settings	enable_alert	tinyint
+erp_inventory	t_repair_alert_settings	default_advance_days	int
+erp_inventory	t_repair_alert_settings	default_notify_to	varchar(1000)
+erp_inventory	t_repair_alert_settings	updated_by	bigint
+erp_inventory	t_repair_alert_settings	update_time	datetime
+erp_inventory	t_repair_inventory_guard	id	int
+erp_inventory	t_repair_inventory_location	inventory_id	bigint
+erp_inventory	t_repair_inventory_location	location_id	bigint
+erp_order	t_order	id	bigint
+erp_order	t_order	platform	varchar(50)
+erp_order	t_order	shop_id	varchar(100)
+erp_order	t_order	platform_order_no	varchar(100)
+erp_order	t_order	internal_order_no	varchar(100)
+erp_order	t_order	buyer_id	varchar(100)
+erp_order	t_order	buyer_name	varchar(200)
+erp_order	t_order	buyer_email	varchar(200)
+erp_order	t_order	buyer_phone	varchar(50)
+erp_order	t_order	order_amount	decimal(18,2)
+erp_order	t_order	product_amount	decimal(18,2)
+erp_order	t_order	shipping_amount	decimal(18,2)
+erp_order	t_order	tax_amount	decimal(18,2)
+erp_order	t_order	discount_amount	decimal(18,2)
+erp_order	t_order	currency_code	varchar(10)
+erp_order	t_order	status	varchar(50)
+erp_order	t_order	payment_status	varchar(50)
+erp_order	t_order	payment_method	varchar(50)
+erp_order	t_order	payment_time	datetime
+erp_order	t_order	shipping_method	varchar(100)
+erp_order	t_order	logistics_company	varchar(100)
+erp_order	t_order	tracking_number	varchar(200)
+erp_order	t_order	shipping_time	datetime
+erp_order	t_order	recipient_name	varchar(200)
+erp_order	t_order	recipient_country	varchar(100)
+erp_order	t_order	recipient_state	varchar(100)
+erp_order	t_order	recipient_city	varchar(100)
+erp_order	t_order	recipient_address	varchar(255)
+erp_order	t_order	recipient_postal_code	varchar(20)
+erp_order	t_order	recipient_phone	varchar(50)
+erp_order	t_order	remark	text
+erp_order	t_order	raw_data	text
+erp_order	t_order	create_time	datetime
+erp_order	t_order	update_time	datetime
+erp_order	t_order	create_by	varchar(100)
+erp_order	t_order	update_by	varchar(100)
+erp_order	t_order	deleted	tinyint
+erp_order	t_order_item	id	bigint
+erp_order	t_order_item	order_id	bigint
+erp_order	t_order_item	platform_product_id	varchar(100)
+erp_order	t_order_item	internal_product_id	varchar(100)
+erp_order	t_order_item	platform_sku	varchar(100)
+erp_order	t_order_item	internal_sku	varchar(100)
+erp_order	t_order_item	product_name	varchar(500)
+erp_order	t_order_item	product_image	varchar(500)
+erp_order	t_order_item	unit_price	decimal(18,2)
+erp_order	t_order_item	quantity	int
+erp_order	t_order_item	total_amount	decimal(18,2)
+erp_order	t_order_item	currency_code	varchar(10)
+erp_order	t_order_item	create_time	datetime
+erp_order	t_order_item	update_time	datetime
+erp_order	t_order_item	deleted	tinyint
+erp_product	t_platform_product_mapping	id	bigint
+erp_product	t_platform_product_mapping	internal_sku	varchar(100)
+erp_product	t_platform_product_mapping	platform	varchar(50)
+erp_product	t_platform_product_mapping	shop_id	varchar(100)
+erp_product	t_platform_product_mapping	platform_product_id	varchar(100)
+erp_product	t_platform_product_mapping	platform_sku	varchar(100)
+erp_product	t_platform_product_mapping	mapping_data	text
+erp_product	t_platform_product_mapping	create_time	datetime
+erp_product	t_platform_product_mapping	update_time	datetime
+erp_product	t_platform_product_mapping	deleted	tinyint
+erp_product	t_product	id	bigint
+erp_product	t_product	internal_sku	varchar(100)
+erp_product	t_product	product_name	varchar(500)
+erp_product	t_product	product_name_en	varchar(500)
+erp_product	t_product	category_id	bigint
+erp_product	t_product	brand	varchar(100)
+erp_product	t_product	main_image	varchar(500)
+erp_product	t_product	images	text
+erp_product	t_product	description	text
+erp_product	t_product	description_en	text
+erp_product	t_product	weight	decimal(10,2)
+erp_product	t_product	length	decimal(10,2)
+erp_product	t_product	width	decimal(10,2)
+erp_product	t_product	height	decimal(10,2)
+erp_product	t_product	status	tinyint
+erp_product	t_product	create_time	datetime
+erp_product	t_product	update_time	datetime
+erp_product	t_product	create_by	varchar(100)
+erp_product	t_product	update_by	varchar(100)
+erp_product	t_product	deleted	tinyint
+erp_product	t_product_category	id	bigint
+erp_product	t_product_category	parent_id	bigint
+erp_product	t_product_category	category_name	varchar(200)
+erp_product	t_product_category	category_name_en	varchar(200)
+erp_product	t_product_category	category_code	varchar(100)
+erp_product	t_product_category	sort_order	int
+erp_product	t_product_category	status	tinyint
+erp_product	t_product_category	create_time	datetime
+erp_product	t_product_category	update_time	datetime
+erp_product	t_product_category	deleted	tinyint
+erp_product	t_product_sku	id	bigint
+erp_product	t_product_sku	product_id	bigint
+erp_product	t_product_sku	sku_code	varchar(100)
+erp_product	t_product_sku	sku_name	varchar(200)
+erp_product	t_product_sku	specs	text
+erp_product	t_product_sku	cost_price	decimal(18,2)
+erp_product	t_product_sku	sale_price	decimal(18,2)
+erp_product	t_product_sku	status	tinyint
+erp_product	t_product_sku	create_time	datetime
+erp_product	t_product_sku	update_time	datetime
+erp_product	t_product_sku	deleted	tinyint
+erp_warehouse	t_repair_warehouse_extra	warehouse_id	bigint
+erp_warehouse	t_repair_warehouse_extra	email	varchar(200)
+erp_warehouse	t_repair_warehouse_extra	is_default	tinyint
+erp_warehouse	t_repair_warehouse_location	id	bigint
+erp_warehouse	t_repair_warehouse_location	warehouse_id	bigint
+erp_warehouse	t_repair_warehouse_location	location_code	varchar(100)
+erp_warehouse	t_repair_warehouse_location	location_type	varchar(50)
+erp_warehouse	t_repair_warehouse_location	zone	varchar(100)
+erp_warehouse	t_repair_warehouse_location	row_code	varchar(100)
+erp_warehouse	t_repair_warehouse_location	column_code	varchar(100)
+erp_warehouse	t_repair_warehouse_location	level_code	varchar(100)
+erp_warehouse	t_repair_warehouse_location	status	tinyint
+erp_warehouse	t_repair_warehouse_location	deleted	tinyint
+erp_warehouse	t_repair_warehouse_location	create_time	datetime
+erp_warehouse	t_repair_warehouse_location	update_time	datetime
+erp_warehouse	t_warehouse	id	bigint
+erp_warehouse	t_warehouse	warehouse_code	varchar(50)
+erp_warehouse	t_warehouse	warehouse_name	varchar(200)
+erp_warehouse	t_warehouse	warehouse_type	varchar(50)
+erp_warehouse	t_warehouse	country	varchar(100)
+erp_warehouse	t_warehouse	province	varchar(100)
+erp_warehouse	t_warehouse	city	varchar(100)
+erp_warehouse	t_warehouse	address	varchar(500)
+erp_warehouse	t_warehouse	contact_person	varchar(100)
+erp_warehouse	t_warehouse	contact_phone	varchar(50)
+erp_warehouse	t_warehouse	status	tinyint
+erp_warehouse	t_warehouse	create_time	datetime
+erp_warehouse	t_warehouse	update_time	datetime
+erp_warehouse	t_warehouse	deleted	tinyint
+erp_warehouse	t_warehouse_in_out	id	bigint
+erp_warehouse	t_warehouse_in_out	warehouse_id	bigint
+erp_warehouse	t_warehouse_in_out	in_out_type	varchar(50)
+erp_warehouse	t_warehouse_in_out	order_no	varchar(100)
+erp_warehouse	t_warehouse_in_out	status	varchar(50)
+erp_warehouse	t_warehouse_in_out	total_items	int
+erp_warehouse	t_warehouse_in_out	operator	varchar(100)
+erp_warehouse	t_warehouse_in_out	remark	varchar(500)
+erp_warehouse	t_warehouse_in_out	create_time	datetime
+erp_warehouse	t_warehouse_in_out	update_time	datetime
+erp_warehouse	t_warehouse_in_out_item	id	bigint
+erp_warehouse	t_warehouse_in_out_item	in_out_id	bigint
+erp_warehouse	t_warehouse_in_out_item	sku_code	varchar(100)
+erp_warehouse	t_warehouse_in_out_item	quantity	int
+erp_warehouse	t_warehouse_in_out_item	create_time	datetime
+
+EXACT_COUNT erp_product t_product 0
+EXACT_COUNT erp_order t_order 0
+EXACT_COUNT erp_order t_order_item 0
+EXACT_COUNT erp_inventory t_inventory 0
+EXACT_COUNT erp_product t_product_sku 0
+ENV_FILE .env absent
+ENV_FILE .env.minimal absent
+ENV_FILE .secrets/ai-center.env absent
+AUDIT_DONE
