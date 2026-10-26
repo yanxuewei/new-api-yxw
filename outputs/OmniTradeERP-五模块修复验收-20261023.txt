@@ -1,0 +1,61 @@
+OmniTradeERP 五模块修复与验收记录
+2026-10-23 18:14（中国标准时间）
+
+结论
+已在 ops:/opt/OmniTradeERP 的 docker-compose.minimal.yml 部署真实业务接口及新版前端。
+库存、物流、平台配置、财务、用户管理主要查询和基础写入已完成API验收。
+仓库列表/库位和库存预警联动一并补齐。不是全系统生产就绪认证，边界见下。
+
+实现与资源
+为保持最低资源，将新增Controller并入现有warehouse-service，未新增常驻JVM。
+仓储容器限额320→384MiB，堆144MiB，Metaspace160MiB，关闭未使用Hibernate。
+首次业务验收发现旧96MiB元空间不足，已修复；修复后库存与全部模块回归通过。
+全栈仍11容器，限额合计3488MiB；18:12实占合计约2310MiB（2.26GiB），主机MemAvailable621MiB。
+Swap约529MiB，短采样存在换入，无换出；不代表高并发容量或长期稳定性保证。
+前端构建移到本机隔离Node环境，成功；服务器构建曾因内存不足停止，最终未使用失败产物。
+
+已验证
+1. 查询：库存统计/列表，仓库列表，物流渠道/费率，财务账户/分类/流水/统计/趋势，平台配置，用户/角色/部门/权限。
+2. 用户：新增、更新、重置密码、删除；禁止删除当前管理员。密码哈希不返回。
+3. 平台：配置新增、更新、删除；密钥掩码返回，掩码回传不覆盖密钥。
+4. 财务：入账100→修改80→撤销0；存在流水时禁止删账户；BigDecimal，币种隔离。
+5. 物流：渠道/费率新增、按真实费率计算2kg=20、删除；无随机报价。
+6. 库存：真实商品/SKU关联；调整、非法扣减拒绝、失败导入整批回滚、锁定量保护、跨仓调拨守恒、双向流水、真实XLSX导出、有关联库存禁止删仓/库位。
+7. 预警：创建规则、库存写入触发、重复检查去重、补货建议确认、处理、统计、设置保存。
+8. 公网HTTPS：登录及五模块核心列表200；未登录401；普通用户403；重置密码后旧token401。
+9. 旧refresh入口401，发现路由关闭，/api/erp-user-service/auth/refresh返回404；用户服务8081仅本机绑定。
+验收使用标注VERIFY的记录；库存测试精确清理，其他记录通过业务API删除/冲销，逻辑删除记录仍保留供追溯。
+
+账号
+旧omnitradeerp_mysql-data克隆后只读核查，用户/角色/关联表均为空，无可迁移管理员。
+经用户确认创建 erpadmin。强随机密码保存在服务器：
+/opt/OmniTradeERP/ops/module-repair/erpadmin.credentials（权限600）
+密码未写入仓库、公开验收报告或工具输出。
+登录 https://workflow-erp.likha.hk/ ，请强制刷新并重新登录。
+读取凭据：ssh root@ops 'cat /opt/OmniTradeERP/ops/module-repair/erpadmin.credentials'
+
+明确未完成/适用边界
+- 平台真实连接测试、订单/商品同步仍返回明确501，需要平台凭据及各平台SDK适配；没有假成功。
+- 预警支持站内；邮件、短信、过期批次预警未接入。补货建议确认不等于采购单创建或实际入库。
+- 新管理接口当前按管理员角色授权；非管理员被403拒绝。角色/权限数据维护可用，但细粒度权限码尚未接入这些接口。
+- 旧刷新令牌机制不安全，当前禁用自动续期，token到期需重新登录。
+- 验收通过HTTP接口与前端生产构建完成，尚未执行真实浏览器逐页点击验收。
+- 这是轻量基础实现，未完成全面并发、压力、财务审计和第三方集成验收。
+
+生效与源码
+/opt/OmniTradeERP/docker-compose.minimal.yml
+/opt/OmniTradeERP/erp-warehouse-service/src/main/java/com/crossborder/erp/warehouse/repair/
+/opt/OmniTradeERP/erp-web/src/
+/opt/OmniTradeERP/ops/module-repair/（构建、增量SQL、验收脚本、镜像标签）
+本机版本化修复工作目录：E:/git_code/new-api-yxw/likha/ops/omnitrade-modules/
+后端镜像：omnitrade-local/warehouse-service:modules-20261023-180707
+前端镜像：omnitrade-local/frontend:modules-20261023-181047
+未提交或推送任何Git变更。
+
+备份与回滚
+修复前配置与数据库：/opt/OmniTradeERP/.ops-backups/modules-20261023-174435/
+最终安全调整前：/opt/OmniTradeERP/.ops-backups/final-modules-20261023-181135/
+前端更新备份：/opt/OmniTradeERP/.ops-backups/frontend-modules-20261023-181047/
+回滚：bash /opt/OmniTradeERP/ops/module-repair/rollback-modules.sh
+回滚恢复修复前Compose/镜像，会恢复原页面故障及原访问策略；增量数据库表、管理员和源码保留，不删除数据。
+常规启动：cd /opt/OmniTradeERP && docker compose -f docker-compose.minimal.yml up -d --no-build

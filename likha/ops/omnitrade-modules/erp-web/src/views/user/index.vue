@@ -440,6 +440,8 @@ const loadAllRoles = async () => {
     const res = await roleApi.getRoles()
     allRoles.value = res || []
   } catch (error) {
+    allRoles.value = []
+    roleList.value = []
     console.error('加载角色列表失败:', error)
   }
 }
@@ -452,6 +454,8 @@ const loadRoles = async () => {
     const pageData = res
     roleList.value = pageData.records || []
   } catch (error) {
+    allRoles.value = []
+    roleList.value = []
     console.error('加载角色列表失败:', error)
   } finally {
     roleLoading.value = false
@@ -475,6 +479,7 @@ const loadDepartments = async () => {
     }
     deptList.value = flatten(res || [])
   } catch (error) {
+    deptList.value = []
     console.error('加载部门列表失败:', error)
   } finally {
     deptLoading.value = false
@@ -524,6 +529,10 @@ const handleUserSubmit = async () => {
   const valid = await userFormRef.value?.validate().catch(() => false)
   if (!valid) return
 
+  if (!userForm.id && new TextEncoder().encode(userForm.password).length > 72) {
+    ElMessage.warning('密码 UTF-8 长度不能超过72字节')
+    return
+  }
   userSubmitLoading.value = true
   try {
     if (userForm.id) {
@@ -564,8 +573,7 @@ const handleResetPassword = async (row: SysUser) => {
     const { value } = await ElMessageBox.prompt(`请输入用户 ${row.username} 的新密码`, '重置密码', {
       inputType: 'password',
       inputValue: '',
-      inputPattern: /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9\s])\S{12,72}$/,
-      inputErrorMessage: '密码需为12–72位，包含大写、小写字母、数字和特殊字符',
+      inputValidator: (value: string) => /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9\s])\S{12,72}$/.test(value) && new TextEncoder().encode(value).length <= 72 || '密码需至少12位且不超过72字节，包含大写、小写字母、数字和特殊字符',
       confirmButtonText: '重置',
       cancelButtonText: '取消',
       closeOnClickModal: false
@@ -588,10 +596,15 @@ const handleUserStatus = async (row: SysUser) => {
 }
 
 const handleAssignRole = async (row: SysUser) => {
-  currentUser.value = row
-  selectedRoleIds.value = row.roles?.map(r => r.id) || []
-  await loadAllRoles()
-  roleDialogVisible.value = true
+  try {
+    const [user, roles] = await Promise.all([userApi.getUser(row.id), roleApi.getRoles()])
+    currentUser.value = user
+    selectedRoleIds.value = user.roles?.map(r => r.id) || []
+    allRoles.value = roles
+    roleDialogVisible.value = true
+  } catch (error) {
+    console.error('加载用户角色失败', error)
+  }
 }
 
 const handleRoleSubmit = async () => {
@@ -682,6 +695,7 @@ const handleAssignPermission = async (row: Role) => {
     console.error('加载权限失败:', error)
     permissionTree.value = []
     checkedPermIds.value = []
+    return
   }
   permDialogVisible.value = true
 }

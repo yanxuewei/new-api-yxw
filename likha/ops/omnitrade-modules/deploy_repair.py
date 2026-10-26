@@ -9,11 +9,15 @@ if mode=='prepare':
  shutil.copy2(str(COMPOSE),str(backup/COMPOSE.name))
  with (backup/'mysql-all.sql').open('w') as out:subprocess.run(['docker','exec','-e','MYSQL_PWD='+pw,'erp-minimal-mysql','mysqldump','-uroot','--single-transaction','--all-databases','--routines','--events','--set-gtid-purged=OFF'],stdout=out,check=True)
  if (backup/'mysql-all.sql').stat().st_size<1000:raise RuntimeError('Backup too small')
- config=yaml.safe_load(COMPOSE.read_text());spec=config['services']['warehouse-service'];spec['image']=(SRC/'image-tag.txt').read_text().strip();spec['environment']['SPRING_DATA_REDIS_DATABASE']='0';spec['environment']['MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE']='health';spec['environment']['SERVER_ERROR_INCLUDE_MESSAGE']='always';spec['mem_limit']='384m';spec['memswap_limit']='448m'
+ config=yaml.safe_load(COMPOSE.read_text());spec=config['services']['warehouse-service'];spec['image']=(SRC/'image-tag.txt').read_text().strip();spec['environment']['SPRING_DATA_REDIS_DATABASE']='2';spec['environment']['MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE']='health';spec['environment']['SERVER_ERROR_INCLUDE_MESSAGE']='always';spec['mem_limit']='384m';spec['memswap_limit']='448m'
  env=spec['environment'];env['SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE']='3'
+ env['JAVA_TOOL_OPTIONS']='-Xms64m -Xmx144m -XX:+UseSerialGC -XX:ActiveProcessorCount=1 -XX:MaxMetaspaceSize=160m -XX:ReservedCodeCacheSize=32m -XX:MaxDirectMemorySize=16m -Xss512k -XX:+ExitOnOutOfMemoryError'
+ env['SPRING_AUTOCONFIGURE_EXCLUDE']='org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration,org.springframework.boot.autoconfigure.data.jpa.JpaRepositoriesAutoConfiguration'
+ env['SPRING_JPA_OPEN_IN_VIEW']='false'
  gateway=config['services']['gateway']['environment']
  # Full route list replacement avoids accidental index overlap with earlier environment overrides.
  current=json.loads(gateway.get('SPRING_APPLICATION_JSON','{}'));routes=[
+  {'id':'refresh-disabled','uri':'http://warehouse-service:8085','predicates':['Path=/api/auth/refresh'],'filters':['StripPrefix=1']},
   {'id':'auth','uri':'http://user-service:8081','predicates':['Path=/api/auth/**'],'filters':['StripPrefix=1']},
   {'id':'order','uri':'http://order-service:8083','predicates':['Path=/api/order/**'],'filters':['StripPrefix=1']},
   {'id':'product','uri':'http://product-service:8082','predicates':['Path=/api/product/**'],'filters':['StripPrefix=1']},
@@ -23,12 +27,13 @@ if mode=='prepare':
  ]
  for key in list(gateway):
   if key.startswith('SPRING_CLOUD_GATEWAY_ROUTES_'):del gateway[key]
- current['spring.cloud.gateway.routes']=routes;gateway['SPRING_APPLICATION_JSON']=json.dumps(current)
+ current.pop('spring.cloud.gateway.routes',None)
+ current.setdefault('spring',{}).setdefault('cloud',{}).setdefault('gateway',{})['routes']=routes;gateway['SPRING_APPLICATION_JSON']=json.dumps(current)
  gateway['MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE']='health'
- candidate=SRC/'docker-compose.candidate.yml';candidate.write_text(yaml.safe_dump(config,sort_keys=False,allow_unicode=True));run(['docker','compose','-f',str(candidate),'config','--quiet'])
+ candidate=SRC/'docker-compose.candidate.yml';candidate.write_text(yaml.safe_dump(config,allow_unicode=True));run(['docker','compose','-f',str(candidate),'config','--quiet'])
  (SRC/'last-backup.txt').write_text(str(backup)+'\n');print('BACKUP',backup);print('CANDIDATE',candidate)
 elif mode=='migrate':
- for name in ['inventory-migration.sql','finance-logistics-migration.sql','user-migration.sql']:
+ for name in ['inventory-migration.sql','alerts-migration.sql','finance-logistics-migration.sql','user-migration.sql']:
   sql=(SRC/name).read_text();assert 'DROP ' not in sql.upper();print(name,mysql(sql))
  if mysql("SELECT COUNT(*) FROM information_schema.columns WHERE TABLE_SCHEMA='erp_user' AND TABLE_NAME='t_role' AND COLUMN_NAME='sort';").strip()=='0':print(mysql('ALTER TABLE erp_user.t_role ADD COLUMN sort INT NOT NULL DEFAULT 0;'))
  print('MIGRATIONS_OK')

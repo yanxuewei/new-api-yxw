@@ -1,129 +1,92 @@
 <template>
-  <div class="ip-page">
-    <el-row :gutter="16" class="ip-summary">
-      <el-col :span="6"><el-card shadow="never"><el-statistic title="待补货 SKU" :value="high" :value-style="{ color: '#f56c6c' }" /></el-card></el-col>
-      <el-col :span="6"><el-card shadow="never"><el-statistic title="中等紧急" :value="medium" :value-style="{ color: '#e6a23c' }" /></el-card></el-col>
-      <el-col :span="6"><el-card shadow="never"><el-statistic title="低优先级" :value="low" :value-style="{ color: '#909399' }" /></el-card></el-col>
-      <el-col :span="6"><el-card shadow="never"><el-statistic title="下次同步" :value="lastSync" /></el-card></el-col>
-    </el-row>
-
+  <div class="ai-page">
     <el-card shadow="never">
-      <template #header>
-        <div class="card-head">
-          <span>AI 智能补货建议（基于 90 天销量 + 季节系数 + 促销计划）</span>
-          <el-button type="primary" @click="refresh">刷新预测</el-button>
-        </div>
-      </template>
-
-      <el-table :data="list" v-loading="loading" stripe>
-        <el-table-column prop="sku"            label="SKU" width="180" />
-        <el-table-column prop="productName"    label="商品" show-overflow-tooltip />
-        <el-table-column label="当前库存" width="100">
-          <template #default="{ row }">{{ row.currentStock }}</template>
-        </el-table-column>
-        <el-table-column prop="predicted30DaySales" label="预测 30 天销量" width="140" />
-        <el-table-column prop="recommendedReplenishment" label="建议补货量" width="140">
-          <template #default="{ row }">
-            <el-tag :type="row.recommendedReplenishment > 0 ? 'success' : 'info'">
-              {{ row.recommendedReplenishment > 0 ? '+' + row.recommendedReplenishment : '无需补货' }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="safetyStock"    label="安全库存"   width="100" />
-        <el-table-column prop="urgency"        label="紧急程度"   width="120">
-          <template #default="{ row }">
-            <el-tag :type="urgencyType(row.urgency)" size="small">{{ row.urgencyLabel }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="180" fixed="right">
-          <template #default="{ row }">
-            <el-button link type="primary" size="small" @click="viewChart(row)">预测趋势</el-button>
-            <el-button link type="success" size="small" @click="createPO(row)">创建采购单</el-button>
-          </template>
-        </el-table-column>
+      <template #header><div class="toolbar"><strong>库存预测与补货建议</strong><el-button :loading="loading" @click="load">重新加载预测</el-button></div></template>
+      <el-alert title="预测仅依据系统内实际销售记录；数据不足时不推算销量或补货数量。采购需到采购管理填写供应商、采购价格等信息，本页不会生成采购单。" type="info" :closable="false" />
+      <el-alert v-if="error" :title="error" type="error" :closable="false" />
+      <el-table v-loading="loading" :data="list" stripe empty-text="暂无商品库存数据">
+        <el-table-column prop="sku" label="SKU" min-width="160" />
+        <el-table-column prop="productName" label="商品" min-width="180" />
+        <el-table-column label="可用库存" width="110"><template #default="{ row }">{{ row.inventoryRecordExists ? row.availableStock : '无库存记录' }}</template></el-table-column>
+        <el-table-column label="预测 30 天销量" width="140"><template #default="{ row }">{{ predictionValue(row, row.predictedDemand) }}</template></el-table-column>
+        <el-table-column label="建议补货量" width="130"><template #default="{ row }">{{ predictionValue(row, row.replenishmentQty) }}</template></el-table-column>
+        <el-table-column label="安全库存" width="110"><template #default="{ row }">{{ row.inventoryRecordExists ? row.safetyStock : '未设置' }}</template></el-table-column>
+        <el-table-column label="预计可售天数" width="130"><template #default="{ row }">{{ predictionValue(row, row.stockoutDays) }}</template></el-table-column>
+        <el-table-column prop="basis" label="计算依据" min-width="240" />
+        <el-table-column label="操作" width="110" fixed="right"><template #default="{ row }"><el-button link type="primary" :disabled="forecastLoading" @click="showForecast(row)">预测详情</el-button></template></el-table-column>
       </el-table>
+      <div class="toolbar pager"><span>第 {{ page }} 页，每页最多 100 个 SKU。</span><div><el-button :disabled="loading || page === 1" @click="page--; load()">上一页</el-button><el-button :disabled="loading || list.length < 100" @click="page++; load()">下一页</el-button></div></div>
     </el-card>
-
-    <el-dialog v-model="chartVisible" title="销量预测" width="640px">
-      <div v-if="chartData.length" class="chart-mock">
-        <div v-for="(d, i) in chartData" :key="i" class="bar" :style="{ height: Math.min(100, (d.value / 60) * 100) + '%' }">
-          <span class="bar-value">{{ d.value }}</span>
-          <span class="bar-label">{{ d.date }}</span>
-        </div>
+    <el-dialog v-model="forecastVisible" :title="`${selectedSku} 预测详情`" width="760px">
+      <el-alert v-if="forecastError" :title="forecastError" type="error" :closable="false" />
+      <el-button v-if="forecastError" :loading="forecastLoading" @click="loadForecast">重试</el-button>
+      <div v-loading="forecastLoading" class="forecast">
+        <el-empty v-if="!forecast && !forecastLoading" description="暂无预测数据" />
+        <template v-if="forecast">
+          <el-alert v-if="forecast.dataStatus === 'INSUFFICIENT_DATA'" title="历史销售数据不足，暂不提供预测。" type="warning" :closable="false" />
+          <el-descriptions :column="1" border>
+            <el-descriptions-item label="商品">{{ forecast.productName || selectedSku }}</el-descriptions-item>
+            <el-descriptions-item label="可用库存">{{ forecast.inventoryRecordExists ? forecast.availableStock : '无库存记录' }}</el-descriptions-item>
+            <el-descriptions-item label="观察期 / 销售日">{{ forecast.observationDays }} 天 / {{ forecast.salesDays }} 天</el-descriptions-item>
+            <el-descriptions-item label="预测 30 天销量">{{ predictionValue(forecast, forecast.predictedDemand) }}</el-descriptions-item>
+            <el-descriptions-item label="建议补货量">{{ predictionValue(forecast, forecast.replenishmentQty) }}</el-descriptions-item>
+            <el-descriptions-item label="计算依据">{{ forecast.basis || '暂无说明' }}</el-descriptions-item>
+          </el-descriptions>
+          <el-table v-if="forecast.dataStatus !== 'INSUFFICIENT_DATA'" :data="forecast.forecast || []" max-height="300" empty-text="暂无逐日预测">
+            <el-table-column prop="date" label="日期" />
+            <el-table-column label="预计销量（历史日均值）"><template #default="{ row }">{{ row.demand == null ? '数据不足' : Number(row.demand).toFixed(2) }}</template></el-table-column>
+          </el-table>
+        </template>
       </div>
     </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
-import { inventoryPredictApi } from '@/api/ai'
+import { onMounted, ref } from 'vue'
+import { aiCenterApi, aiError, type InventoryPrediction } from '@/api/ai'
 
-const list = ref<any[]>([])
+const list = ref<InventoryPrediction[]>([])
+const page = ref(1)
 const loading = ref(false)
-const lastSync = ref('')
-const chartVisible = ref(false)
-const chartData = ref<any[]>([])
-
-const urgencyMap: Record<string, { label: string; type: string }> = {
-  HIGH:   { label: '紧急', type: 'danger'  },
-  MEDIUM: { label: '中等', type: 'warning' },
-  LOW:    { label: '低',    type: 'info'    },
-}
-const urgencyType = (u: string) => (urgencyMap[u] || {}).type || ''
-const urgencyLabel = (u: string) => (urgencyMap[u] || {}).label || u
-
-const high = computed(() => list.value.filter(x => x.urgency === 'HIGH').length)
-const medium = computed(() => list.value.filter(x => x.urgency === 'MEDIUM').length)
-const low = computed(() => list.value.filter(x => x.urgency === 'LOW').length)
-
-onMounted(load)
+const error = ref('')
+const forecastVisible = ref(false)
+const forecastLoading = ref(false)
+const forecastError = ref('')
+const selectedSku = ref('')
+const forecast = ref<InventoryPrediction | null>(null)
+const predictionValue = (row: InventoryPrediction, value: number | null | undefined) => row.dataStatus === 'INSUFFICIENT_DATA' || value == null ? '数据不足' : value
 
 async function load() {
   loading.value = true
-  try {
-    list.value = await inventoryPredictApi.listSuggestions({})
-  } catch {
-    list.value = [
-      { sku: 'SKU-STN-004',     productName: '便携手机支架',       currentStock: 1920, predicted30DaySales: 1500, recommendedReplenishment: 0,    safetyStock: 300, urgency: 'LOW',    urgencyLabel: '低' },
-      { sku: 'SKU-USB-003-US',  productName: '65W GaN 充电器',      currentStock: 920,  predicted30DaySales: 1100, recommendedReplenishment: 380,  safetyStock: 200, urgency: 'MEDIUM', urgencyLabel: '中等' },
-      { sku: 'SKU-BLU-001-BLK', productName: '无线蓝牙耳机 Pro',   currentStock: 400,  predicted30DaySales: 580,  recommendedReplenishment: 280,  safetyStock: 100, urgency: 'HIGH',   urgencyLabel: '紧急' },
-      { sku: 'SKU-PWB-005-BLK', productName: '20000mAh 充电宝',     currentStock: 530,  predicted30DaySales: 480,  recommendedReplenishment: 50,   safetyStock: 100, urgency: 'LOW',    urgencyLabel: '低' },
-      { sku: 'SKU-WAT-002-BLK', productName: '智能手表 X1',         currentStock: 160,  predicted30DaySales: 220,  recommendedReplenishment: 160,  safetyStock: 50,  urgency: 'MEDIUM', urgencyLabel: '中等' },
-      { sku: 'SKU-BTY-010',     productName: '精华液 30ml',         currentStock: 760,  predicted30DaySales: 600,  recommendedReplenishment: 0,    safetyStock: 150, urgency: 'LOW',    urgencyLabel: '低' },
-    ]
-  } finally {
-    loading.value = false
-    lastSync.value = new Date().toLocaleString()
-  }
+  error.value = ''
+  try { list.value = await aiCenterApi.inventory({ limit: 100, offset: (page.value - 1) * 100 }) }
+  catch (e) { list.value = []; error.value = aiError(e) }
+  finally { loading.value = false }
 }
 
-function refresh() { load(); ElMessage.success('预测已刷新') }
-function viewChart(row: any) {
-  chartData.value = Array.from({ length: 30 }, (_, i) => ({
-    date: `D+${i + 1}`,
-    value: Math.round(row.predicted30DaySales / 30 + (Math.random() - 0.5) * 20),
-  }))
-  chartVisible.value = true
+async function showForecast(row: InventoryPrediction) {
+  selectedSku.value = row.sku
+  forecastVisible.value = true
+  await loadForecast()
 }
-function createPO(row: any) {
-  ElMessage.success(`已基于 AI 建议创建 ${row.sku} 的采购单（${row.recommendedReplenishment} 件）`)
+
+async function loadForecast() {
+  forecastLoading.value = true
+  forecastError.value = ''
+  forecast.value = null
+  try { forecast.value = await aiCenterApi.forecast(selectedSku.value) }
+  catch (e) { forecastError.value = aiError(e) }
+  finally { forecastLoading.value = false }
 }
+
+onMounted(load)
 </script>
 
 <style scoped>
-.ip-page { padding: 16px; }
-.ip-summary { margin-bottom: 16px; }
-.card-head { display: flex; justify-content: space-between; align-items: center; }
-.chart-mock {
-  display: flex; align-items: flex-end; gap: 4px; height: 220px;
-  border-bottom: 1px solid #eee; padding-bottom: 20px;
-}
-.chart-mock .bar {
-  flex: 1; min-width: 0; background: linear-gradient(180deg, #67c23a, #95d475);
-  border-radius: 3px 3px 0 0; position: relative; color: #fff; text-align: center;
-}
-.chart-mock .bar-label { position: absolute; bottom: -18px; left: 0; right: 0; font-size: 9px; color: #999; }
-.chart-mock .bar-value { position: absolute; top: -18px; left: 0; right: 0; font-size: 9px; color: #666; }
+.ai-page { padding: 16px; }
+.toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.el-alert { margin-bottom: 12px; }
+.forecast { min-height: 120px; }
+.pager { margin-top: 16px; flex-wrap: wrap; }
 </style>

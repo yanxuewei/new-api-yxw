@@ -205,9 +205,10 @@
         <el-table-column prop="categoryName" label="分类" width="120" />
         <el-table-column prop="accountName" label="账户" width="100" />
         <el-table-column prop="remark" label="备注" min-width="200" show-overflow-tooltip />
-        <el-table-column label="操作" width="100" fixed="right">
+        <el-table-column label="操作" width="150" fixed="right">
           <template #default="{ row }">
-            <el-button type="primary" link @click="handleViewFlow(row)">详情</el-button>
+            <el-button type="primary" link @click="handleViewFlow(row)">详情/编辑</el-button>
+            <el-button type="danger" link @click="handleDeleteFlow(row)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -247,7 +248,7 @@
           <el-input v-model="accountForm.bankName" placeholder="请输入银行或支付渠道" />
         </el-form-item>
         <el-form-item label="币种">
-          <el-select v-model="accountForm.currency" placeholder="请选择币种" style="width: 100%">
+          <el-select v-model="accountForm.currency" :disabled="!!accountForm.id" placeholder="请选择币种" style="width: 100%">
             <el-option label="人民币 (CNY)" value="CNY" />
             <el-option label="美元 (USD)" value="USD" />
             <el-option label="欧元 (EUR)" value="EUR" />
@@ -255,7 +256,7 @@
           </el-select>
         </el-form-item>
         <el-form-item label="初始余额">
-          <el-input-number v-model="accountForm.balance" :min="0" :precision="2" style="width: 200px" />
+          <el-input-number v-model="accountForm.balance" :disabled="!!accountForm.id" :min="0" :precision="2" style="width: 200px" />
         </el-form-item>
         <el-form-item label="设为默认">
           <el-switch v-model="accountForm.isDefault" :active-value="1" :inactive-value="0" />
@@ -290,6 +291,9 @@
           <el-select v-model="flowForm.accountId" placeholder="请选择账户" style="width: 200px">
             <el-option v-for="acc in accounts" :key="acc.id" :label="acc.accountName" :value="acc.id" />
           </el-select>
+        </el-form-item>
+        <el-form-item label="币种">
+          <span>{{ accounts.find(account => account.id === flowForm.accountId)?.currency || currency }}</span>
         </el-form-item>
         <el-form-item label="分类" prop="categoryId">
           <el-select v-model="flowForm.categoryId" placeholder="请选择分类" style="width: 200px">
@@ -414,6 +418,7 @@ const loadStats = async () => {
     const res = await financeFlowApi.getStatistics(params)
     stats.value = res || { totalIncome: 0, totalExpense: 0, profit: 0, recordCount: 0 }
   } catch (error) {
+    stats.value = { totalIncome: 0, totalExpense: 0, profit: 0, recordCount: 0 }
     console.error('加载统计失败:', error)
   }
 }
@@ -422,8 +427,9 @@ const loadStats = async () => {
 const loadAccounts = async () => {
   try {
     const res = await financeAccountApi.getAccounts(currency.value)
-    accounts.value = res || []
+    accounts.value = (res || []).filter(account => account.currency === currency.value)
   } catch (error) {
+    accounts.value = []
     console.error('加载账户列表失败:', error)
   }
 }
@@ -456,6 +462,8 @@ const loadFlows = async () => {
     flowList.value = pageData.records || []
     pagination.total = pageData.total || 0
   } catch (error) {
+    flowList.value = []
+    pagination.total = 0
     console.error('加载流水列表失败:', error)
   } finally {
     loading.value = false
@@ -486,6 +494,7 @@ const updateTrendChart = (data: any[]) => {
   }
 
   const option = {
+    title: { text: data.length ? '' : '无数据', left: 'center', top: 'center' },
     tooltip: { trigger: 'axis' },
     legend: { data: ['收入', '支出'] },
     xAxis: { type: 'category', data: data.map(d => d.date) },
@@ -524,6 +533,7 @@ const updatePieChart = (data: any[]) => {
   const colors = ['#67c23a', '#f56c6c', '#e6a23c', '#409eff', '#909399']
   
   const option = {
+    title: { text: data.length ? '' : '无数据', left: 'center', top: 'center' },
     tooltip: { trigger: 'item', formatter: `{b}: ${currency.value} {c} ({d}%)` },
     series: [{
       type: 'pie',
@@ -571,7 +581,7 @@ const handleAddAccount = () => {
   accountForm.accountNo = ''
   accountForm.accountType = 'bank'
   accountForm.bankName = ''
-  accountForm.currency = 'CNY'
+  accountForm.currency = currency.value
   accountForm.balance = 0
   accountForm.isDefault = 0
   accountForm.status = 1
@@ -653,22 +663,33 @@ const handleViewFlow = (row: FinanceFlow) => {
   flowDialogVisible.value = true
 }
 
+const handleDeleteFlow = async (row: FinanceFlow) => {
+  try {
+    await ElMessageBox.confirm('确定删除该流水并回退账户余额吗？', '删除流水', { type: 'warning' })
+    await financeFlowApi.deleteFlow(row.id)
+    ElMessage.success('删除成功')
+    await Promise.all([loadFlows(), loadStats(), loadAccounts(), loadChartData()])
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') console.error('删除流水失败', error)
+  }
+}
+
 const handleFlowSubmit = async () => {
   const valid = await flowFormRef.value?.validate().catch(() => false)
   if (!valid) return
 
   flowSubmitLoading.value = true
   try {
+    const data = { ...flowForm, currency: accounts.value.find(account => account.id === flowForm.accountId)?.currency || currency.value }
     if (flowForm.id) {
-      await financeFlowApi.updateFlow(flowForm)
+      await financeFlowApi.updateFlow(data)
       ElMessage.success('更新成功')
     } else {
-      await financeFlowApi.createFlow(flowForm)
+      await financeFlowApi.createFlow(data)
       ElMessage.success('创建成功')
     }
     flowDialogVisible.value = false
-    loadFlows()
-    loadStats()
+    await Promise.all([loadFlows(), loadStats(), loadAccounts(), loadChartData()])
   } catch (error) {
     console.error('保存流水失败:', error)
   } finally {

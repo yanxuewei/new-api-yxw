@@ -15,7 +15,7 @@ request.interceptors.request.use(config => {
 request.interceptors.response.use(
   response => {
     const result = response.data
-    if (result && result.code !== undefined && result.code !== 200) {
+    if (result.code !== 200) {
       const error = new Error(result.message || '请求失败')
       ElMessage.error(error.message)
       return Promise.reject(error)

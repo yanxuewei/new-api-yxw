@@ -28,7 +28,7 @@
           </div>
         </el-card>
       </el-col>
-      < <el-col :span="6">
+      <el-col :span="6">
         <el-card shadow="hover" class="stat-card">
           <div class="stat-content">
             <div class="stat-icon" style="background: #E6A23C;">

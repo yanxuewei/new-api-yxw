@@ -1,0 +1,75 @@
+{
+  "application": "OmniTradeERP AI智能中心",
+  "date": "2026-10-24",
+  "url": "https://workflow-erp.likha.hk",
+  "result": "前后端基础能力已发布；模型生成待配置后验收",
+  "deployment": {
+    "root": "/opt/OmniTradeERP",
+    "compose": "/opt/OmniTradeERP/docker-compose.minimal.yml",
+    "warehouseImage": "omnitrade-local/warehouse-service:modules-20261024-110329",
+    "frontendImage": "omnitrade-local/frontend:modules-20261024-111249",
+    "containers": 11,
+    "addedResidentContainers": 0,
+    "warehouseMemoryLimitMiB": 384,
+    "warehouseObservedMemoryAfterVerificationMiB": 251.5,
+    "gatewayRoute": "/api/ai-center/**",
+    "addedTables": 8
+  },
+  "capabilities": [
+    {"name": "AI客服助手", "available": "真实知识库增删、词法检索原文问答、会话历史、用户隔离、请求幂等", "boundary": "模型未配置；未命中知识时503，不生成假回答"},
+    {"name": "智能定价", "available": "真实SKU成本建议、确认调价、原价冲突保护、历史回读", "boundary": "成本/(1-30%)；不含运费税费平台费，不提供竞品价格"},
+    {"name": "选品推荐", "available": "真实站内销量和毛利评分、分页候选、采纳持久化", "boundary": "当前候选页排序；未接外部热点"},
+    {"name": "异常检测", "available": "真实订单规则、精确订单检测、人工确认与驳回、状态和规则版本校验", "boundary": "规则辅助审核；批量最多1000并标识截断；大订单ID按字符串"},
+    {"name": "描述生成", "available": "真实SKU生成接口、幂等请求、历史、保存和原描述冲突保护", "boundary": "缺模型生成503；真实模型生成未验收。保存测试用人工夹具：中英文写商品，日西语仅文案库"},
+    {"name": "库存预测", "available": "真实合格订单日均销量、30天需求与补货建议、缺库存和数据不足null", "boundary": "90日窗口历史均值；至少14天观察且5个销售日；未扣在途采购，不自动建采购单"}
+  ],
+  "verification": {
+    "httpsAssertionsPassed": 223,
+    "skippedWithinConfiguredSuite": 0,
+    "suiteScope": "无模型环境的API与业务持久化；0跳过不表示包含真实模型调用或浏览器E2E",
+    "strictVueTypes": "PASS；vue-tsc 1.8.27 + TypeScript 5.3.3",
+    "sfcAndProductionBuild": "PASS",
+    "publishedAssetSha256Matches": 8,
+    "temporaryDataCleanupTableScopes": 22,
+    "temporaryDataResiduals": 0,
+    "allContainersHealthy": true,
+    "newRestartsDuringVerification": 0,
+    "oomObserved": false,
+    "logout": "3个临时用户真实注销成功，旧token访问AI接口401",
+    "existingPasswordsReset": false,
+    "browserClickTest": "未执行",
+    "realModelGeneration": "未执行；未配置模型、未发起收费调用"
+  },
+  "changedSource": [
+    "likha/ops/omnitrade-modules/AiBusinessController.java",
+    "likha/ops/omnitrade-modules/AiLanguageController.java",
+    "likha/ops/omnitrade-modules/ai-business-migration.sql",
+    "likha/ops/omnitrade-modules/ai-language-migration.sql",
+    "likha/ops/omnitrade-modules/erp-web/src/api/ai.ts",
+    "likha/ops/omnitrade-modules/erp-web/src/views/ai/Assistant.vue",
+    "likha/ops/omnitrade-modules/erp-web/src/views/ai/Pricing.vue",
+    "likha/ops/omnitrade-modules/erp-web/src/views/ai/Recommend.vue",
+    "likha/ops/omnitrade-modules/erp-web/src/views/ai/Anomaly.vue",
+    "likha/ops/omnitrade-modules/erp-web/src/views/ai/Description.vue",
+    "likha/ops/omnitrade-modules/erp-web/src/views/ai/InventoryPredict.vue"
+  ],
+  "rollback": {
+    "beforeAiDeployment": "/opt/OmniTradeERP/.ops-backups/ai-center-20261024-110339/docker-compose.minimal.yml",
+    "beforeFrontendDeployment": "/opt/OmniTradeERP/.ops-backups/frontend-modules-20261024-111249/docker-compose.minimal.yml",
+    "note": "恢复所选Compose备份后重新创建对应服务；前端备份保留AI后端。新增表保留，勿将全库备份直接覆盖已有新业务。"
+  },
+  "modelConfigurationNeeded": {
+    "serverFile": "/opt/OmniTradeERP/.secrets/ai-center.env",
+    "permissions": "600",
+    "keys": ["OMNITRADE_AI_BASE_URL", "OMNITRADE_AI_MODEL", "OMNITRADE_AI_API_KEY"],
+    "baseUrlFormat": "HTTPS且以/v1结尾",
+    "note": "当前文件与运行时配置不存在；提供配置后需加入warehouse-service env_file并重建服务，再验收真实模型调用。密钥不应发送到聊天或前端。"
+  },
+  "remaining": [
+    "真实模型调用与生成结果验收",
+    "浏览器逐页点击验收",
+    "隔离前端构建环境依赖审计6项告警：5 moderate、1 high，未专项修复",
+    "细粒度RBAC、平台同步、采购流程等先前分阶段事项仍按原边界推进"
+  ],
+  "workerFailure": "ai-language-impl遇到上游空响应；未将其失败视作完成证据。主线程核查落盘代码，并完成真实HTTPS知识问答、会话隔离、文案保存验证。"
+}

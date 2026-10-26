@@ -1,0 +1,10 @@
+const fs = require('fs');
+const path = require('path');
+const {spawnSync} = require('child_process');
+const source = path.join(__dirname, 'erp-web');
+const dest = 'C:/Users/pc260829/.workbuddy/binaries/node/workspace/omnitrade-web';
+for (const name of ['src','index.html','vite.config.ts']) fs.cpSync(path.join(source,name),path.join(dest,name),{recursive:true});
+const outputDir = `dist-logout-${new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14)}`;
+const result=spawnSync(process.execPath,['--max-old-space-size=2048',path.join(dest,'node_modules/vite/bin/vite.js'),'build','--outDir',outputDir],{cwd:dest,stdio:'inherit'});
+if (result.status === 0) fs.writeFileSync(path.join(dest, 'LATEST_OUTPUT_DIR'), outputDir + '\n');
+process.exit(result.status === 0 ? 0 : 1);

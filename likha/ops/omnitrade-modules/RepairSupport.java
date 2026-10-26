@@ -23,7 +23,7 @@ public class RepairSupport {
  public static long number(Object x){try{return Long.parseLong(str(x));}catch(Exception e){throw bad("Invalid integer");}}
  public static ResponseStatusException bad(String m){return new ResponseStatusException(HttpStatus.BAD_REQUEST,m);}
  public static ResponseStatusException missing(){return new ResponseStatusException(HttpStatus.NOT_FOUND,"Record not found");}
- public long id(){return random.nextLong() & ((1L<<52)-1);}
+ public long id(){long value;do{value=random.nextLong() & ((1L<<52)-1);}while(value==0);return value;}
  public <T>T atomic(Supplier<T> op){return tx.execute(s->op.get());}
  public List<Map<String,Object>> rows(String sql,Object... args){return db.queryForList(sql,args);}
  public Map<String,Object> one(String sql,Object... args){List<Map<String,Object>> r=rows(sql,args);if(r.isEmpty())throw missing();return r.get(0);}

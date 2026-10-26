@@ -1,116 +1,89 @@
 <template>
-  <div class="recommend-page">
+  <div class="ai-page">
     <el-card shadow="never">
-      <template #header>
-        <div class="card-head">
-          <span>AI 选品推荐（基于历史销量 + 平台热点 + 利润率）</span>
-          <el-button type="primary" :loading="refreshing" @click="refresh">刷新推荐</el-button>
-        </div>
-      </template>
-
-      <el-row :gutter="16" class="summary">
-        <el-col :span="6"><el-statistic title="候选商品数" :value="list.length" /></el-col>
-        <el-col :span="6"><el-statistic title="平均推荐得分" :value="avgScore" :precision="2" suffix="/ 100" /></el-col>
-        <el-col :span="6"><el-statistic title="平均预期利润率" :value="avgMargin" :precision="2" suffix="%" /></el-col>
-        <el-col :span="6"><el-statistic title="刷新时间" :value="lastRefresh" /></el-col>
-      </el-row>
-
-      <el-table :data="list" v-loading="loading" stripe>
-        <el-table-column prop="sku"          label="SKU" width="180" />
-        <el-table-column prop="productName"  label="推荐商品" />
-        <el-table-column prop="category"     label="类目" width="120" />
-        <el-table-column label="推荐得分" width="140">
-          <template #default="{ row }">
-            <el-progress :percentage="row.score" :stroke-width="14" :format="() => row.score + ' 分'" />
-          </template>
-        </el-table-column>
-        <el-table-column prop="expectedMargin" label="预期利润率" width="120">
-          <template #default="{ row }">
-            <el-tag :type="row.expectedMargin > 30 ? 'success' : 'warning'" size="small">{{ row.expectedMargin }}%</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="reason"       label="推荐理由"  show-overflow-tooltip />
-        <el-table-column label="操作" width="160" fixed="right">
-          <template #default="{ row }">
-            <el-button link type="primary" size="small" @click="viewDetail(row)">详情</el-button>
-            <el-button link type="success" size="small" @click="addToShelf(row)">加入选品库</el-button>
-          </template>
-        </el-table-column>
+      <template #header><div class="toolbar"><strong>选品推荐</strong><div>
+        <el-button :loading="loading" :disabled="busy" @click="load">重新加载</el-button>
+        <el-button type="primary" :loading="refreshing" :disabled="loading || busy" @click="refresh">重新计算推荐</el-button>
+      </div></div></template>
+      <el-alert title="仅基于系统内的商品、订单与成本数据进行规则推荐，未接入外部平台热度。加入选品库不等于商品上架。" type="info" :closable="false" />
+      <el-alert v-if="error" :title="error" type="error" :closable="false" />
+      <el-tabs v-model="tab">
+        <el-tab-pane label="推荐列表" name="recommended" />
+        <el-tab-pane label="已采纳选品" name="adopted" />
+      </el-tabs>
+      <el-table v-loading="loading" :data="tab === 'recommended' ? list : adopted" stripe empty-text="暂无选品数据">
+        <el-table-column prop="sku" label="SKU" min-width="160" />
+        <el-table-column prop="productName" label="商品" min-width="180" />
+        <template v-if="tab === 'recommended'">
+          <el-table-column prop="sales90d" label="90 日销量" width="110" />
+          <el-table-column label="规则得分" width="110"><template #default="{ row }">{{ row.score == null ? '数据不足' : row.score }}</template></el-table-column>
+          <el-table-column label="当前毛利率" width="120"><template #default="{ row }">{{ row.grossMargin == null ? '数据不足' : `${row.grossMargin}%` }}</template></el-table-column>
+          <el-table-column prop="reason" label="评分依据" min-width="240" />
+          <el-table-column prop="basis" label="数据口径" min-width="260" />
+        </template>
+        <el-table-column v-if="tab === 'adopted'" prop="createTime" label="采纳时间" min-width="180" />
+        <el-table-column v-else label="操作" width="130" fixed="right"><template #default="{ row }">
+          <el-button link type="primary" :disabled="busy || loading || refreshing || isAdopted(row)" @click="adopt(row)">{{ isAdopted(row) ? '已采纳' : '加入选品库' }}</el-button>
+        </template></el-table-column>
       </el-table>
+      <div class="toolbar pager"><span>第 {{ page }} 页，每页最多 100 条；得分排序仅针对本页候选。</span><div><el-button :disabled="loading || busy || refreshing || page === 1" @click="page--; load()">上一页</el-button><el-button :disabled="loading || busy || refreshing || (tab === 'recommended' ? list.length : adopted.length) < 100" @click="page++; load()">下一页</el-button></div></div>
     </el-card>
-
-    <el-dialog v-model="detailVisible" title="推荐详情" width="600px">
-      <div v-if="detail">
-        <h3>{{ detail.productName }}</h3>
-        <p>{{ detail.reason }}</p>
-        <el-descriptions :column="2" border size="small">
-          <el-descriptions-item label="SKU">{{ detail.sku }}</el-descriptions-item>
-          <el-descriptions-item label="类目">{{ detail.category }}</el-descriptions-item>
-          <el-descriptions-item label="推荐得分">{{ detail.score }} 分</el-descriptions-item>
-          <el-descriptions-item label="预期利润率">{{ detail.expectedMargin }}%</el-descriptions-item>
-        </el-descriptions>
-      </div>
-    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { recommendApi } from '@/api/ai'
+import { aiCenterApi, aiError, type ProductRecommend } from '@/api/ai'
 
-const list = ref<any[]>([])
+const list = ref<ProductRecommend[]>([])
+const adopted = ref<ProductRecommend[]>([])
+const tab = ref('recommended')
+const page = ref(1)
 const loading = ref(false)
 const refreshing = ref(false)
-const detailVisible = ref(false)
-const detail = ref<any>(null)
-const lastRefresh = ref('')
-
-const avgScore = computed(() => {
-  if (!list.value.length) return 0
-  return list.value.reduce((s, x) => s + (x.score || 0), 0) / list.value.length
-})
-const avgMargin = computed(() => {
-  if (!list.value.length) return 0
-  return list.value.reduce((s, x) => s + (x.expectedMargin || 0), 0) / list.value.length
-})
-
-onMounted(load)
+const busy = ref(false)
+const error = ref('')
+const isAdopted = (row: ProductRecommend) => row.adopted || adopted.value.some(item => item.sku === row.sku)
 
 async function load() {
   loading.value = true
-  try {
-    list.value = await recommendApi.list({})
-  } catch {
-    list.value = [
-      { sku: 'SKU-BTY-010',     productName: '精华液 30ml - 玻尿酸烟酰胺', category: '美妆个护', score: 92, expectedMargin: 65, reason: '近 90 天平台搜索量上涨 320%，TikTok 标签 #GlowUp 累计 1.2 亿播放' },
-      { sku: 'SKU-PWB-005-BLK', productName: '20000mAh 充电宝',          category: '数码',     score: 88, expectedMargin: 58, reason: '夏季旅行季 + 跨境充电刚需，亚马逊 BSR 排名上涨 28 位' },
-      { sku: 'SKU-WOM-009-L',   productName: '女士瑜伽裤',              category: '服饰',     score: 85, expectedMargin: 64, reason: 'Lululemon 平替讨论热度高，客单价提升 12%' },
-      { sku: 'SKU-MEN-008-XL',  productName: '男士速干 T 恤',            category: '服饰',     score: 80, expectedMargin: 66, reason: '健身场景季节性需求，回购率 35%' },
-      { sku: 'SKU-STG-007',     productName: '真空收纳袋 10 件',         category: '家居',     score: 78, expectedMargin: 64, reason: '收纳整理赛道蓝海，欧洲市场 CAGR 18%' },
-    ]
-  } finally {
-    loading.value = false
-    lastRefresh.value = new Date().toLocaleTimeString()
-  }
+  error.value = ''
+  try { [list.value, adopted.value] = await Promise.all([aiCenterApi.recommendations({ limit: 100, offset: (page.value - 1) * 100 }), aiCenterApi.adoptedRecommendations({ limit: 100, offset: (page.value - 1) * 100 })]) }
+  catch (e) { list.value = []; adopted.value = []; error.value = aiError(e) }
+  finally { loading.value = false }
 }
 
 async function refresh() {
+  if (refreshing.value || busy.value) return
   refreshing.value = true
+  error.value = ''
   try {
-    await recommendApi.refresh()
+    await aiCenterApi.refreshRecommendations()
+    ElMessage.success('服务端已重新计算推荐')
     await load()
-  } catch { await load() }
-  refreshing.value = false
-  ElMessage.success('推荐已刷新')
+  } catch (e) { error.value = aiError(e) }
+  finally { refreshing.value = false }
 }
 
-function viewDetail(row: any) { detail.value = row; detailVisible.value = true }
-function addToShelf(row: any) { ElMessage.success(`已加入选品库：${row.sku}`) }
+async function adopt(row: ProductRecommend) {
+  if (busy.value || isAdopted(row)) return
+  busy.value = true
+  error.value = ''
+  try {
+    await aiCenterApi.adoptRecommendation(row.sku)
+    ElMessage.success('已保存到选品库')
+    await load()
+  } catch (e) { error.value = aiError(e) }
+  finally { busy.value = false }
+}
+
+onMounted(load)
 </script>
 
 <style scoped>
-.recommend-page { padding: 16px; }
-.card-head { display: flex; justify-content: space-between; align-items: center; }
-.summary { margin-bottom: 16px; padding: 12px; background: #fafafa; border-radius: 4px; }
+.ai-page { padding: 16px; }
+.toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.el-alert { margin-bottom: 12px; }
+.pager { margin-top: 16px; }
 </style>

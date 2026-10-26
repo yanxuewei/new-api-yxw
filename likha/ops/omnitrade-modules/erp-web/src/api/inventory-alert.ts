@@ -112,7 +112,6 @@ export interface LogisticsRate {
 }
 
 export interface LogisticsChannel {
-  id: number
   status: number
   code: string
   name: string
@@ -156,6 +155,15 @@ export interface PageResult<T> {
 // ========== 库存预警API ==========
 
 export const inventoryAlertApi = {
+  getSettings: () =>
+    request.get<any, { enableAlert: boolean; defaultAdvanceDays: number; defaultNotifyTypes: string[]; defaultNotifyTo: string }>('/inventory/alert/settings'),
+
+  saveSettings: (data: { enableAlert: boolean; defaultAdvanceDays: number; defaultNotifyTypes: string[]; defaultNotifyTo: string }) =>
+    request.put<any, void>('/inventory/alert/settings', data),
+
+  createReplenishment: (recordId: number, suggestedQuantity: number) =>
+    request.post<any, ReplenishmentSuggestion>(`/inventory/alert/record/${recordId}/replenishment`, { suggestedQuantity }),
+
   // 预警规则
   createRule: (data: InventoryAlertRule) =>
     request.post<any, number>('/inventory/alert/rule', data),
@@ -188,11 +196,11 @@ export const inventoryAlertApi = {
   getPendingAlerts: () =>
     request.get<any, InventoryAlert[]>('/inventory/alert/records/pending'),
 
-  handleAlert: (id: number, handlerId: number, handlerName: string, remark?: string) =>
-    request.post<any, void>(`/inventory/alert/record/${id}/handle`, null, { params: { handlerId, handlerName, remark } }),
+  handleAlert: (id: number, remark?: string) =>
+    request.post<any, void>(`/inventory/alert/record/${id}/handle`, { remark }),
 
-  ignoreAlert: (id: number, handlerId: number, handlerName: string, remark?: string) =>
-    request.post<any, void>(`/inventory/alert/record/${id}/ignore`, null, { params: { handlerId, handlerName, remark } }),
+  ignoreAlert: (id: number, remark?: string) =>
+    request.post<any, void>(`/inventory/alert/record/${id}/ignore`, { remark }),
 
   // 预警统计
   getRealTimeStatistics: (warehouseId?: string) =>
@@ -215,8 +223,8 @@ export const inventoryAlertApi = {
   getPendingReplenishments: () =>
     request.get<any, ReplenishmentSuggestion[]>('/inventory/alert/replenishments/pending'),
 
-  confirmReplenishment: (id: number, userId: number, userName: string, remark?: string) =>
-    request.post<any, void>(`/inventory/alert/replenishment/${id}/confirm`, null, { params: { userId, userName, remark } }),
+  confirmReplenishment: (id: number, remark?: string) =>
+    request.post<any, void>(`/inventory/alert/replenishment/${id}/confirm`, { remark }),
 
   cancelReplenishment: (id: number, remark?: string) =>
     request.post<any, void>(`/inventory/alert/replenishment/${id}/cancel`, null, { params: { remark } }),
@@ -236,8 +244,8 @@ export const logisticsApi = {
   createChannel: (data: Partial<LogisticsChannel>) =>
     request.post<any, LogisticsChannel>('/logistics/channel', data),
 
-  updateChannelStatus: (id: number, status: number) =>
-    request.put<any, void>(`/logistics/channel/${id}/status`, { status }),
+  updateChannelStatus: (code: string, status: number) =>
+    request.put<any, void>(`/logistics/channel/${encodeURIComponent(code)}/status`, { status }),
 
   // 运费计算
   calculateRate: (data: ShippingRateQuery) =>
