@@ -3,9 +3,14 @@
 > 目标：把 `newapi-dev` 命名空间的手工部署（`kubectl set image` / 控制台改 Deployment / `dev_deploy.sh` 逐条 apply）换成
 > **「代码合并 → CI 出镜像 → GitOps 仓库自动提变更 → 集群自愈收敛」**的闭环。
 >
-> 版本 v1.0 ｜ 编制 2026-10-26 ｜ 适用集群 ACK 雅加达 `cb0abf5bc06034f7bbdb991752f6f3e62`（`ap-southeast-5`）
+> 版本 v1.1 ｜ 编制 2026-10-26 ｜ 适用集群 ACK 雅加达 `cb0abf5bc06034f7bbdb991752f6f3e62`（`ap-southeast-5`）
 > 依据文档：`deploy/docs/git开发-发布-值班规范.md`（下称《规范》）、`impl_tech.md`（§6.5/6.6/7.7/7.9）
-> **本文件是方案，不是执行记录。执行后另出《执行报告》。**
+>
+> **状态（2026-10-26 19:35）**：T0–T3 已落地并实测通过，详见
+> `deploy/docs/GitOps开发流水线_雅加达dev_执行报告_2026-10-26.md`。
+> 未完成：CI 首次构建（缺 `ACR_PASSWORD`）、T4/T5 分档开关。
+> 执行中新踩的 6 个坑（CRD 262144 字节上限、`argocd-server` args 写法、controller 是 StatefulSet、
+> `local` 同行求值、`yxw-*` 耦合旧 CM、第 3 台节点来源）已记录在执行报告 §3，**本文件未逐条回改**。
 
 ---
 
@@ -14,7 +19,7 @@
 | 项 | 结论 |
 |---|---|
 | CD 引擎 | **ArgoCD v3.x 非 HA**，装在本集群 `argocd` 命名空间；**不用 Flux**（理由 §5-D1） |
-| 仓库拓扑 | **不新建 ops 仓库**：就在 `new-api-yxw` 的 `deploy/gitops/` 路径下，ArgoCD 只 watch 该路径（理由 §5-D2） |
+| 仓库拓扑 | **独立 ops 仓库** `github.com/yanxuewei/new-api-yxw-ops`（私有）：只放 manifest，不含业务代码；`bases/` + `overlays/{jkt-dev,jkt-pre,jkt-test,jkt-prod}` 为后续三环境预留（fanyan 2026-10-26 裁定，理由 §5-D2） |
 | 部署触发源 | `develop` 分支 push（**不是 tag**；本仓 `release.yml` 抢 `tags:'*'`，打 tag 会触发上游三平台构建，见 §12-R1） |
 | 镜像 | 继续推**马尼拉 ACR EE** `newapi-dev/newapi-master`，jkt 节点跨区公网拉取（现状已跑通，零改造） |
 | tag 规则 | `dev-<yyyymmdd>-<sha7>`，**不可变、禁 latest**；GitOps 里写 **digest**，不写 tag |
@@ -120,17 +125,20 @@ flowchart LR
     subgraph DEV["开发者"]
         A["feature/xxx"]
     end
-    subgraph GH["GitHub · yanxuewei/new-api-yxw"]
+    subgraph GH["GitHub · 业务仓 yanxuewei/new-api-yxw"]
         B["develop<br/>（dev 环境唯一源）"]
         C["main<br/>（生产基线）"]
         W1["ci.yml<br/>PR 门禁"]
         W2["dev-build.yml（新建）<br/>push develop 触发"]
     end
+    subgraph OPS["GitHub · ops 仓 yanxuewei/new-api-yxw-ops"]
+        O1["overlays/jkt-dev/<br/>（期望状态真源）"]
+    end
     subgraph CI["GitHub Actions · ubuntu-latest"]
         S1["vet / build / test<br/>bun typecheck"]
         S2["docker buildx<br/>tag=dev-yyyymmdd-sha7"]
-        S3["kustomize edit set image<br/>→ digest"]
-        S4["commit deploy/gitops/<br/>[skip ci]"]
+        S3["overlays/jkt-dev<br/>set-image.sh → digest"]
+        S4["commit + push ops/main<br/>src=<业务仓 sha7>"]
     end
     ACR[("马尼拉 ACR EE<br/>newapi-dev/newapi-master")]
     subgraph JKT["ACK 雅加达 dev 集群"]
@@ -144,8 +152,8 @@ flowchart LR
     A -->|PR| W1 --> S1
     A -->|squash merge| B
     B -->|push| W2 --> S2 --> ACR
-    S2 --> S3 --> S4 -->|push 同分支| B
-    AR -->|"poll 3min<br/>path: deploy/gitops/apps/jkt-dev"| B
+    S2 --> S3 -->     S4 -->|push| O1
+    AR -->|"poll 3min<br/>path: overlays/jkt-dev"| O1
     AR -->|"kube apply（限 newapi-dev）"| NS
     SEC -.->|"dev_deploy.sh --secret"| NS
     ACR -->|"kubelet 跨区拉取（免密）"| NS
@@ -166,48 +174,80 @@ flowchart LR
 
 ## 4. 目录结构（落地后的形态）
 
+### 4.1 业务仓库 `new-api-yxw`（只加 3 个文件 + 1 个目录）
+
 ```
 new-api-yxw/
 ├── .github/workflows/
 │   ├── ci.yml                    # 复用，不动
-│   ├── dev-build.yml             # 【新建】push develop → 构建 + 推 ACR + 改 gitops + commit
-│   └── gitops-verify.yml         # 【新建】PR 门禁：kustomize build + secret_scan + 禁改 overlays 白名单
-├── deploy/
-│   ├── gitops/                   # 【新建】GitOps 真源（ArgoCD 只看这里）
-│   │   ├── apps/jkt-dev/
-│   │   │   ├── kustomization.yaml        # ← CI 唯一会改的文件（images: newTag/newName → digest）
-│   │   │   ├── namespace.yaml
-│   │   │   ├── serviceaccount.yaml
-│   │   │   ├── master-deployment.yaml
-│   │   │   ├── slave-deployment.yaml
-│   │   │   ├── channel-task-deployment.yaml
-│   │   │   ├── service.yaml
-│   │   │   ├── ingress-dev.yaml
-│   │   │   └── configs/
-│   │   │       ├── new-api-config.properties   # ← configMapGenerator 的源（非敏感）
-│   │   │       └── kustomization.yaml
-│   │   └── argocd/
-│   │       ├── project-jkt-dev.yaml        # AppProject（destination 限定 newapi-dev）
-│   │       ├── app-jkt-dev.yaml            # Application（path = apps/jkt-dev）
-│   │       └── README.md                   # bootstrap 步骤（人工执行一次）
-│   ├── jakarta_dev/              # 保留：bootstrap / 应急 / Secret 注入仍用
-│   │   ├── scripts/dev_deploy.sh # 只保留 --secret / --grants / --apply-ingress(AlbConfig) / --status
-│   │   └── manifests/            # 逐步降级为「历史参考」，避免双真源
-│   └── lib/ack_remote_jkt_dev.sh # bootstrap 通道（云助手 → 节点内 kubectl）
+│   └── dev-build.yml             # 【新建】push develop → 构建 + 推 ACR + 回写 ops 仓 + 可选冒烟
+└── deploy/
+    ├── jakarta_dev/              # 保留：bootstrap / 应急 / Secret 注入
+    │   ├── scripts/dev_deploy.sh # 保留 --secret/--grants/--rotate/--status/--verify/--smoke
+    │   └── manifests/            # T3 后冻结（顶部加 DEPRECATED），AlbConfig 仍以此为准
+    ├── gitops/bootstrap/         # 【新建】ArgoCD 一次性安装与接入（运维工具，非清单）
+    │   ├── install-argocd.sh     # 云助手 body：装非 HA 版 + 压 requests + 关 dex
+    │   ├── add-repo-secret.sh    # 云助手 body：注入 ops 仓只读 deploy key
+    │   ├── apply-app.sh          # 云助手 body：apply AppProject + Application
+    │   ├── expose-ui.sh          # 云助手 body：建 argocd Ingress（走既有 ALB）
+    │   └── verify.sh             # 只读：ArgoCD 健康 + app 状态 + requests 汇总
+    └── lib/ack_remote_jkt_dev.sh # bootstrap 通道（云助手 → 节点内 kubectl）
+```
+
+> 为什么 bootstrap 留在业务仓库：它要用 `deploy/lib/ack_remote_jkt_dev.sh`（15 min 临时 kubeconfig）和堡垒机凭据，
+> 这套通道的凭据体系在业务仓库的 `deploy/` 下。ops 仓库存放「期望状态」，不存放「如何把 ArgoCD 装进去」。
+
+### 4.2 ops 仓库 `new-api-yxw-ops`（新建，私有）
+
+```
+new-api-yxw-ops/
+├── README.md                        # 环境清单 + 谁能改什么
+├── bases/newapi/                    # 与环境无关的骨架（当前只有 jkt 三站，但已按多环境设计）
+│   ├── kustomization.yaml
+│   ├── namespace.yaml
+│   ├── resourcequota.yaml
+│   ├── serviceaccount.yaml
+│   ├── master-deployment.yaml       # 镜像占位 newapi-master:PLACEHOLDER（overlay 覆盖）
+│   ├── slave-deployment.yaml
+│   ├── channel-task-deployment.yaml
+│   ├── service-master.yaml          # master 无 Service？dev 现状：无 ⇒ 只留 slave svc
+│   └── service-slave.yaml
+├── overlays/
+│   ├── jkt-dev/
+│   │   ├── kustomization.yaml       # ★ CI 唯一改动的文件（images: newTag→digest）
+│   │   ├── patch-resources.yaml     # dev 收紧的 requests/limits（500m/1Gi）
+│   │   ├── patch-node-type.yaml     # dev 偏差②：NODE_TYPE=master + SQL_DSN 取 MIGRATE
+│   │   ├── configs/
+│   │   │   ├── new-api-config.properties   # 非敏感配置（kustomize 生成，带 hash 后缀）
+│   │   │   └── kustomization.yaml
+│   │   ├── ingress-dev.yaml         # 只含 Ingress（AlbConfig/IngressClass 不在此）
+│   │   └── DEPLOY.md                # 该环境的事实卡（集群 id / ns / 域名 / 依赖）
+│   ├── jkt-pre/  └── README.md      # 占位：后续环境按同一 overlay 契约补
+│   ├── jkt-test/ └── README.md      # 占位
+│   └── jkt-prod/ └── README.md      # 占位
+├── argocd/
+│   ├── project-newapi.yaml          # AppProject：destinations 白名单到具体 env ns
+│   ├── application-jkt-dev.yaml     # Application（path=overlays/jkt-dev）
+│   └── applicationset.yaml          # 占位注释版：多环境后启用（git generator 扫 overlays/*）
+├── scripts/
+│   ├── set-image.sh                 # 被业务仓 CI 调用：改 overlay images → digest
+│   └── verify.sh                    # kustomize build 全 overlay + 禁 latest + 禁明文 Secret
+└── .github/workflows/verify.yml     # ops 仓自身门禁：PR 时跑 scripts/verify.sh
 ```
 
 **真源唯一性**（《规范》§7.1「线上任何变更必须体现为 ops 仓库的一次 commit」）：
 
 | 资源 | 真源 | 说明 |
 |---|---|---|
-| Deployment / Service / Ingress | `deploy/gitops/apps/jkt-dev/` | ArgoCD 管理 |
-| ConfigMap（非敏感） | `deploy/gitops/apps/jkt-dev/configs/` | kustomize 生成 |
-| Secret | **集群内**（`/root/.deploy_secrets_dev` 为 OOB 备份） | 不进 Git |
-| AlbConfig / IngressClass | `deploy/jakarta_dev/manifests/dev_ingress.yaml` | 基础设施，人工 apply |
-| Namespace / ResourceQuota / SA | `deploy/gitops/apps/jkt-dev/` | 配额调整走 PR |
+| Deployment / Service / Ingress(dev) | `new-api-yxw-ops` → `overlays/jkt-dev/` | ArgoCD 管理 |
+| ConfigMap（非敏感） | `overlays/jkt-dev/configs/` | kustomize `configMapGenerator` 生成 |
+| Secret | **集群内**（`/root/.deploy_secrets_dev` 为 OOB 备份） | 不进任何 Git |
+| AlbConfig / IngressClass | 业务仓 `deploy/jakarta_dev/manifests/dev_ingress.yaml` | 基础设施，人工 apply（D8） |
+| Namespace / ResourceQuota / SA | `bases/newapi/` | 配额调整走 ops PR |
+| ArgoCD 自身 | 业务仓 `deploy/gitops/bootstrap/` | 一次性 bootstrap，不自举 |
 
-> `deploy/jakarta_dev/manifests/newapi-dev.yaml` 在 T3 之后**冻结**（顶部加 `DEPRECATED` 注释），
-> 否则「两个真源」比现在的纯手工更危险。
+> `deploy/jakarta_dev/manifests/newapi-dev.yaml` 在 T4 之后**冻结**（顶部加 `DEPRECATED` 注释），
+> 否则「两个真源」比现在的纯手工更危险。只保留其 AlbConfig 部分作为有效真源。
 
 ---
 
@@ -225,16 +265,34 @@ new-api-yxw/
 
 **结论**：多花 200m CPU 换排障效率和后续生产灰度扩展性，值得。dev 集群剩余 2.0 核够用。
 
-### D2 · 仓库拓扑：**单仓 `deploy/gitops/`**（否独立 ops 仓库）
+### D2 · 仓库拓扑：**独立 ops 仓库 `new-api-yxw-ops`**（fanyan 2026-10-26 裁定）
 
-| 选项 | 优点 | 缺点 |
-|---|---|---|
-| **A. 单仓 + 路径隔离（选）** | 无跨仓 token；manifest 与代码同 commit 审查；`kubectl diff` 对账简单 | 代码提交会改 ArgoCD 的 revision（但渲染结果不变 ⇒ no-op sync） |
-| B. 独立 `<repo>-ops` 仓库 | 严格权限分离；prod 目录可挂 CODEOWNERS | 需 `OPS_REPO_TOKEN`（PAT 管理成本）；改一处镜像要跨两仓；单人效率损失大 |
+> 原方案推荐单仓 + 路径隔离，**已按裁定改为独立 ops 仓库**。理由是提前为「预发 / 测试 / 正式」三环境铺路：
+> 多环境一旦进来，manifest 的变更节奏就和业务代码完全脱钩（同一份代码可部署到 4 个环境，每次部署是一次独立 commit），
+> 混在一个仓库里会导致 `develop` 的 revision 既代表「代码版本」又代表「部署状态」，两者语义冲突。
 
-**选 A 的理由**：现在只有 1 个人在做（`git remote` 只有 `origin`，分支只有 `main` + 2 个 feature），
-独立仓库带来的审批价值 < 维护成本。**何时该拆**：当出现第二个环境（prod）且需要不同审批人时，
-`git subtree split -P deploy/gitops` 一行就能迁出去，路径设计已为此留好。
+| 选项 | 优点 | 缺点 | 判定 |
+|---|---|---|---|
+| 单仓 + 路径隔离 | 无跨仓 token；改一处镜像只需一个 commit | revision 语义混淆；多环境后 commit 噪音指数增长 | ❌ |
+| **独立 `<repo>-ops`（选）** | 部署状态与代码版本彻底解耦；多环境天然分目录；ops 仓库可单独给 ArgoCD 只读 deploy key；prod 目录可挂 CODEOWNERS | 需 1 个 `OPS_REPO_TOKEN`（PAT，90 天轮换）；镜像 bump 要跨仓 commit | ✅ |
+
+**跨仓代价的消解**（这是选它的前提，必须做到）：
+
+| 常规痛点 | 本方案的处理 |
+|---|---|
+| 改一处镜像要跨两仓 | CI 在同一个 job 里完成「推镜像 → 改 ops → 推 ops」，人只面对一次「合并 develop」 |
+| 追不到「代码 commit ↔ 部署 commit」对应 | ops 的 commit message 强制带 `src=<业务仓 sha7>`，且镜像 digest 本身可反查 |
+| PAT 过期导致流水线静默失效 | `dev-build.yml` 回写失败即 job 红（不吞错），并把 PAT 过期日写进值班 Checklist |
+| ArgoCD 需要 ops 仓库凭据 | 用**只读 SSH deploy key**（绑单仓），不共用 PAT |
+
+仓库命名与归属：
+
+| 项 | 值 |
+|---|---|
+| 仓库 | `git@github.com:yanxuewei/new-api-yxw-ops.git`（**私有**） |
+| 默认分支 | `main` |
+| ArgoCD watch | `main` 分支（不做多分支模型，环境用目录区分） |
+| 谁写 | 只有 CI（`gitops-bot`）与人工发布；**业务代码永不进此仓** |
 
 ### D3 · 触发模型：`push develop` 全自动，PR 只跑门禁
 
@@ -300,7 +358,7 @@ digest : sha256:6f1c…                # GitOps 里写这个
 GitOps 后：kustomize `configMapGenerator` 生成 `new-api-config-<hash>`，Deployment 里的引用由 kustomize 自动替换 ⇒ **改配置必然产生新 Pod 模板 ⇒ 必然滚动**。
 
 ```yaml
-# deploy/gitops/apps/jkt-dev/configs/kustomization.yaml
+# new-api-yxw-ops/overlays/jkt-dev/configs/kustomization.yaml
 configMapGenerator:
   - name: new-api-config
     envs: [new-api-config.properties]   # KEY=VALUE，纯非敏感
@@ -369,18 +427,21 @@ on:
   push:
     branches: [develop]
     paths-ignore:
-      - 'deploy/gitops/**'      # CI 自己提交的 manifest 变更不再触发（防循环，双保险）
       - '**/*.md'
       - 'deploy/docs/**'
+      - 'deploy/**'             # 运维脚本改动不重新构建镜像（要构建请手动 dispatch）
   workflow_dispatch:
 
 concurrency:
   group: dev-build-${{ github.ref }}
   cancel-in-progress: true      # 连续合并只保留最后一次
 permissions:
-  contents: write               # 仅用于回写 deploy/gitops
-  packages: read
+  contents: read                # 业务仓只读；回写目标在 ops 仓，用 OPS_REPO_TOKEN
 ```
+
+> 与单仓方案的差异：业务仓不再需要 `contents: write`（不自回写），
+> 因此 `GITHUB_TOKEN` 推送不触发 workflow 的那套防循环机制**不再适用**——ops 仓由 PAT 推送，
+> 会在 ops 仓触发它自己的 `verify.yml`（这是期望行为，不是循环，因为 ops 仓不构建镜像）。
 
 ### 6.2 作业图
 
@@ -436,24 +497,27 @@ jobs:
 > **`VERSION` build-arg**：Dockerfile 需支持（`ARG VERSION` + 传进 `go build -ldflags`）。当前上游 `Dockerfile` 不注入
 > 版本号，T2 需确认；若不支持，退化为「构建后 `/api/status` 无版本」——不阻断，但 G2 追溯性打折。此项列为 T2 待验证项。
 
-### 6.4 回写 GitOps 的两种做法
+### 6.4 回写 ops 仓库的两种做法
 
 | 做法 | 优点 | 缺点 | 判定 |
 |---|---|---|---|
-| `kustomize edit set image` + `git commit`（选） | 无需额外组件，diff 可读 | 需要 `contents: write` | ✅ dev 阶段 |
-| ArgoCD Image Updater（集群内） | CI 更薄 | 多一个组件 + 回写凭据进集群 | ❌ 本期不引入，列入演进 |
+| `set-image.sh` + `git commit/push`（选） | 无需额外组件，diff 可读，跨仓也能一次 job 完成 | 需要 `OPS_REPO_TOKEN`（PAT） | ✅ dev 阶段 |
+| ArgoCD Image Updater（集群内） | CI 更薄 | 多一个组件 + 回写凭据进集群，且要能写 ops 仓 | ❌ 本期不引入，列入演进 |
 
 ```bash
-# 关键：写 digest，且 newName 保持可变（便于以后换 registry）
-cd deploy/gitops/apps/jkt-dev
-kustomize edit set image \
-  newapi-master=acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com/newapi-dev/newapi-master@${DIGEST}
+# CI 末尾：跨仓回写（OPS_REPO_TOKEN 拥有 ops 仓 contents:write）
+git clone --depth 1 "https://x-access-token:${OPS_REPO_TOKEN}@github.com/yanxuewei/new-api-yxw-ops.git" /tmp/ops
+bash /tmp/ops/scripts/set-image.sh jkt-dev \
+     "acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com/newapi-dev/newapi-master@${DIGEST}"
+cd /tmp/ops
 git -c user.name="gitops-bot" -c user.email="gitops-bot@users.noreply.github.com" \
-    commit -am "chore(gitops): jkt-dev → ${TAG} (${DIGEST:7:12}) [skip ci]"
-git push
+    commit -am "chore(jkt-dev): ${TAG} (src=${GITHUB_SHA:0:7})"
+git push origin main
 ```
 
-**两个 deployment 引用同一个 image key** ⇒ 一次 `set image` 同时改 master 与 slave（这是把 `images:` 抽成 kustomize 的唯一 key 的理由）。
+**两个 deployment 引用同一个 image key**（`newapi-master`）⇒ 一次 `set-image.sh` 同时改 master 与 slave
+（这是把 `images:` 抽成 kustomize 唯一 key 的理由）。commit message 里的 `src=<业务仓 sha7>` 是双向追溯的锚点：
+从 ops commit 能回到代码，从镜像 digest 也能。`set-image.sh` 内部用 `kustomize edit set image`，且失败即 `exit 1`（不吞错）。
 
 ---
 
@@ -479,18 +543,16 @@ git push
 ```bash
 # ① 建 ns + 装非 HA 版（版本钉死，禁 latest）
 wsl -d Ubuntu -u root -- bash -c "cd /mnt/e/git_code/new-api-yxw && \
-  bash deploy/lib/ack_remote_jkt_dev.sh deploy/gitops/bodies/install-argocd.sh"
+  bash deploy/lib/ack_remote_jkt_dev.sh deploy/gitops/bootstrap/install-argocd.sh"
 
-# ② 注入仓库凭据（SSH deploy key，只读，绑本仓库）
-#    私钥从堡垒机取，不进仓库、不进 shell history
-bash deploy/lib/ack_remote_jkt_dev.sh deploy/gitops/bodies/add-repo-secret.sh
+# ② 注入 ops 仓只读 deploy key（私钥从堡垒机取，不进任何仓库）
+bash deploy/lib/ack_remote_jkt_dev.sh deploy/gitops/bootstrap/add-repo-secret.sh
 
-# ③ 应用 AppProject + Application（从本仓 Git 拉，不自举）
-kubectl apply -f deploy/gitops/argocd/project-jkt-dev.yaml
-kubectl apply -f deploy/gitops/argocd/app-jkt-dev.yaml
+# ③ 应用 AppProject + Application（清单来自 ops 仓，本步只 apply 一次）
+bash deploy/lib/ack_remote_jkt_dev.sh deploy/gitops/bootstrap/apply-app.sh
 
 # ④ 暴露 UI（Ingress 走既有 ALB，证书复用 606823-ap-southeast-1）
-kubectl apply -f deploy/gitops/argocd/ingress-argocd.yaml
+bash deploy/lib/ack_remote_jkt_dev.sh deploy/gitops/bootstrap/expose-ui.sh
 ```
 
 `install-argocd.sh` 的口径（body 内跑，受 15000 字节硬门禁约束）：
@@ -514,7 +576,7 @@ kubectl -n argocd set resources deploy/argocd-server \
 ### 7.3 Application 与 AppProject
 
 ```yaml
-# deploy/gitops/argocd/app-jkt-dev.yaml
+# new-api-yxw-ops/argocd/application-jkt-dev.yaml
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -522,19 +584,18 @@ metadata:
   namespace: argocd
   finalizers: [resources-finalizer.argocd.argoproj.io]
 spec:
-  project: jkt-dev
+  project: newapi
   source:
-    repoURL: git@github.com:yanxuewei/new-api-yxw.git
-    targetRevision: develop
-    path: deploy/gitops/apps/jkt-dev
-    kustomize: { images: [] }        # 由 kustomization.yaml 的 images: 控制
+    repoURL: git@github.com:yanxuewei/new-api-yxw-ops.git
+    targetRevision: main
+    path: overlays/jkt-dev
   destination:
     server: https://kubernetes.default.svc
     namespace: newapi-dev
   syncPolicy:
     automated: { prune: false, selfHeal: false }   # T3 起步；T4 改 true/true
     syncOptions:
-      - CreateNamespace=false          # ns 由清单自己管，别让 ArgoCD 建
+      - CreateNamespace=false          # ns 由 base 自己管，别让 ArgoCD 建
       - ServerSideApply=true           # 大对象 + 注解多时防 last-applied 爆炸
       - ApplyOutOfSyncOnly=true
     retry: { limit: 3, backoff: { duration: 10s, factor: 2, maxDuration: 2m } }
@@ -577,7 +638,7 @@ T3 时在 `dev_deploy.sh` 顶部加护栏：`--apply-app` 若检测到 ArgoCD ap
 # 1. 从集群导出三个 Deployment 的真实 spec（去掉 status / managedFields）
 # 2. 与 gitops 清单逐字段 diff
 kubectl -n newapi-dev get deploy new-api-dev -o yaml > /tmp/live-master.yaml
-kustomize build deploy/gitops/apps/jkt-dev > /tmp/desired.yaml
+kustomize build new-api-yxw-ops/overlays/jkt-dev > /tmp/desired.yaml
 kubectl diff -f /tmp/desired.yaml          # 期望：只有 image tag → digest 与 checksum 注解两处差异
 ```
 
@@ -621,15 +682,18 @@ kubectl diff -f /tmp/desired.yaml          # 期望：只有 image tag → diges
 
 | 阶段 | 内容 | 产出 | 回滚 |
 |---|---|---|---|
-| **T0 · 决策确认**（0.2 人日） | 逐条过 §5 的 D1–D10，确认 4 个待定项：① 是否引入 `develop` ② 是否给 ArgoCD 开 `argocd.likha.hk` ③ 是否接受马尼拉 ACR 跨区拉取 ④ IP 白名单范围 | 决策记录（写进本文件附录） | — |
-| **T1 · 分支与仓库**（0.2 人日） | 建 `develop`；配分支保护；配 5 个 Repository Secrets（`ACR_REGISTRY` / `ACR_USERNAME` / `ACR_PASSWORD` / `SMOKE_URL`）；生成 `gitops-bot` 用的 push 方式 | `develop` 可用，保护规则生效 | 删分支，无副作用 |
-| **T2 · 镜像流水线**（0.4 人日） | 新建 `dev-build.yml`；先在 `workflow_dispatch` 手动跑一次，验证：镜像能推、digest 能取、`VERSION` 注入是否生效、构建耗时与 Actions 分钟数 | 一次成功的手动构建 + `newapi-dev/newapi-master:dev-20261026-xxxxxxx` 出现在 ACR | 删 workflow 文件；ACR 侧 tag 保留无害 |
-| **T3 · ArgoCD 落地**（0.4 人日） | 装 ArgoCD（§7.2）；建 AppProject + Application（**selfHeal=false, prune=false**）；做 §8.2 的 live-vs-desired diff；把差异压到 ≤2 类 | ArgoCD UI 可访问，app 显示 OutOfSync 且差异已知 | `kubectl delete ns argocd`（**不影响 newapi-dev**，因为 selfHeal=false 期间没改集群） |
-| **T4 · 切换真源**（0.3 人日） | 首次 `sync`；删 `checksum/config` 注解与旧 `new-api-config`；把 `dev_deploy.sh --apply-app` 上护栏（§8.1）；开 `selfHeal=true` | 集群状态完全来自 Git | `git revert` 该 commit + 用 `dev_deploy.sh --apply-app --force` 回到手工态 |
-| **T5 · 闭环与验收**（0.3 人日） | 打通「合并 → 自动上线」；跑 V1–V11；开 `prune=true`（先 `argocd app diff` 逐条确认）；补一份《执行报告》 | 11 项验收全绿 | 关 `prune` 即退到 T4 状态 |
+| **T0 · 决策确认**（0.2 人日） | §5 的 D1–D10 逐条过；**已完成**：Q1 `develop`（fanyan 已建，`c48790d`）/ Q2 UI 对外 / Q3 复用马尼拉 ACR / Q4 个人负载不纳管 / **新增：独立 ops 仓库 `new-api-yxw-ops`** | 本文件 §13 决策记录 | — |
+| **T1 · 仓库与凭据**（0.3 人日） | ① 建私有空仓 `new-api-yxw-ops`（**必须建仓才能 push**）② 生成一对 ops 仓 SSH deploy key（只读，绑单仓）+ 一个 PAT（`OPS_REPO_TOKEN`，`contents:write` on ops，90 天到期）③ 业务仓配 4 个 Secrets：`ACR_REGISTRY` / `ACR_USERNAME` / `ACR_PASSWORD` / `OPS_REPO_TOKEN`（+ `SMOKE_URL` 可选）④ `develop` 分支保护（必过 `ci.yml` 两 job） | ops 仓可 push；业务仓 secrets 齐 | 删仓库 / 删 secrets，无集群副作用 |
+| **T2 · ops 仓骨架 + 镜像流水线**（0.5 人日） | ① 按 §4.2 生成 `bases/newapi` + `overlays/jkt-dev`（**期望状态抄集群现状**，见 §8.2）② ops 仓 `verify.sh` + `verify.yml` 门禁 ③ 业务仓 `dev-build.yml`，先 `workflow_dispatch` 手动跑一次 | 一次成功的构建；`newapi-dev/newapi-master:dev-20261026-xxxxxxx` 在 ACR；ops 仓出现 1 个 `chore(jkt-dev)` commit | 删 workflow；ACR tag 保留无害 |
+| **T3 · ArgoCD 落地（只读）**（0.4 人日） | 装 ArgoCD（§7.2）+ 注入 ops deploy key + AppProject/Application（**selfHeal=false, prune=false**）+ `argocd.likha.hk` 暴露 + 做 §8.2 的 live-vs-desired diff | UI 可访问，app 显示 OutOfSync 且差异已知（目标 ≤2 类） | `kubectl delete ns argocd`（selfHeal=false 期间没改集群，**newapi-dev 零影响**） |
+| **T4 · 切换真源**（0.3 人日） | 首次 `sync`（master wave 0 / slave wave 1）；删 `checksum/config` 注解与旧 `new-api-config`；`dev_deploy.sh --apply-app` 上护栏；开 `selfHeal=true` | 集群状态完全来自 ops 仓 | `git revert` ops commit + `dev_deploy.sh --apply-app --force` 回手工态 |
+| **T5 · 闭环与验收**（0.3 人日） | 打通「合并 develop → 自动上线」；跑 V1–V11；开 `prune=true`（先 `argocd app diff` 逐条确认）；出《执行报告》 | 11 项验收全绿 | 关 `prune` 即退到 T4 状态 |
 
 **关键节奏建议**：T3 与 T4 之间**隔一个工作日**。先让 ArgoCD 以只读模式跑一天，
 观察它对「手工改动的感知」是否符合预期（这一步能提前暴露 `ignoreDifferences` 的缺项）。
+
+**T1 是唯一的硬阻塞**：`new-api-yxw-ops` 仓库必须先在 GitHub 上存在（私有），否则 T2 的 push 和 T3 的
+ArgoCD 拉取都无从谈起。建仓方式在 §15。其余阶段都可自动推进。
 
 ---
 
@@ -663,17 +727,22 @@ kubectl diff -f /tmp/desired.yaml          # 期望：只有 image tag → diges
 | **R8** | CM 改名导致 env 丢失 | Pod CrashLoop | `configMapGenerator` 必须保留 `name: new-api-config`，只是加后缀；Deployment 用 `envFrom.configMapRef.name: new-api-config`（kustomize 自动替换后缀，**不要手工写后缀**） |
 | **R9** | Actions 分钟数耗尽 | 流水线停摆 | 见 §11 三个选项 |
 | **R10** | ArgoCD 与 `dev_deploy.sh` 互相覆盖 | 状态反复横跳，排查困难 | T4 给脚本上护栏（§8.1）；团队公告「Deployment/CM 只经 Git 改」 |
+| **R11** | `OPS_REPO_TOKEN`（PAT）过期 | `dev-build.yml` 在最后一步 403，镜像推了但部署没变 ⇒ **最危险的静默失败形态** | ① 回写步骤失败必须 `exit 1`（不写 `\|\| true`）② 把到期日写进值班 Checklist ③ 到期前 7 天 `dev-build.yml` 加一步校验 PAT 有效期（`/user` 返回的 `github-authentication-token-expiration`） |
+| **R12** | 两个来源同时写 ops 仓 | `push` 被拒（non-fast-forward）或覆盖别人改动 | CI 用 `git pull --rebase` 后重推；**禁止 force push**（ops 仓 main 开分支保护 + 不允许 force） |
+| **R13** | 跨仓 debug 链路变长 | 出问题要先搞清楚是代码仓还是 ops 仓 | commit message 强制带 `src=<sha7>`；《执行报告》里记录「三件套」：业务仓 sha / 镜像 digest / ops commit sha |
 
 ---
 
-## 13. 待你确认的 4 个决策点
+## 13. 决策记录（2026-10-26 fanyan 已确认）
 
-| # | 决策 | 选项 | 我的建议 |
+| # | 决策 | 结论 | 落地影响 |
 |---|---|---|---|
-| Q1 | 是否引入 `develop` 分支 | A. 引入（dev 环境源）B. 直接用 `main` + 每次合并发 dev | **A**：`main` 保留生产语义，否则将来加生产环境时无分支可切 |
-| Q2 | ArgoCD UI 是否对外 | A. `argocd.likha.hk` + IP 白名单 B. 只 port-forward 走云助手 | **A**：白名单 + ArgoCD 自身登录双因子，便利性 >> 风险；不给公网 API server |
-| Q3 | 镜像仓库 | A. 复用马尼拉 ACR（跨区拉）B. 雅加达新开个人版 | **A**：零改造零成本；单日拉取 >50 次再评估 B |
-| Q4 | 个人负载 `yxw-new-api-*` 是否纳管 | A. 本期不纳管 B. 一起纳管（独立 Application） | **A**：个人调试高频改，纳管会产生噪音 commit，反而降低 Git 历史可读性 |
+| Q1 | 是否引入 `develop` | **引入**，已创建（`c48790db437e55e9a412c9ba71c269360c69a9d0`） | `dev-build.yml` 的触发源 = `push develop` |
+| Q2 | ArgoCD UI 是否对外 | **对外**，`argocd.likha.hk` + IP 白名单 | §7.2 ④；DNS 加 A/CNAME 一条 |
+| Q3 | 镜像仓库 | **复用马尼拉 ACR EE**，jkt 跨区公网拉取 | §5-D5 选项 A |
+| Q4 | `yxw-new-api-*` 个人负载 | **本期不纳管** | §5-D8；后续用独立 Application 承接 |
+| Q5 | 仓库拓扑 | **独立 ops 仓库 `new-api-yxw-ops`**（原方案单仓 → 已改） | §5-D2、§4.2 全量重写；CI 改跨仓回写 |
+| Q6 | 是否预留多环境 | **是**：`bases/newapi` + `overlays/{jkt-dev,jkt-pre,jkt-test,jkt-prod}` | overlay 契约定了，后续环境只补目录 |
 
 ---
 
@@ -685,6 +754,65 @@ kubectl diff -f /tmp/desired.yaml          # 期望：只有 image tag → diges
 4. **Argo Rollouts**：需要 canary + 自动门禁时再引入（dev 不需要）。
 5. **ops 仓库拆分**：出现第二审批人时 `git subtree split`。
 6. **冒烟 job 常态化**：`dev-build.yml` 末尾 curl `/api/status`，失败自动 `git revert` 上一 commit（真正的自动回滚）。
+
+---
+
+## 15. 建仓与凭据准备（T1 操作清单）
+
+### 15.1 建 ops 仓库（必须人工，SSH 不能建仓）
+
+```bash
+# 方式 A：网页（最快）
+#   github.com → New repository → Name: new-api-yxw-ops → Private → 不勾 README/gitignore
+#
+# 方式 B：有 PAT 时用 API
+curl -sS -X POST https://api.github.com/user/repos \
+  -H "Authorization: Bearer $GH_TOKEN" \
+  -d '{"name":"new-api-yxw-ops","private":true,"auto_init":false}'
+```
+
+建完立刻推本地骨架（骨架在 T2 生成）：
+
+```bash
+cd /e/git_code/new-api-yxw-ops
+git init -b main
+git add -A && git commit -m "chore: bootstrap ops repo (jkt-dev overlay)"
+git remote add origin git@github.com:yanxuewei/new-api-yxw-ops.git
+git push -u origin main
+```
+
+### 15.2 两把凭据（分开，不要复用）
+
+| 凭据 | 用途 | 权限 | 存放 | 轮换 |
+|---|---|---|---|---|
+| **ops deploy key**（SSH，只读） | ArgoCD 拉 ops 仓 | 仅 `new-api-yxw-ops` 的 read | 集群内 Secret `argocd/repo-new-api-yxw-ops`；私钥备份在堡垒机 | 泄漏时重建（ArgoCD 侧改 Secret 即生效） |
+| **`OPS_REPO_TOKEN`**（细粒度 PAT） | CI 回写 ops 仓 | 仅 `new-api-yxw-ops` 的 `Contents: Read and write` | 业务仓 Repository Secrets | **90 天**，到期日写进值班 Checklist |
+
+生成 deploy key（在 WSL 里执行，私钥不进仓库）：
+
+```bash
+ssh-keygen -t ed25519 -C "argocd@jkt-dev" -f /root/.ssh/ops_newapi_yxw -N ""
+cat /root/.ssh/ops_newapi_yxw.pub     # → GitHub: ops 仓 Settings → Deploy keys → Add（不勾 write）
+```
+
+### 15.3 业务仓 4 个 Secrets
+
+| Secret | 值来源 |
+|---|---|
+| `ACR_REGISTRY` | `acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com` |
+| `ACR_USERNAME` | `yanxuewei@5108890064395960` |
+| `ACR_PASSWORD` | ACR 控制台「访问凭证」里的**固定密码**（不是阿里云账号密码） |
+| `OPS_REPO_TOKEN` | §15.2 的 PAT |
+
+> `ACR_PASSWORD` 当前不在 `/root/.deploy_secrets*` 里（该目录只有 RDS/CK/SESSION/TLS 类），
+> 需要从 ACR 控制台或密码管理器取一次；`push.sh` 之前是交互输入的。
+
+### 15.4 ArgoCD 初始口令
+
+```bash
+kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d
+# 登录后立刻改密（UI → User Info → Update Password），并把新口令存密码管理器
+```
 
 ---
 
@@ -702,8 +830,8 @@ kubectl -n argocd get app jkt-dev -o jsonpath='{.status.sync.status} {.status.he
 kubectl -n argocd get app jkt-dev -o jsonpath='{.status.summary.images}'
 
 # ── 本地渲染对账（不需要集群）
-kustomize build deploy/gitops/apps/jkt-dev | grep 'image:'
-kustomize build deploy/gitops/apps/jkt-dev | kubectl diff -f -   # 需 kubeconfig
+kustomize build new-api-yxw-ops/overlays/jkt-dev | grep 'image:'
+kustomize build new-api-yxw-ops/overlays/jkt-dev | kubectl diff -f -   # 需 kubeconfig
 
 # ── 手工发布（应急，GitOps 后应尽量避免）
 git switch develop && git pull --ff-only
@@ -723,11 +851,11 @@ bash deploy/lib/ack_remote_jkt_dev.sh <(echo 'kubectl -n newapi-dev rollout rest
 
 | 《规范》条款 | 本方案落点 | 偏差说明 |
 |---|---|---|
-| §1.1 仓库拓扑（upstream/origin/ops 三仓） | 单仓 + `deploy/gitops/` | **有意偏离**：单人阶段运维成本 > 权限收益；路径已为拆分预留（D2） |
-| §2 分支模型 Git Flow | 只落 `main` + `develop` + `feature/*` | 渐进：`release/*`/`hotfix/*` 随生产 GitOps 那期引入 |
-| §7.1 线上变更 = ops 仓库一次 commit | ✅ `deploy/gitops/` 下 commit | 语义等价 |
+| §1.1 仓库拓扑（upstream/origin/ops 三仓） | ✅ **独立 ops 仓库** `new-api-yxw-ops` | 本轮按 fanyan 裁定对齐（原方案曾是单仓，已改） |
+| §2 分支模型 Git Flow | 业务仓落 `main` + `develop` + `feature/*`；ops 仓单 `main` 分支 + 环境目录 | `release/*`/`hotfix/*` 随生产 GitOps 那期引入；ops 仓不需要分支模型 |
+| §7.1 线上变更 = ops 仓库一次 commit | ✅ 逐字落地 | — |
 | §7.2 禁 latest、tag 与 git tag 一致 | dev 用 `dev-日期-sha7`，GitOps 记 digest | dev 无 semver，生产那期对齐 |
-| §7.3 ops 仓库结构（bases/overlays/releases） | `apps/jkt-dev` + `argocd` | 单环境不需要 base/overlay 拆分；多环境时再上 |
+| §7.3 ops 仓库结构（bases/overlays/releases） | ✅ `bases/newapi` + `overlays/*`；`releases/` 用 commit message `src=` 代替 | 单环境暂不建 `releases/vX.yaml` 目录，多种环境后再加 |
 | §7.5 发布后健康检查 + 自动回滚 | T5 之后的演进项 6 | 本期只有冒烟，无自动 revert |
 | §8.1 workflow 清单（ci/release/sync/e2e） | `ci.yml` 复用 + 新增 `dev-build.yml` / `gitops-verify.yml` | e2e-nightly 未建（dev 无 e2e 套件） |
 | §8.2 Action 固定 commit SHA | ✅ 沿用现有 pin 风格 | — |
