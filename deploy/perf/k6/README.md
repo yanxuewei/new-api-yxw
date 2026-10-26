@@ -116,6 +116,25 @@ python3 deploy/perf/k6/report.py --log-dir deploy/perf/perf_reports \
 
 判定统一用 `report.py --check <log>`：`run.sh` 会把远端输出落盘并把真实返回码写入日志；只有输出形如 `[check] PASS/FAIL ...` 才映射为 0/1，其余异常统一为 2（数据不完整），不会被当作容量上限。
 
+## 固定副本 + 逐档扫描（`sweep`，2026-10-26）
+
+`sweep` 用来回答“某条路径在某个副本数下的最佳通过档是多少”：
+
+```bash
+# 1 副本：先公网、再内网
+bash deploy/perf/k6/run.sh sweep https://perf.likha.hk 1 150 100 2000 120s
+bash deploy/perf/k6/run.sh sweep perf-new-api-slave  1 150 100 2000 120s
+# 2 副本：同样两条路径
+bash deploy/perf/k6/run.sh sweep https://perf.likha.hk 2 150 100 2000 120s
+bash deploy/perf/k6/run.sh sweep perf-new-api-slave  2 150 100 2000 120s
+```
+
+- 参数顺序：`<target> [reps] [start] [step] [max] [dur]`，默认 `1 副本 / 150 起 / +100 / 上限 2000 / 每档 120s`。
+- 每档开始前会 `scale` 到指定副本并等就绪；`public-url` 模式下固定 `perf-new-api-slave`，`clusterip` 模式固定目标 Service。
+- 首个 SLO 失败档即停；数据不完整也立即停止，不写入容量边界。
+- 每组结束打印本组最优通过档（VU / RPS / P95），并生成该组报告与全量报告；四组跑完后按路径/副本横向对比。
+- 每档时长建议 ≥120s；若要跑 300s 以上，注意 `app-logs` EmptyDir 上限（雅加达 perf slave 已从 2Gi 调到 10Gi，约支持 20 分钟级写入）。
+
 ## 多 Job 分片并行（`shard`，2026-10-21）
 
 单 Job 是单进程，1500 VU 已需要约 2 核/1Gi；3000+ 并发时用分片：

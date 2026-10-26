@@ -378,7 +378,7 @@ def analyse(runs: list[dict], eip_mbps: float = 0.0) -> dict:
     a["best_phase"] = max(phased, key=lambda r: r["rps"]) if phased else a["best"]
     a["worst"] = max(runs, key=lambda r: r["vus_i"])
     cap_runs = [r for r in runs if r.get("mode") in CAPACITY_MODES]
-    config_fields = ("mode", "target", "base", "images", "dur", "load_config", "mock_config")
+    config_fields = ("mode", "target", "base", "images", "dur", "load_config", "mock_config", "token_mode")
     grouped = {}
     for r in cap_runs:
         key = tuple(r.get(k, "") for k in config_fields) + (r["replicas_i"], r.get("shards", "1"))
