@@ -21,9 +21,14 @@ NODE_ARG="${2:-}"
 # 一起消失，且开了弹性后实例 id 会继续变。这里每次现取一个 state=running 的实例，
 # 拿不到就直接失败（不猜 id，免得命令打到已释放实例上还报成"应用有问题"）。
 if [ -z "$NODE_ARG" ]; then
-  NODE_ARG=$(aliyun cs DescribeClusterNodes --ClusterId "$CID" --region "$REGION" 2>/dev/null \
-    | jq -r '[.nodes[]? | select(.state=="running") | .instance_id] | first // empty')
-  [ -n "$NODE_ARG" ] || { echo "[!] 集群 $CID 没有 state=running 的节点 ⇒ 终止（不向已释放实例发命令）"; exit 1; }
+  # 阿里云 OpenAPI 偶发超时/重置会返回空列表，先有限重试再判定无节点。
+  for _try in 1 2 3 4 5; do
+    NODE_ARG=$(aliyun cs DescribeClusterNodes --ClusterId "$CID" --region "$REGION" 2>/dev/null \
+      | jq -r '[.nodes[]? | select(.state=="running") | .instance_id] | first // empty')
+    [ -n "$NODE_ARG" ] && break
+    sleep 3
+  done
+  [ -n "$NODE_ARG" ] || { echo "[!] 集群 $CID 连续 5 次未取到 state=running 节点 ⇒ 终止（不向已释放实例发命令）"; exit 1; }
   echo "[i] 动态选定节点=$NODE_ARG（DescribeClusterNodes 现取，未写死）"
 fi
 RUN_ID="$(date +%s)-$$-${RANDOM}"
@@ -38,9 +43,16 @@ mkdir -p "$TMPD"; chmod 700 "$TMPD" 2>/dev/null || true
 command -v aliyun >/dev/null || { echo "[!] aliyun CLI 不在 PATH"; exit 1; }
 
 echo "[i] 取 15 分钟临时私网 kubeconfig"
-aliyun cs DescribeClusterUserKubeconfig --ClusterId "$CID" --region "$REGION" \
-  --PrivateIpAddress true --TemporaryDurationMinutes 15 > "${TMPD}/kc.${RUN_ID}.json" 2>&1 \
-  || { echo "[!] kubeconfig 拉取失败："; head -5 "${TMPD}/kc.${RUN_ID}.json"; exit 1; }
+KC_OK=0
+for _try in 1 2 3; do
+  if aliyun cs DescribeClusterUserKubeconfig --ClusterId "$CID" --region "$REGION" \
+      --PrivateIpAddress true --TemporaryDurationMinutes 15 > "${TMPD}/kc.${RUN_ID}.json" 2>&1; then
+    KC_OK=1
+    break
+  fi
+  sleep 2
+done
+[ "$KC_OK" = "1" ] || { echo "[!] kubeconfig 拉取失败（已重试 3 次）："; head -5 "${TMPD}/kc.${RUN_ID}.json"; exit 1; }
 jq -r '.config' "${TMPD}/kc.${RUN_ID}.json" > "$KCF"
 [ -s "$KCF" ] || { echo "[!] kubeconfig 为空（检查 DescribeClusterUserKubeconfig 返回）"; exit 1; }
 rm -f "${TMPD}/kc.${RUN_ID}.json"

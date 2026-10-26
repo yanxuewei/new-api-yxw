@@ -17,6 +17,8 @@ const DUR = __ENV.DUR || '120s';
 const BASE = __ENV.BASE;
 const MODEL = __ENV.MODEL || 'mock-gpt';
 const TOKEN = __ENV.TOKEN;
+// 多用户压测：TOKENS 为逗号分隔的令牌列表，按 VU 轮转，避免所有请求命中同一用户/令牌热行。
+const TOKENS = (__ENV.TOKENS || '').split(',').map((s) => s.trim()).filter(Boolean);
 const SHARD = __ENV.SHARD || '0';   // 分片编号（多 Job 并行时用于区分指标）
 
 export const options = {
@@ -44,7 +46,7 @@ export default function () {
   });
   const res = http.post(`${BASE}/v1/chat/completions`, body, {
     headers: {
-      Authorization: `Bearer sk-${TOKEN}`,
+      Authorization: `Bearer sk-${TOKENS.length ? TOKENS[(__VU - 1) % TOKENS.length] : TOKEN}`,
       'Content-Type': 'application/json',
     },
     timeout: '120s',

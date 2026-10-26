@@ -5,7 +5,8 @@
 # 为什么这么绕：集群 API Server 仅内网、本机无法直连；k6 Job 与 mock 都在集群内，客户端不能成为瓶颈（任务 33 坑 1）。
 #
 # usage:
-#   bash deploy/perf/k6/run.sh stage <target-svc> <vus> <duration>                     # 单副本单阶段，如 stage perf-new-api-slave 300 120s
+#   bash deploy/perf/k6/run.sh stage <target-svc|url> <vus> <duration>                 # 单档，如 stage perf-new-api-slave 300 120s
+#   bash deploy/perf/k6/run.sh sweep <target-svc|url> [reps] [start] [step] [max] [dur] # 固定副本数逐档扫描，默认 1 副本、150 起、+100、上限2000、每档120s
 #   bash deploy/perf/k6/run.sh ramp  <target-svc> [start] [step] [max] [duration]      # 阶梯递增找瓶颈，默认 300→3000 步长300 每阶段90s
 #   bash deploy/perf/k6/run.sh ladder <target-svc> [start] [step] [max] [dur] [reps]     # 副本阶梯：1 副本压到瓶颈→扩到 2 副本同参数重压（默认 reps=1,2）
 #   bash deploy/perf/k6/run.sh scale <replicas> [deploy]                                # 只调副本数（压测后恢复现场）
@@ -25,7 +26,7 @@ K6JS_FILE="$HERE/sse.js"   # 每个动作可切换（burst/admin/long 用各自�
 [ -s "$K6JS_FILE" ] || { echo "[!] 缺 $K6JS_FILE"; exit 1; }
 [ -x "$REMOTE" ] || { echo "[!] 缺通道脚本 $REMOTE"; exit 1; }
 
-ACTION="${1:?action: stage|ramp|ladder|dual1500|summary|readback}"; shift || true
+ACTION="${1:?action: stage|sweep|ramp|ladder|dual1500|summary|readback}"; shift || true
 
 # 节点侧需要的最小上下文：sse.js 载荷（Base64）+ 动作参数。值不进 argv，只进本次命令体。
 header() {
@@ -157,7 +158,7 @@ run_body() {
 # 累加到 RAMP_DIRS 供调用方出汇总报告。
 run_ramp() {
   local tgt="$1" start="$2" step="$3" max="$4" dur="$5" rep="${6:-}" pfx="${7:-ramp}"
-  local p rtag="" v chkrc tag hit=0
+  local p rtag="" v chkrc tag hit=0 prev_log="" prev_vu=""
   case "$tgt" in *://*) p=public ;; *) p=clusterip ;; esac
   [ -n "$rep" ] && rtag="r${rep}-"
   echo "[perf-k6] ${pfx} 开始：target=$tgt  ${start}→${max} 步长${step} 每阶段${dur}${rep:+ 副本=$rep}"
@@ -175,7 +176,7 @@ run_ramp() {
     [ -n "$LAST_RUN_DIR" ] && RAMP_DIRS+=("$LAST_RUN_DIR")
     if [ -s "${LAST_LOG:-}" ]; then
       case "$chkrc" in
-        0) ;;
+        0) prev_log="$LAST_LOG"; prev_vu="$v" ;;
         1) echo "[perf-k6] VU=$v 未通过 SLO，停止递增；仅记录失败档，不宣称精确容量上限。"; hit=1; break ;;
         *) echo "[perf-k6] VU=$v 数据不完整或无法评估，停止递增；不能用作容量边界。"; return 2 ;;
       esac
@@ -190,6 +191,10 @@ run_ramp() {
     fi
   done
   [ "$hit" -eq 0 ] && echo "[perf-k6] 跑到 max=${max} 仍未破线${rep:+（${rep} 副本）}；仅证明该实测档通过，尚未找到失败边界。"
+  if [ -n "$prev_log" ]; then
+    echo "[perf-k6] 本组最优通过档（${prev_vu} VU${rep:+，${rep} 副本}）："
+    python3 "$HERE/report.py" --check "$prev_log" --eip-mbps "${EIP_MBPS:-100}" 2>&1 | sed 's/^\[check\] /  /'
+  fi
   return "$hit"
 }
 
@@ -252,6 +257,20 @@ case "$ACTION" in
     case "$TGT" in *://*) P=public ;; *) P=clusterip ;; esac
     DESC="stage-${P}-vu${VUS}-dur${DUR}"
     run_body stage.sh "stage_${TGT//[^a-zA-Z0-9]/_}_${VUS}" "TARGET_SVC=$TGT" "VUS=$VUS" "DUR=$DUR" ;;
+  sweep)
+    # 同一路径 + 同一副本数下逐档扫描：先 scale 到指定副本，再从 start 起每档 +step，
+    # 首个 SLO 失败即停；结束时打印本组最优通过档。
+    # usage: sweep <target-svc|url> [reps=1] [start=150] [step=100] [max=2000] [dur=120s]
+    K6JS_FILE="$HERE/sse.js"
+    TGT="${1:?sweep 需要 <target-svc|url>}"
+    S_REPS="${2:-1}"; S_START="${3:-150}"; S_STEP="${4:-100}"; S_MAX="${5:-2000}"; S_DUR="${6:-120s}"
+    case "$TGT" in *://*) S_PATH=public ;; *) S_PATH=clusterip ;; esac
+    echo "[perf-k6] sweep：${S_PATH} 路径，固定 ${S_REPS} 副本，${S_START}→${S_MAX} 步长${S_STEP}，每档${S_DUR}"
+    RAMP_DIRS=()
+    RC=0
+    run_ramp "$TGT" "$S_START" "$S_STEP" "$S_MAX" "$S_DUR" "$S_REPS" "sweep" || RC=$?
+    emit_report "sweep_${S_PATH}_r${S_REPS}" "${RAMP_DIRS[@]}"
+    exit "$RC" ;;
   ramp)
     # 阶梯递增压测：逐级加 VU，找系统真实饱和点（错误率/延迟劣化即终止）
     # usage: ramp <target-svc|url> [start=300] [step=300] [max=3000] [dur=90s]

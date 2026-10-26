@@ -1,6 +1,0 @@
-[i] 动态选定节点=i-k1afs8wedv35rai4pmx2（DescribeClusterNodes 现取，未写死）
-[i] 取 15 分钟临时私网 kubeconfig
-[!] kubeconfig 拉取失败：
-[1;31mERROR: request to cs.ap-southeast-5.aliyuncs.com failed: context deadline exceeded (Client.Timeout exceeded while awaiting headers)
-[0m
-runner_rc=1

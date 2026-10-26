@@ -18,15 +18,17 @@ echo "=== target=$TARGET_SVC ($MODE, BASE=$BASE)  vus=$VUS dur=$DUR"
 # 可选：REQ_REPLICAS 指定本次压测的副本数。起 Job 前先 scale 到该值并等就绪，
 # 保证同一阶梯内副本口径固定（HPA/人工改动不会混进同一档）。
 REPL_BEFORE=""
-if [ -n "${REQ_REPLICAS:-}" ] && [ "$MODE" = "clusterip" ]; then
-  REPL_BEFORE=$(kubectl -n $NS get deploy "$TARGET_SVC" -o jsonpath='{.status.readyReplicas}' 2>/dev/null)
-  echo "=== 目标副本数=$REQ_REPLICAS（压测前 ready=${REPL_BEFORE:-?}），先 scale deploy/$TARGET_SVC"
-  kubectl -n $NS scale deploy "$TARGET_SVC" --replicas="$REQ_REPLICAS" 2>&1 | sed 's/^/  /'
-  kubectl -n $NS rollout status deploy/"$TARGET_SVC" --timeout=240s 2>&1 | sed 's/^/  /'
-  READY=$(kubectl -n $NS get deploy "$TARGET_SVC" -o jsonpath='{.status.readyReplicas}' 2>/dev/null)
+DEPLOY_NAME="$TARGET_SVC"
+[ "$MODE" = "public-url" ] && DEPLOY_NAME=perf-new-api-slave
+if [ -n "${REQ_REPLICAS:-}" ]; then
+  REPL_BEFORE=$(kubectl -n $NS get deploy "$DEPLOY_NAME" -o jsonpath='{.status.readyReplicas}' 2>/dev/null)
+  echo "=== 目标副本数=$REQ_REPLICAS（压测前 ready=${REPL_BEFORE:-?}），先 scale deploy/$DEPLOY_NAME"
+  kubectl -n $NS scale deploy "$DEPLOY_NAME" --replicas="$REQ_REPLICAS" 2>&1 | sed 's/^/  /'
+  kubectl -n $NS rollout status deploy/"$DEPLOY_NAME" --timeout=240s 2>&1 | sed 's/^/  /'
+  READY=$(kubectl -n $NS get deploy "$DEPLOY_NAME" -o jsonpath='{.status.readyReplicas}' 2>/dev/null)
   echo "  ready=${READY:-0}/$REQ_REPLICAS"
   [ "${READY:-0}" -ge "$REQ_REPLICAS" ] || { echo "  [XX] 副本未就绪，终止本档"; exit 2; }
-  [ "$REQ_REPLICAS" -gt 1 ] && MODE="clusterip-dual"
+  [ "$REQ_REPLICAS" -gt 1 ] && [ "$MODE" = "clusterip" ] && MODE="clusterip-dual"
 fi
 echo "=== 生效：mode=$MODE replicas=${REQ_REPLICAS:-auto}"
 
@@ -54,6 +56,8 @@ spec:
             - {name: BASE, value: "$BASE"}
             - name: TOKEN
               valueFrom: {secretKeyRef: {name: perf-load-test-credentials, key: token_key}}
+            - name: TOKENS
+              valueFrom: {secretKeyRef: {name: perf-load-test-credentials, key: tokens, optional: true}}
           volumeMounts: [{name: scripts, mountPath: /scripts}]
           resources: {requests: {cpu: 500m, memory: 256Mi}, limits: {cpu: "2", memory: 1Gi}}
       volumes:
@@ -98,6 +102,9 @@ echo "mem_peak_mi=${MEMM:-0}"
 echo "mem_max_pod_mi=${MEM_MAX_POD_MI:-0}"
 echo "pods_peak=${PODS_PEAK:-0}"
 echo "sample_rows=${SAMPLE_ROWS:-0}"
+TOKEN_MODE=$(kubectl -n $NS get secret perf-load-test-credentials -o jsonpath='{.data.tokens}' 2>/dev/null)
+[ -n "$TOKEN_MODE" ] && TOKEN_MODE=multi || TOKEN_MODE=single
+echo "token_mode=$TOKEN_MODE"
 echo "load_config=k6-0.54.0:${SCRIPT_ID}:const-vus:model=${MODEL:-mock-gpt}"
 echo "mock_config=${MOCK_CFG}"
 echo "replicas_before=${REPL_BEFORE:-}"

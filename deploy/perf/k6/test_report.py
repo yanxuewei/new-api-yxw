@@ -48,7 +48,7 @@ class ReportTests(unittest.TestCase):
             vus="1200", dur="90s", replicas="1", cpu_peak_m="900", mem_peak_mi="200",
             job=f"stage-{self.counter}", ts="2026-10-23T08:00:00Z", images="gateway=v1;",
             load_config="sse-v1:k6-0.54:1-shard:mock-gpt", mock_config="300ms:30ms:50tokens",
-            summary_schema="2", k6_exit_codes="0",
+            summary_schema="2", k6_exit_codes="0", token_mode="single",
         )
         fields.update(meta)
         path = self.root / f"{self.counter}.log"
@@ -213,14 +213,25 @@ class ReportTests(unittest.TestCase):
         shutil.copytree(HERE / "lib", k6 / "lib")
         remote = sandbox / "deploy/lib/ack_remote_jkt_dev.sh"
         remote.parent.mkdir(parents=True)
-        remote.write_text('#!/bin/bash\n'
-                          'case "$(basename "$1")" in\n'
-                          '  perf_k6_install.*)\n'
-                          '    cm=$(sed -n "s/.*export K6JS_CM=\'\\([^\']*\\)\'.*/\\1/p" "$1")\n'
-                          '    echo "  configmap/$cm 就绪"; exit 0 ;;\n'
-                          'esac\n'
-                          'printf "remote-call\\n" >> "$FIXTURE_CALLS"\n'
-                          'cat "$FIXTURE_LOG"\nexit "${FIXTURE_RC:-0}"\n')
+        remote.write_text(r'''#!/bin/bash
+case "$(basename "$1")" in
+  perf_k6_install.*)
+    cm=$(sed -n "s/.*export K6JS_CM='\([^']*\)'.*/\1/p" "$1")
+    echo "  configmap/$cm 就绪"; exit 0 ;;
+esac
+if [ -n "${FIXTURE_TIERS:-}" ]; then
+  n=$(cat "$FIXTURE_TIERS" 2>/dev/null || echo 0); n=$((n+1)); echo "$n" > "$FIXTURE_TIERS"
+fi
+if [ -n "${FIXTURE_REPS:-}" ]; then
+  sed -n "s/.*export REQ_REPLICAS='\([^']*\)'.*/\1/p" "$1" >> "$FIXTURE_REPS"
+fi
+printf 'remote-call\n' >> "$FIXTURE_CALLS"
+if [ -n "${FIXTURE_FAIL_AT:-}" ] && [ "${n:-0}" -ge "$FIXTURE_FAIL_AT" ]; then
+  cat "$FIXTURE_LOG_FAIL"; exit "${FIXTURE_RC:-0}"
+fi
+cat "$FIXTURE_LOG"
+exit "${FIXTURE_RC:-0}"
+''')
         remote.chmod(0o700)
         bin_dir = sandbox / "bin"
         bin_dir.mkdir()
@@ -250,6 +261,43 @@ class ReportTests(unittest.TestCase):
                 self.assertEqual(calls.read_text().count("remote-call"), 1)
                 if expected == 2:
                     self.assertNotIn("容量高于", proc.stdout)
+        # sweep：固定副本数、150 起 +100，逐档扫描到首个失败
+        tiers = sandbox / "tiers"
+        reps = sandbox / "reps"
+        env.update(FIXTURE_TIERS=str(tiers), FIXTURE_REPS=str(reps), FIXTURE_RC="0",
+                   FIXTURE_LOG=str(self.log(summary())))
+        calls.write_text(""); tiers.write_text("0"); reps.write_text("")
+        proc = subprocess.run(["bash", str(k6 / "run.sh"), "sweep",
+                               "perf-new-api-slave", "1", "150", "100", "350", "90s"],
+                              env=env, capture_output=True, text=True, timeout=30)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertEqual(calls.read_text().count("remote-call"), 3)
+        self.assertEqual(set(reps.read_text().split()), {"1"})
+        self.assertIn("本组最优通过档（350 VU", proc.stdout)
+        self.assertIn("跑到 max=350 仍未破线", proc.stdout)
+
+        # URL 路径同样要把副本数固定到指定值
+        calls.write_text(""); tiers.write_text("0"); reps.write_text("")
+        proc = subprocess.run(["bash", str(k6 / "run.sh"), "sweep",
+                               "https://perf.likha.hk", "1", "150", "100", "250", "90s"],
+                              env=env, capture_output=True, text=True, timeout=30)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertEqual(calls.read_text().count("remote-call"), 2)
+        self.assertEqual(set(reps.read_text().split()), {"1"})
+
+        # 第 2 档失败即停，且最优通过档取上一档
+        calls.write_text(""); tiers.write_text("0"); reps.write_text("")
+        env["FIXTURE_FAIL_AT"] = "2"
+        env["FIXTURE_LOG_FAIL"] = str(self.log(summary(waiting=900)))
+        proc = subprocess.run(["bash", str(k6 / "run.sh"), "sweep",
+                               "perf-new-api-slave", "1", "150", "100", "450", "90s"],
+                              env=env, capture_output=True, text=True, timeout=30)
+        self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+        self.assertEqual(calls.read_text().count("remote-call"), 2)
+        self.assertIn("VU=250 未通过 SLO", proc.stdout)
+        self.assertIn("本组最优通过档（150 VU", proc.stdout)
+        env.pop("FIXTURE_FAIL_AT"); env.pop("FIXTURE_LOG_FAIL")
+
         checker = k6 / "report.py"
         checker.write_text("raise RuntimeError('fixture checker failure')\n")
         calls.write_text("")

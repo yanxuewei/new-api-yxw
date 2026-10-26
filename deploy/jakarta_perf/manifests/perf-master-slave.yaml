@@ -208,6 +208,10 @@ spec:
           value: slave
         - name: GOMAXPROCS
           value: "2"
+        - name: BATCH_UPDATE_ENABLED
+          value: "true"
+        - name: MEMORY_CACHE_ENABLED
+          value: "true"
         - name: SQL_SLOW_THRESHOLD_MS
           value: "200"
         - name: SQL_DSN
