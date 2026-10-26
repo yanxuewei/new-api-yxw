@@ -412,16 +412,39 @@ class ReportTests(unittest.TestCase):
             analysis = report.analyse(runs)
             self.assertEqual(bool(analysis.get("verified_replicas")), expected)
 
-    def test_legacy_logs_cannot_prove_integrity_or_capacity(self):
-        for mode in ("clusterip", "admin"):
-            run = self.run_record(summary(complete=None, admin_duration=900), mode=mode,
-                                  summary_schema="", k6_exit_codes="")
-            self.assertEqual(run["verdict"], "INCOMPLETE")
-        run = self.run_record(summary(complete=None, waiting=2820), summary_schema="", k6_exit_codes="")
+    def test_legacy_checks_yield_legacy_verdict_without_exact_capacity(self):
+        legacy = dict(summary_schema="", k6_exit_codes="")
+        run = self.run_record(summary(complete=None), **legacy)
+        self.assertEqual(run["verdict"], "PASS")
+        self.assertEqual(run["evidence"], "legacy")
+        self.assertFalse(run["evidence_complete"])
+        self.assertIn("旧口径", run["verdict_reason"])
+        # 管理面旧日志不能套用 SSE 的两项 checks
+        run = self.run_record(summary(complete=None, admin_duration=900), mode="admin", **legacy)
+        self.assertEqual(run["verdict"], "INCOMPLETE")
+        # 已知延迟破线仍判失败
+        run = self.run_record(summary(complete=None, waiting=2820), **legacy)
         self.assertEqual(run["verdict"], "FAIL")
         self.assertFalse(run["evidence_complete"])
-        passing = self.run_record(summary(), vus="600")
-        self.assertIsNone(report.analyse([passing, run])["capacity_groups"][0]["knee_vus"])
+        # 旧口径不参与容量插值
+        passing = self.run_record(summary(complete=None), vus="1200", **legacy)
+        failing = self.run_record(summary(complete=None, waiting=1000), vus="1800", **legacy)
+        groups = report.analyse([passing, failing])["capacity_groups"]
+        self.assertTrue(all(g["knee_vus"] is None for g in groups))
+
+    def test_legacy_verdict_requires_verifiable_two_checks_per_request(self):
+        legacy = dict(summary_schema="", k6_exit_codes="")
+        # 1 项/请求无法证明同时校验了 status 与 DONE
+        run = self.run_record(summary(complete=None, checks_total=10000, checks=10000), **legacy)
+        self.assertEqual(run["verdict"], "INCOMPLETE")
+        # 超出错误预算的 checks 失败必须判失败
+        run = self.run_record(summary(complete=None, checks=19990), **legacy)
+        self.assertEqual(run["verdict"], "FAIL")
+        self.assertIn("integrity", run["verdict_reason"])
+        # 新版日志即使缺 sse_complete 也不能降级成旧口径
+        run = self.run_record(summary(complete=None))
+        self.assertEqual(run["verdict"], "INCOMPLETE")
+        self.assertEqual(run["evidence"], "insufficient")
 
     def test_shards_without_overlap_evidence_cannot_verify_total_concurrency(self):
         run = self.run_record(summary() + summary(), mode="clusterip-shard", vus="1500", shards="2",

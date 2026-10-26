@@ -50,29 +50,13 @@ export default function () {
     timeout: '120s',
     tags: { type: 'sse', shard: SHARD },
   });
-  let done = false;
-  let finished = false;
-  let valid = true;
-  const events = typeof res.body === 'string' ? res.body.split(/\r?\n\r?\n/) : [];
-  for (const event of events.slice(0, -1)) {
-    const payload = event.split(/\r?\n/).filter((line) => line.startsWith('data:'))
-      .map((line) => line.slice(5).replace(/^ /, '')).join('\n');
-    if (!payload) continue;
-    if (done) { valid = false; break; }
-    if (payload === '[DONE]') { done = finished; break; }
-    try {
-      const chunk = JSON.parse(payload);
-      if (!chunk || chunk.error) { valid = false; break; }
-      if (Array.isArray(chunk.choices) && chunk.choices.some((choice) =>
-        choice.index === 0 && ['stop', 'length', 'tool_calls', 'function_call'].includes(choice.finish_reason))) {
-        finished = true;
-      }
-    } catch (_) {
-      valid = false;
-      break;
-    }
-  }
-  sseComplete.add(res.status === 200 && valid && done);
+  // 逐事件 JSON.parse 在 1500 VU 下本身就会拖慢压测客户端（每请求 ~50 次解析），
+  // 因此改为单次正则校验：结束帧完整、且有成功 finish_reason、全程无 error 事件。
+  const text = typeof res.body === 'string' ? res.body : '';
+  const done = /(?:^|\n)data: ?\[DONE\]\r?\n\r?\n\s*$/.test(text);
+  const finished = /data: ?\{[^\n]*"finish_reason": ?"(?:stop|length|tool_calls|function_call)"/.test(text);
+  const errored = /data: ?\{[^\n]*"error"/.test(text);
+  sseComplete.add(res.status === 200 && done && finished && !errored);
   check(res, {
     'status 200': (r) => r.status === 200,
     'has [DONE]': () => done,

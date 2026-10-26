@@ -1,0 +1,122 @@
+{
+  "generated_at": "2026-10-26T02:08:08+00:00",
+  "runs": [
+    {
+      "target": "perf-new-api-slave",
+      "base": "http://172.23.2.189",
+      "mode": "clusterip-dual",
+      "vus": "1500",
+      "dur": "300s",
+      "cpu_peak_m": "1639",
+      "cpu_max_pod_m": "828",
+      "mem_peak_mi": "412",
+      "mem_max_pod_mi": "212",
+      "pods_peak": "2",
+      "sample_rows": "126",
+      "load_config": "k6-0.54.0:sse.js@0a98e5ee5966:const-vus:model=mock-gpt",
+      "mock_config": "first_token_delay_ms=300,token_interval_ms=30,tokens_per_response=50,token_text_bytes=12,error_rate=0,error_status=500,extra_latency_ms=0",
+      "replicas_before": "",
+      "replicas": "2",
+      "job": "k6-stage-1500",
+      "ts": "2026-10-26T02:08:05Z",
+      "images": "mock-upstream=acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com/newapi-dev/mock-upstream:20261019-4788bec2e;perf-new-api-master=acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com/newapi-dev/newapi-master:20261015-c62445555;perf-new-api-slave=acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com/newapi-dev/newapi-master:20261015-c62445555;",
+      "summary_schema": "2",
+      "shards": "1",
+      "k6_exit_codes": "99",
+      "reqs": 191461,
+      "rps": 633.582922,
+      "streams": 1,
+      "dropped_iterations": 0,
+      "err_n": 0,
+      "reqs_total": 191461,
+      "err_pct": 0.0,
+      "ttfb_avg": 472.17,
+      "ttfb_med": 408.25,
+      "ttfb_p90": 695.15,
+      "ttfb_p95": 828.76,
+      "ttfb_p99": 1090.0,
+      "ttfb_max": 2960.0,
+      "dur_avg": 2350.0,
+      "dur_med": 2280.0,
+      "dur_p90": 2800.0,
+      "dur_p95": 3010.0,
+      "dur_p99": 3560.0,
+      "checks_counts": [
+        [
+          382922,
+          382922
+        ]
+      ],
+      "checks_pct": 100.0,
+      "complete_counts": [
+        [
+          191461,
+          191461
+        ]
+      ],
+      "complete_pct": 100.0,
+      "data_mb": 2.1,
+      "data_mbps": 56.0,
+      "vus_max": 1500,
+      "request_counts": [
+        191461
+      ],
+      "error_counts": [
+        [
+          0,
+          191461
+        ]
+      ],
+      "p95_values": {
+        "http_req_connecting": [
+          0.0
+        ],
+        "http_req_duration": [
+          3010.0
+        ],
+        "http_req_receiving": [
+          2440.0
+        ],
+        "http_req_sending": [
+          0.02341
+        ],
+        "http_req_tls_handshaking": [
+          0.0
+        ],
+        "http_req_waiting": [
+          828.76
+        ],
+        "http_req_waiting{type:sse}": [
+          828.76
+        ]
+      },
+      "metadata_valid": true,
+      "vus_i": 1500,
+      "replicas_i": 2,
+      "cpu_cores": 1.639,
+      "mem_mi": 412.0,
+      "dur_s": 300.0,
+      "source": "20261026-100246-stage_perf_new_api_slave_1500.log",
+      "phase_connecting": 0.0,
+      "phase_tls": 0.0,
+      "phase_sending": 0.01898,
+      "phase_waiting": 695.15,
+      "phase_receiving": 2270.0,
+      "phase_duration": 2800.0,
+      "pass": false,
+      "verdict": "FAIL",
+      "failure_reasons": [
+        "latency"
+      ],
+      "evidence_complete": true,
+      "evidence": "exact",
+      "verdict_reason": "latency",
+      "cpu_per_rps": 0.0025868752819698,
+      "cpu_h_per_mreq": 0.7185764672138334,
+      "reqs_per_core_h": 1391640.3411836484,
+      "rps_per_replica": 316.791461,
+      "vus_per_replica": 750.0,
+      "little_vus": 1488.9198667
+    }
+  ]
+}

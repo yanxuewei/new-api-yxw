@@ -48,7 +48,7 @@ bash deploy/perf/k6/run.sh readback
 - **首字延迟 = `http_req_waiting`（TTFB 代理）**：k6 不做半流式读取，SSE 下响应头+首块几乎同时到达，可作近似；毫秒级 P95 由 k6 统计，节点侧只做秒级粗验。
 - **稳态判据**：请求失败率 `< 0.05%`、`P95 TTFB < 800ms`、完整流成功率 `> 99.95%`，等于边界也不通过。完整流须 HTTP 200、包含成功 `finish_reason`、随后收到完整 `[DONE]` 事件，不能只有网关补发的结束标记。
 - **其他场景**：突发场景为 P95 `< 1500ms`、失败率 `< 1%`、完整流成功率 `> 99%`；管理面为 `type:admin` 端到端 P95 `< 1000ms`、失败率 `< 1%`、业务成功 checks `> 99%`，且不能丢弃计划迭代。突发汇总通过不代表已验证恢复时间。
-- **四态判定**：`PASS`（通过）、`FAIL`（已知指标失败）、`INCOMPLETE`（执行异常/数据不完整）、`UNASSESSED`（尚无专属验收标准）。旧日志只可确认已有指标失败，不凭旧 checks 证明完整流或业务成功；`degrade`、`rolling`、`long` 暂为待评估。
+- **四态判定**：`PASS`（通过）、`FAIL`（已知指标失败）、`INCOMPLETE`（执行异常/数据不完整）、`UNASSESSED`（尚无专属验收标准）。旧日志（无 `summary_schema`）若 `checks=2×http_reqs` 且全部在错误预算内，标为 `PASS·旧口径`：只证明 HTTP 200 且响应含 `[DONE]`，不含 `finish_reason` 与退出码，也不参与容量拟合；无法逐请求核对时仍为 `INCOMPLETE`。`degrade`、`rolling`、`long` 暂为待评估。
 - **资源采样**：每 5s 逐 Pod 记录 `时刻/Pod/CPU/内存`，结束后按同一时刻求和得到**全副本合计峰值**，另存单 Pod 峰值与采样到的 Pod 数；原始序列落到 `<run>/*.samples.tsv`，日志只保留可解析摘要。
 - **配置快照**：`load_config`（k6 版本 + 脚本 SHA + executor/model）、`mock_config`（各副本 `/__state` 一致才记录，否则 `changed`/`mixed`/`unavailable`）、`images`（网关与 mock）；任一项缺失或不可信时禁止容量拟合。
 - **归档**：每次运行保留 `.log`（指标）、`.json`（结构化判定）、`.samples.tsv`（原始采样）；`perf_report_ALL_*.html` 递归聚合全部历史运行目录，分阶段报告只覆盖本次阶段。
@@ -80,7 +80,7 @@ python3 deploy/perf/k6/report.py --log-dir deploy/perf/perf_reports \
 
 **带宽判定**：公网路径（k6→NAT→EIP→ALB）先撞 EIP 带宽时，表现为「RPS 塌陷 + 连接级失败 + 应用侧无 5xx + CPU 很低」。`run.sh` 用 `EIP_MBPS`（默认 100，雅加达 dev 现网实测 100 Mbps）把这条写进报告；公网档不参与内网容量分组插值，EIP 饱和仍需结合 EIP 实际监控确认。
 
-**已知边界**：2026-10-20 17:22 之前的 3 条日志因抓取过滤漏了 `http_req_duration`，明细表该列现在显示 `—`（缺失），不再显示为 0。旧日志也只采了首个 Pod 的资源，CPU/内存偏小。
+**已知边界**：2026-10-20 17:22 之前的 3 条日志因抓取过滤漏了 `http_req_duration`，明细表该列现在显示 `—`（缺失），不再显示为 0。旧日志也只采了首个 Pod 的资源，CPU/内存偏小。历史运行目前只有 14 份原始日志可解析；更早、仅存在于旧 HTML 里的运行不会导入（无法复核原始指标）。
 
 ## 完整报告（2026-10-21 起）
 

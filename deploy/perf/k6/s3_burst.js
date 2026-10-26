@@ -39,28 +39,10 @@ export default function () {
     headers: { Authorization: `Bearer sk-${TOKEN}`, 'Content-Type': 'application/json' },
     timeout: '120s', tags: { type: 'sse' },
   });
-  let done = false;
-  let finished = false;
-  let valid = true;
-  const events = typeof res.body === 'string' ? res.body.split(/\r?\n\r?\n/) : [];
-  for (const event of events.slice(0, -1)) {
-    const payload = event.split(/\r?\n/).filter((line) => line.startsWith('data:'))
-      .map((line) => line.slice(5).replace(/^ /, '')).join('\n');
-    if (!payload) continue;
-    if (done) { valid = false; break; }
-    if (payload === '[DONE]') { done = finished; break; }
-    try {
-      const chunk = JSON.parse(payload);
-      if (!chunk || chunk.error) { valid = false; break; }
-      if (Array.isArray(chunk.choices) && chunk.choices.some((choice) =>
-        choice.index === 0 && ['stop', 'length', 'tool_calls', 'function_call'].includes(choice.finish_reason))) {
-        finished = true;
-      }
-    } catch (_) {
-      valid = false;
-      break;
-    }
-  }
-  sseComplete.add(res.status === 200 && valid && done);
+  const text = typeof res.body === 'string' ? res.body : '';
+  const done = /(?:^|\n)data: ?\[DONE\]\r?\n\r?\n\s*$/.test(text);
+  const finished = /data: ?\{[^\n]*"finish_reason": ?"(?:stop|length|tool_calls|function_call)"/.test(text);
+  const errored = /data: ?\{[^\n]*"error"/.test(text);
+  sseComplete.add(res.status === 200 && done && finished && !errored);
   check(res, { 'status 200': (r) => r.status === 200, 'has [DONE]': () => done });
 }

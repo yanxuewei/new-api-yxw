@@ -1,0 +1,48 @@
+[i] 动态选定节点=i-k1afs8wedv35rai4pmx2（DescribeClusterNodes 现取，未写死）
+[i] 取 15 分钟临时私网 kubeconfig
+[i] server=    server: https://10.2.25.173:6443  节点=i-k1afs8wedv35rai4pmx2  RUN_ID=1792753949-135106-8490
+[i] InvokeId=t-ida70whdvno8f0g
+----- 节点内输出（status=Success）-----
+=== target=perf-new-api-slave (clusterip, BASE=http://172.23.2.189)  vus=1500 dur=120s
+=== 生效：mode=clusterip replicas=auto
+  [!!] k6 job failed（阈值破线，k6 退出码非 0）⇒ 仍采集结果
+--- job_succeeded=? cpu_peak_sum=1373m cpu_peak_pod=1373m mem_peak_sum=398Mi pods=1 samples=27
+===RUN_META===
+target=perf-new-api-slave
+base=http://172.23.2.189
+mode=clusterip
+vus=1500
+dur=120s
+cpu_peak_m=1373
+cpu_max_pod_m=1373
+mem_peak_mi=398
+mem_max_pod_mi=398
+pods_peak=1
+sample_rows=27
+load_config=k6-0.54.0:sse.js@0a98e5ee5966:const-vus:model=mock-gpt
+mock_config=first_token_delay_ms=300,token_interval_ms=30,tokens_per_response=50,token_text_bytes=12,error_rate=0,error_status=500,extra_latency_ms=0
+replicas_before=
+replicas=1
+job=k6-stage-1500
+ts=2026-10-23T11:14:45Z
+images=mock-upstream=acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com/newapi-dev/mock-upstream:20261019-4788bec2e;perf-new-api-master=acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com/newapi-dev/newapi-master:20261015-c62445555;perf-new-api-slave=acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com/newapi-dev/newapi-master:20261015-c62445555;
+summary_schema=2
+shards=1
+k6_exit_codes=99
+===END_META===
+     checks.........................: 100.00% 153660 out of 153660
+     data_received..................: 845 MB  6.9 MB/s
+     http_req_connecting............: avg=2.02ms   min=0s       med=0s       p(90)=0s       p(95)=0s       p(99)=105.53ms max=243.09ms
+     http_req_duration..............: avg=2.35s    min=1.86s    med=2.28s    p(90)=2.72s    p(95)=2.94s    p(99)=3.89s    max=5.46s   
+   ✓ http_req_failed................: 0.00%   0 out of 76830
+     http_req_receiving.............: avg=1.84s    min=1.31s    med=1.77s    p(90)=2.15s    p(95)=2.33s    p(99)=2.98s    max=4.25s   
+     http_req_sending...............: avg=401.11µs min=3.71µs   med=11.88µs  p(90)=19.38µs  p(95)=24.92µs  p(99)=7.9ms    max=142.75ms
+     http_req_tls_handshaking.......: avg=0s       min=0s       med=0s       p(90)=0s       p(95)=0s       p(99)=0s       max=0s      
+     http_req_waiting...............: avg=516.7ms  min=336.96ms med=457.83ms p(90)=765.26ms p(95)=890.58ms p(99)=1.1s     max=2.57s   
+     ✗ { type:sse }.................: avg=516.7ms  min=336.96ms med=457.83ms p(90)=765.26ms p(95)=890.58ms p(99)=1.1s     max=2.57s   
+     http_reqs......................: 76830   627.973381/s
+     iterations.....................: 76830   627.973381/s
+   ✓ sse_complete...................: 100.00% 76830 out of 76830
+     vus_max........................: 1500    min=1500             max=1500
+time="2026-10-23T11:14:36Z" level=error msg="thresholds on metrics 'http_req_waiting{type:sse}' have been crossed"
+runner_rc=0

@@ -266,7 +266,7 @@ spec:
       volumes:
       - name: app-logs
         emptyDir:
-          sizeLimit: 2Gi
+          sizeLimit: 10Gi
       topologySpreadConstraints:
       - maxSkew: 1
         topologyKey: topology.kubernetes.io/zone

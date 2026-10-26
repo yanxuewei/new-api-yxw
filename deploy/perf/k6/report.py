@@ -226,7 +226,23 @@ def evaluate_run(run: dict, text: str) -> None:
                        and (is_admin or all(n == requests[i] for i, (_, n) in enumerate(integrity))))
     if integrity_valid and any((n - p) / n >= error_limit for p, n in integrity):
         reasons.append("checks" if is_admin else "integrity")
-    run["evidence_complete"] = integrity_valid and run.get("summary_schema") == "2"
+    # 旧日志（无 summary_schema）：旧脚本每请求 2 个 checks（status 200 + body 含 [DONE]）。
+    # 计数能逐请求核对时给出“旧口径”判定，但证据等级低于新版，不参与容量拟合。
+    legacy = (not is_admin and not run["complete_counts"]
+              and run.get("summary_schema") != "2"
+              and len(run["checks_counts"]) == count
+              and all(n > 0 and 0 <= p <= n for p, n in run["checks_counts"])
+              and all(n == requests[i] * 2 for i, (_, n) in enumerate(run["checks_counts"])))
+    if legacy and any((n - p) / n >= error_limit for p, n in run["checks_counts"]):
+        reasons.append("integrity")
+    run["evidence_complete"] = integrity_valid and run.get("summary_schema") == "2" and not legacy
+    run["evidence"] = "legacy" if legacy else ("exact" if run["evidence_complete"] else "insufficient")
+    if legacy:
+        run["verdict"] = "FAIL" if reasons else "PASS"
+        run["pass"] = not reasons
+        run["verdict_reason"] = (", ".join(reasons) if reasons else
+                                 "旧口径通过：checks 证明 HTTP 200 且响应含 [DONE]；无 finish_reason/退出码证据")
+        return
     if not run["evidence_complete"]:
         run["verdict_reason"] = "缺少新版完整流/业务成功计数或执行状态，旧 checks 不能证明完整性"
         if reasons:
@@ -453,9 +469,11 @@ def fmt(x, n=1, suffix=""):
         return "—"
 
 
-def badge(verdict: str) -> str:
+def badge(verdict: str, legacy: bool = False) -> str:
     cls = {"PASS": "ok", "FAIL": "bad"}.get(verdict, "pending")
     label = {"INCOMPLETE": "数据不完整", "UNASSESSED": "待评估"}.get(verdict, verdict)
+    if legacy and verdict == "PASS":
+        label = "PASS·旧口径"
     return f'<span class="badge {cls}">{esc(label)}</span>'
 
 
@@ -660,7 +678,7 @@ def render(runs: list[dict], a: dict, out_path: str, eip_mbps: float = 0.0) -> N
 <td>{fmt(r["cpu_cores"], 2)}</td>
 <td>{fmt(r["mem_mi"], 0)}</td>
 <td>{fmt(r.get("data_mbps"), 2)}</td>
-<td>{badge(r["verdict"])}<div class="sub">{esc(r["verdict_reason"])}</div></td>
+<td>{badge(r["verdict"], r.get("evidence") == "legacy")}<div class="sub">{esc(r["verdict_reason"])}</div></td>
 </tr>'''
     best = a.get("best")
     verified = "、".join(str(n) for n in a.get("verified_replicas", []))
@@ -719,6 +737,7 @@ def render(runs: list[dict], a: dict, out_path: str, eip_mbps: float = 0.0) -> N
         "checks_pct": r.get("checks_pct"), "cpu": r.get("cpu_cores", 0),
         "mem": r.get("mem_mi", 0), "bw": r.get("data_mbps", 0), "pass": bool(r.get("pass")),
         "verdict": r["verdict"], "verdict_reason": r["verdict_reason"],
+        "evidence": r.get("evidence"),
     } for r in runs], ensure_ascii=False).replace("</", "<\\/")
 
     doc = f'''<!DOCTYPE html>
@@ -781,7 +800,7 @@ pre{{background:#06281a;color:#d9ffe9;border:1px solid #14532d;padding:14px 16px
 <thead><tr><th>Job / 时间</th><th>VU</th><th>路径</th><th>RPS</th><th>P50 首字</th><th>P95 首字</th><th>P99 首字</th><th>P95 端到端（管理面按标签）</th><th>错误率</th><th>完整流成功率 / 管理面 checks</th><th>CPU 峰值(核·全副本合计)</th><th>内存峰值(Mi·全副本合计)</th><th>下行(Mbps)</th><th>判定</th></tr></thead>
 <tbody>{rows or "<tr><td colspan=14>无数据</td></tr>"}</tbody>
 </table>
-<div class="lim">首字使用 k6 <code>http_req_waiting</code>（TTFB 代理）。稳态：P95 &lt; {SLO_TTFB_P95:.0f}ms、请求失败率 &lt; {SLO_ERR_RATE*100:.2f}%、完整流成功率 &gt; 99.95%；突发：P95 &lt; 1500ms、失败率 &lt; 1%、完整流成功率 &gt; 99%；管理面：标签端到端 P95 &lt; 1000ms、失败率 &lt; 1%、业务成功 checks &gt; 99%、丢弃迭代为 0。CPU/内存为采样窗口内同一时刻全副本合计峰值；旧日志只采首个 Pod，数值偏小且不可用于成本换算。旧日志只能确认已有指标是否失败，不能凭 checks 宣告通过或用于容量插值；新日志须有完整流/业务成功计数及 k6 退出状态。故障注入、滚动及长流待定义专属标准；分片缺少共同运行窗口证据时待评估。突发汇总阈值通过不代表已验证恢复时间。</div>
+<div class="lim">首字使用 k6 <code>http_req_waiting</code>（TTFB 代理）。稳态：P95 &lt; {SLO_TTFB_P95:.0f}ms、请求失败率 &lt; {SLO_ERR_RATE*100:.2f}%、完整流成功率 &gt; 99.95%；突发：P95 &lt; 1500ms、失败率 &lt; 1%、完整流成功率 &gt; 99%；管理面：标签端到端 P95 &lt; 1000ms、失败率 &lt; 1%、业务成功 checks &gt; 99%、丢弃迭代为 0。CPU/内存为采样窗口内同一时刻全副本合计峰值；旧日志只采首个 Pod，数值偏小且不可用于成本换算。旧日志（无 <code>summary_schema</code>）当 checks 计数按每请求 2 项可逐请求核对且全部在错误预算内时，标为 <b>PASS·旧口径</b>：只证明 HTTP 200 且响应含 <code>[DONE]</code>，不证明 <code>finish_reason</code>，也不参与容量拟合；其余缺证据情况仍为“数据不完整”。新日志须有完整流/业务成功计数及 k6 退出状态。故障注入、滚动及长流待定义专属标准；分片缺少共同运行窗口证据时待评估。突发汇总阈值通过不代表已验证恢复时间。</div>
 
 <h2>可比配置容量边界</h2>
 <table><thead><tr><th>分组 / 配置</th><th>实测最高通过 VU</th><th>最小失败 VU</th><th>延迟边界估计（总量）</th><th>说明</th></tr></thead>
@@ -854,6 +873,8 @@ pre{{background:#06281a;color:#d9ffe9;border:1px solid #14532d;padding:14px 16px
    突发：错误率 &lt; 1%、P95 TTFB &lt; 1500ms、完整流成功率 &gt; 99%。
    管理面：错误率 &lt; 1%、管理面标签 P95 &lt; 1000ms、业务成功 checks &gt; 99%、丢弃迭代为 0。
    分片逐一判定，不能用加权平均掩盖某分片失败；执行异常/缺数据为 INCOMPLETE。
+   旧日志无 summary_schema 时：checks=2×http_reqs 且各项在错误预算内 ⇒ PASS·旧口径
+   （仅证明 HTTP 200 + 含 [DONE]，不含 finish_reason/退出码，不参与容量拟合）。
    未定义专属验收标准的场景为 UNASSESSED，不计入通过容量。
    注意：本环境 mock 上游无真实厂商延迟，且部分档位未含 ALB（clusterip 模式）；
    URL 模式（https://perf.likha.hk）含 NAT+ALB 入口开销，两种模式不可直接混比。
@@ -896,7 +917,8 @@ function f(v, n, suf) {
 }
 function head(r) {
   const cls = r.verdict === 'PASS' ? 'ok' : (r.verdict === 'FAIL' ? 'bad' : 'pending');
-  const label = { INCOMPLETE: '数据不完整', UNASSESSED: '待评估' }[r.verdict] || r.verdict;
+  let label = { INCOMPLETE: '数据不完整', UNASSESSED: '待评估' }[r.verdict] || r.verdict;
+  if (r.evidence === 'legacy' && r.verdict === 'PASS') label = 'PASS·旧口径';
   return '<div class="tip-h">' + r.job + ' <span class="badge ' + cls + '">'
     + label + '</span></div>';
 }
