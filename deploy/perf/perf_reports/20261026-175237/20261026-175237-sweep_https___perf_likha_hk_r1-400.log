@@ -1,0 +1,52 @@
+[i] 动态选定节点=i-k1afs8wedv35rai4pmx2（DescribeClusterNodes 现取，未写死）
+[i] 取 15 分钟临时私网 kubeconfig
+[i] server=    server: https://10.2.25.173:6443  节点=i-k1afs8wedv35rai4pmx2  RUN_ID=1793008359-284539-31555
+[i] InvokeId=t-ida716zmnq5fw8w
+----- 节点内输出（status=Success）-----
+=== target=https://perf.likha.hk (public-url, BASE=https://perf.likha.hk)  vus=400 dur=120s
+=== 目标副本数=1（压测前 ready=2），先 scale deploy/perf-new-api-slave
+  deployment.apps/perf-new-api-slave scaled
+  deployment "perf-new-api-slave" successfully rolled out
+  ready=1/1
+=== 生效：mode=public-url replicas=1
+--- job_succeeded=1 cpu_peak_sum=370m cpu_peak_pod=370m mem_peak_sum=187Mi pods=2 samples=30
+===RUN_META===
+target=https://perf.likha.hk
+base=https://perf.likha.hk
+mode=public-url
+vus=400
+dur=120s
+cpu_peak_m=370
+cpu_max_pod_m=370
+mem_peak_mi=187
+mem_max_pod_mi=147
+pods_peak=2
+sample_rows=30
+token_mode=multi
+method=constant-vus
+load_config=k6-0.54.0:sse.js@4dada748979a:const-vus:model=mock-gpt
+mock_config=first_token_delay_ms=300,token_interval_ms=30,tokens_per_response=50,token_text_bytes=12,error_rate=0,error_status=500,extra_latency_ms=0
+replicas_before=2
+replicas=1
+job=k6-stage-400
+ts=2026-10-26T09:54:53Z
+images=mock-upstream=acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com/newapi-dev/mock-upstream:20261019-4788bec2e;perf-new-api-master=acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com/newapi-dev/newapi-master:20261015-c62445555;perf-new-api-slave=acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com/newapi-dev/newapi-master:20261015-c62445555;
+summary_schema=2
+shards=1
+k6_exit_codes=0
+===END_META===
+     checks.........................: 100.00% 52000 out of 52000
+     data_received..................: 319 MB  2.6 MB/s
+     http_req_connecting............: avg=410.63µs min=0s       med=0s       p(90)=0s       p(95)=0s       p(99)=10.67ms  max=91.6ms  
+     http_req_duration..............: avg=1.85s    min=1.83s    med=1.85s    p(90)=1.86s    p(95)=1.87s    p(99)=2.09s    max=2.38s   
+   ✓ http_req_failed................: 0.00%   0 out of 26000
+     http_req_receiving.............: avg=1.5s     min=1.43s    med=1.5s     p(90)=1.51s    p(95)=1.51s    p(99)=1.53s    max=1.64s   
+     http_req_sending...............: avg=35.82µs  min=12.34µs  med=24.08µs  p(90)=33.54µs  p(95)=38.88µs  p(99)=56.65µs  max=65.19ms 
+     http_req_tls_handshaking.......: avg=787.67µs min=0s       med=0s       p(90)=0s       p(95)=0s       p(99)=33.56ms  max=163.42ms
+     http_req_waiting...............: avg=347.17ms min=337.52ms med=341.47ms p(90)=347.42ms p(95)=354.06ms p(99)=579.7ms  max=760.43ms
+     ✓ { type:sse }.................: avg=347.17ms min=337.52ms med=341.47ms p(90)=347.42ms p(95)=354.06ms p(99)=579.7ms  max=760.43ms
+     http_reqs......................: 26000   213.610102/s
+     iterations.....................: 26000   213.610102/s
+   ✓ sse_complete...................: 100.00% 26000 out of 26000
+     vus_max........................: 400     min=400            max=400
+runner_rc=0
