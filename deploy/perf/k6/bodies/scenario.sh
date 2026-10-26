@@ -45,6 +45,7 @@ spec:
               valueFrom: {secretKeyRef: {name: perf-load-test-credentials, key: admin_password}}
           volumeMounts: [{name: scripts, mountPath: /scripts}]
           resources: {requests: {cpu: 500m, memory: 256Mi}, limits: {cpu: "2", memory: 1Gi}}
+      nodeSelector: {perf-role: load}
       volumes: [{name: scripts, configMap: {name: $CM}}]
 YAML
 
@@ -66,6 +67,7 @@ echo "target=$TGT"; echo "base=$BASE"; echo "mode=$MODE"; echo "vus=${VUS:-1}"; 
 echo "cpu_peak_m=${CP:-0}"; echo "cpu_max_pod_m=${CPU_MAX_POD_M:-0}"
 echo "mem_peak_mi=${MP:-0}"; echo "mem_max_pod_mi=${MEM_MAX_POD_MI:-0}"
 echo "pods_peak=${PODS_PEAK:-0}"; echo "sample_rows=${SAMPLE_ROWS:-0}"
+echo "method=scenario:${MODE}"
 echo "load_config=k6-0.54.0:${SCRIPT_ID}:${MODE}"
 echo "mock_config=${MOCK_CFG}"
 echo "replicas=$(kubectl -n $NS get deploy perf-new-api-slave -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo 1)"

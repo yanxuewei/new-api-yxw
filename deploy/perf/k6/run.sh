@@ -6,7 +6,7 @@
 #
 # usage:
 #   bash deploy/perf/k6/run.sh stage <target-svc|url> <vus> <duration>                 # 单档，如 stage perf-new-api-slave 300 120s
-#   bash deploy/perf/k6/run.sh sweep <target-svc|url> [reps] [start] [step] [max] [dur] # 固定副本数逐档扫描，默认 1 副本、150 起、+100、上限2000、每档120s
+#   bash deploy/perf/k6/run.sh sweep <target-svc|url> [reps] [start] [step] [max] [dur] # 固定副本数逐档扫描，默认 1 副本、400 起、+100、上限2000、每档120s
 #   bash deploy/perf/k6/run.sh ramp  <target-svc> [start] [step] [max] [duration]      # 阶梯递增找瓶颈，默认 300→3000 步长300 每阶段90s
 #   bash deploy/perf/k6/run.sh ladder <target-svc> [start] [step] [max] [dur] [reps]     # 副本阶梯：1 副本压到瓶颈→扩到 2 副本同参数重压（默认 reps=1,2）
 #   bash deploy/perf/k6/run.sh scale <replicas> [deploy]                                # 只调副本数（压测后恢复现场）
@@ -207,8 +207,7 @@ emit_report() {
   out="$REPORT_DIR/perf_report_${pfx}_${ts}.html"
   local args=()
   for d in "${dirs[@]}"; do args+=(--log-dir "$d"); done
-  local HIST="$ROOT/deploy/logs/perf_reports"
-  [ -d "$HIST" ] && args+=(--log-dir "$HIST")
+  # 单组报告只包含本次阶段的目录；历史目录仅用于 ALL 全量报告，避免内网报告混入公网数据。
   python3 "$HERE/report.py" "${args[@]}" --out "$out" --eip-mbps "${EIP_MBPS:-100}" || true
   # 本次分阶段报告只覆盖本次阶段；ALL_latest 仍代表全部历史，避免把它缩成一次子集。
   local full="$REPORT_DIR/perf_report_ALL_${ts}.html" hist_args=(--log-dir "$REPORT_DIR")
@@ -260,10 +259,10 @@ case "$ACTION" in
   sweep)
     # 同一路径 + 同一副本数下逐档扫描：先 scale 到指定副本，再从 start 起每档 +step，
     # 首个 SLO 失败即停；结束时打印本组最优通过档。
-    # usage: sweep <target-svc|url> [reps=1] [start=150] [step=100] [max=2000] [dur=120s]
+    # usage: sweep <target-svc|url> [reps=1] [start=400] [step=100] [max=2000] [dur=120s]
     K6JS_FILE="$HERE/sse.js"
     TGT="${1:?sweep 需要 <target-svc|url>}"
-    S_REPS="${2:-1}"; S_START="${3:-150}"; S_STEP="${4:-100}"; S_MAX="${5:-2000}"; S_DUR="${6:-120s}"
+    S_REPS="${2:-1}"; S_START="${3:-400}"; S_STEP="${4:-100}"; S_MAX="${5:-2000}"; S_DUR="${6:-120s}"
     case "$TGT" in *://*) S_PATH=public ;; *) S_PATH=clusterip ;; esac
     echo "[perf-k6] sweep：${S_PATH} 路径，固定 ${S_REPS} 副本，${S_START}→${S_MAX} 步长${S_STEP}，每档${S_DUR}"
     RAMP_DIRS=()

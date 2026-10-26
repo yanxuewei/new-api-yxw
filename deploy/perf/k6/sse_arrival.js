@@ -5,9 +5,13 @@
 // preAllocatedVUs/maxVUs，并做好多 Job 分片（单 k6 进程 CPU 有限）。
 import http from 'k6/http';
 import { check } from 'k6';
-import { Rate } from 'k6/metrics';
+import { Counter, Rate } from 'k6/metrics';
 
 const sseComplete = new Rate('sse_complete');
+const status0 = new Counter('status_0');
+const status4xx = new Counter('status_4xx');
+const status5xx = new Counter('status_5xx');
+const errSample = new Counter('err_sample');
 
 const BASE = __ENV.BASE;
 const MODEL = __ENV.MODEL || 'mock-gpt';
@@ -52,6 +56,14 @@ export default function () {
     timeout: '120s',
     tags: { type: 'sse', shard: SHARD },
   });
+  if (res.status === 0) status0.add(1);
+  else if (res.status >= 500) {
+    status5xx.add(1);
+    errSample.add(1, { msg: String(res.body || '').replace(/[^\x20-\x7e]/g, ' ').slice(0, 90) });
+    if (__VU <= 5) {
+      console.log(`ERR vu=${__VU} status=${res.status} err=${res.error || ''} code=${res.error_code || ''} body=${String(res.body || '').slice(0, 160)}`);
+    }
+  } else if (res.status >= 400) status4xx.add(1);
   const text = typeof res.body === 'string' ? res.body : '';
   const done = /(?:^|\n)data: ?\[DONE\]\r?\n\r?\n\s*$/.test(text);
   const finished = /data: ?\{[^\n]*"finish_reason": ?"(?:stop|length|tool_calls|function_call)"/.test(text);

@@ -188,7 +188,10 @@ class ReportTests(unittest.TestCase):
         doc = out.read_text()
         self.assertIn("待评估", doc)
         self.assertIn("数据不完整", doc)
-        self.assertIn("尚未验证", doc)
+        self.assertIn("无通过档", doc)
+        self.assertIn("没有可用于推测的通过记录", doc)
+        self.assertIn("副本数量", doc)
+        self.assertIn("压测方法", doc)
         self.assertNotIn("Replicas = ceil", doc)
         self.assertNotIn("单副本拐点（线性插值）", doc)
         self.assertNotIn("SLO：P95 首字 ≤", doc)
@@ -318,6 +321,16 @@ exit "${FIXTURE_RC:-0}"
                 card = out.read_text().split("SSE 最优通过档", 1)[1].split('<div class="card">', 1)[0]
                 self.assertIn("无通过档", card)
                 self.assertNotIn("500.0", card)
+
+    def test_summary_shows_estimate_and_resource_usage(self):
+        run = self.run_record(summary(), vus="600", replicas="1")
+        out = self.root / "estimate.html"
+        report.render([run], report.analyse([run]), str(out))
+        doc = out.read_text()
+        self.assertIn("3 副本（推测）", doc)
+        self.assertIn("最高通过 VU=600", doc)
+        self.assertIn("CPU 0.90 核", doc)
+        self.assertIn("内存 200 MiB", doc)
 
     def test_bandwidth_uses_decimal_units_and_only_public_path(self):
         self.assertAlmostEqual(report.parse_summary("data_received..................: 1 MB 1 MB/s\n")["data_mbps"], 8.0)

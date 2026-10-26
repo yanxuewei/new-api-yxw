@@ -55,6 +55,7 @@ spec:
               valueFrom: {secretKeyRef: {name: perf-load-test-credentials, key: tokens, optional: true}}
           volumeMounts: [{name: scripts, mountPath: /scripts}]
           resources: {requests: {cpu: 500m, memory: 256Mi}, limits: {cpu: "2", memory: 1Gi}}
+      nodeSelector: {perf-role: load}
       volumes: [{name: scripts, configMap: {name: $CM}}]
 YAML
   echo "  shard-$i -> $V VU"
@@ -99,6 +100,7 @@ echo "sample_rows=${SAMPLE_ROWS:-0}"
 TOKEN_MODE=$(kubectl -n $NS get secret perf-load-test-credentials -o jsonpath='{.data.tokens}' 2>/dev/null)
 [ -n "$TOKEN_MODE" ] && TOKEN_MODE=multi || TOKEN_MODE=single
 echo "token_mode=$TOKEN_MODE"
+echo "method=constant-vus"
 echo "load_config=k6-0.54.0:${SCRIPT_ID}:const-vus:model=${MODEL:-mock-gpt}:shards=${SHARDS}"
 echo "mock_config=${MOCK_CFG}"
 echo "replicas=${REPL:-1}"

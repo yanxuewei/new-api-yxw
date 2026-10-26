@@ -43,6 +43,21 @@ bash deploy/perf/k6/run.sh summary k6-1500-m k6-1500-s
 bash deploy/perf/k6/run.sh readback
 ```
 
+## 节点角色与放置（2026-10-26）
+
+1500 qps 验证依赖节点隔离，部署前需给节点打标签：
+
+```bash
+kubectl label node <node1> perf-role=gateway --overwrite
+kubectl label node <node2> perf-role=gateway --overwrite
+kubectl label node <node3> perf-role=load    --overwrite
+```
+
+- 网关 `perf-new-api-slave`：`nodeAffinity` 限定 `perf-role=gateway`，并用 `podAntiAffinity`（hostname，required）保证两副本分散；滚动策略为 `maxSurge=0 / maxUnavailable=1`，否则强制反亲和会卡住滚动。
+- k6 Job：所有 body 带 `nodeSelector: perf-role=load`。
+- mock：`nodeSelector: perf-role=load`，避免与网关争 CPU。
+- mock 单请求时长由 `TOKENS_PER_RESPONSE` 控制：1500 rps 验证使用 **10 token（0.6s）**；默认 50 token（1.8s）时 1500 VU 的闭环上限只有约 833 rps。
+
 ## 口径与已知边界
 
 - **首字延迟 = `http_req_waiting`（TTFB 代理）**：k6 不做半流式读取，SSE 下响应头+首块几乎同时到达，可作近似；毫秒级 P95 由 k6 统计，节点侧只做秒级粗验。
@@ -129,7 +144,7 @@ bash deploy/perf/k6/run.sh sweep https://perf.likha.hk 2 150 100 2000 120s
 bash deploy/perf/k6/run.sh sweep perf-new-api-slave  2 150 100 2000 120s
 ```
 
-- 参数顺序：`<target> [reps] [start] [step] [max] [dur]`，默认 `1 副本 / 150 起 / +100 / 上限 2000 / 每档 120s`。
+- 参数顺序：`<target> [reps] [start] [step] [max] [dur]`，默认 `1 副本 / 400 起 / +100 / 上限 2000 / 每档 120s`。
 - 每档开始前会 `scale` 到指定副本并等就绪；`public-url` 模式下固定 `perf-new-api-slave`，`clusterip` 模式固定目标 Service。
 - 首个 SLO 失败档即停；数据不完整也立即停止，不写入容量边界。
 - 每组结束打印本组最优通过档（VU / RPS / P95），并生成该组报告与全量报告；四组跑完后按路径/副本横向对比。

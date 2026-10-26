@@ -426,6 +426,24 @@ def analyse(runs: list[dict], eip_mbps: float = 0.0) -> dict:
         groups.append(group)
     a["capacity_groups"] = groups
     a["verified_replicas"] = sorted({g["runs"][0]["replicas_i"] for g in groups if g["target_verified"]})
+    a["replicas_seen"] = sorted({r["replicas_i"] for r in runs})
+    a["methods"] = sorted({r.get("method") for r in runs if r.get("method")})
+    # 目标档未实测时给出“推测副本数”，明确标注依据与“未实测”。
+    a["target_estimate"] = None
+    if not a["verified_replicas"]:
+        best_per_rep = {}
+        for r in runs:
+            if r["pass"] and r.get("evidence") == "exact" and r["vus_i"] > 0:
+                per = r["vus_i"] / max(1, r["replicas_i"])
+                best_per_rep[r["replicas_i"]] = max(best_per_rep.get(r["replicas_i"], 0), per)
+        if best_per_rep:
+            base_rep, per = max(best_per_rep.items(), key=lambda kv: kv[1])
+            a["target_estimate"] = {
+                "replicas": math.ceil(TARGET_VUS / per),
+                "per_replica": per,
+                "basis_replicas": base_rep,
+                "basis_vus": int(per * base_rep),
+            }
     facts, guesses = [], []
     for i, group in enumerate(groups, 1):
         if group["best"]:
@@ -682,12 +700,26 @@ def render(runs: list[dict], a: dict, out_path: str, eip_mbps: float = 0.0) -> N
 </tr>'''
     best = a.get("best")
     verified = "、".join(str(n) for n in a.get("verified_replicas", []))
+    replicas_seen = " / ".join(str(n) for n in a.get("replicas_seen", [])) or "—"
+    methods = "、".join(a.get("methods", [])) or "—"
+    estimate = a.get("target_estimate")
+    if verified:
+        target_value, target_note = verified, "同条件实测通过；不外推其它配置"
+    elif estimate and best:
+        target_value = f"{estimate['replicas']} 副本（推测）"
+        target_note = (f"按 {estimate['basis_replicas']} 副本最高通过 VU={estimate['basis_vus']} 折算，"
+                       f"约 {estimate['per_replica']:.0f} VU/副本；未实测，仅供参考")
+    else:
+        target_value, target_note = "无通过档", "没有可用于推测的通过记录"
+    best_res = (f"CPU {best['cpu_cores']:.2f} 核 · 内存 {best['mem_mi']:.0f} MiB") if best else ""
     cards = f'''
 <div class="card"><div class="k">本次运行数</div><div class="v">{a["n"]}</div><div class="s">由所选日志聚合</div></div>
-<div class="card"><div class="k">SSE 最优通过档</div><div class="v">{fmt(best["rps"], 1) if best else "无通过档"}<small>{" req/s" if best else ""}</small></div><div class="s">VU={best["vus_i"] if best else "—"} · P95={fmt(best.get("ttfb_p95"), 0) if best else "—"}ms</div></div>
+<div class="card"><div class="k">副本数量</div><div class="v">{replicas_seen}</div><div class="s">本报告内出现的副本配置</div></div>
+<div class="card"><div class="k">压测方法</div><div class="v" style="font-size:20px">{esc(methods)}</div><div class="s">k6 executor / 场景类型</div></div>
+<div class="card"><div class="k">SSE 最优通过档</div><div class="v">{fmt(best["rps"], 1) if best else "无通过档"}<small>{" req/s" if best else ""}</small></div><div class="s">VU={best["vus_i"] if best else "—"} · P95={fmt(best.get("ttfb_p95"), 0) if best else "—"}ms{f" · {best_res}" if best_res else ""}</div></div>
 {f'<div class="card"><div class="k">管理面最优通过档（读接口）</div><div class="v">{fmt(a["best_admin"]["rps"],1)}<small> req/s</small></div><div class="s">管理面 P95 {fmt(a["best_admin"].get("admin_p95"),1)}ms</div></div>' if a.get("best_admin") else ''}
 <div class="card"><div class="k">可比容量分组</div><div class="v">{len(a.get("capacity_groups", []))}</div><div class="s">固定路径、副本及配置；分别展示实测与估计</div></div>
-<div class="card"><div class="k">{TARGET_VUS} VU 实测通过副本配置</div><div class="v">{verified or "尚未验证"}</div><div class="s">仅对应本报告中的测试条件，不推算最少所需副本</div></div>'''
+<div class="card"><div class="k">{TARGET_VUS} VU 副本配置</div><div class="v">{target_value}</div><div class="s">{esc(target_note)}</div></div>'''
     capacity_rows = ""
     for i, group in enumerate(a.get("capacity_groups", []), 1):
         first = group["runs"][0]
@@ -835,7 +867,10 @@ pre{{background:#06281a;color:#d9ffe9;border:1px solid #14532d;padding:14px 16px
 </div>
 <table class="mini" style="margin-top:10px">
 <thead><tr><th>Job / 动作</th><th>脚本</th><th>含义</th><th>为什么这么设计（设计目的）</th></tr></thead><tbody>
-<tr><td><code>stage</code></td><td>sse.js</td><td>恒定 VU 打 SSE，阶梯取 100/300/500/900/1200…</td><td>固定并发观察 P95/CPU 随并发单调变化，用线性插值找 800ms 拐点（单副本容量 C）</td></tr>
+<tr><td><code>stage</code></td><td>sse.js</td><td>恒定 VU 打 SSE，单档运行（如 1500 VU）</td><td>固定并发观察 P95/CPU/完整流，用于单点验收</td></tr>
+<tr><td><code>sweep</code></td><td>sse.js</td><td>先 scale 到指定副本，再从 start（默认 400）每档 +step（默认 100）扫到首个失败</td><td>同一路径/副本下逐档找通过上限；每组结束打印本组最优通过档</td></tr>
+<tr><td><code>shard</code></td><td>sse.js</td><td>多个 k6 Job 分摊总 VU（如 2×750）</td><td>排除单客户端 CPU/连接限制，验证是否由客户端先行饱和</td></tr>
+<tr><td><code>arrival</code></td><td>sse_arrival.js</td><td>恒定到达率（如 1500 rps），不受单请求耗时反压</td><td>测真实 QPS 能力；需要按 RATE×耗时为并发预留 VU</td></tr>
 <tr><td><code>dual1500</code></td><td>sse.js</td><td>把 slave 扩到 2 副本，单 Job 打 Service</td><td>用 kube-proxy 自然分摊，复现"多副本入口"形态；避免直连单 Pod 造成失真</td></tr>
 <tr><td><code>burst</code></td><td>s3_burst.js</td><td>0→1500 用 30s 拉起，保持后再降</td><td>验证 HPA/排队/冷启动在突增下的收敛能力（S3），而非稳态容量</td></tr>
 <tr><td><code>admin</code></td><td>s4_admin.js</td><td>恒定到达率打管理面读接口</td><td>管理面是"请求/秒"型负载，用 arrival-rate 而非 VU，才能对准 800 QPS 目标</td></tr>
