@@ -126,9 +126,18 @@ jobs:
         working-directory: ops
         env:
           DIGEST: ${{ needs.build-push.outputs.digest }}
-          IMAGE: ${{ needs.build-push.outputs.image }}
+          # ⚠️ 不要用 needs.build-push.outputs.image：实测传过来是空串，
+          #    导致 newName 被写空、镜像退化成 docker.io/library/newapi-master@sha256:…
+          #    然后 ImagePullBackOff。这里直接重拼，只依赖 secrets + job env。
+          ACR_REGISTRY: ${{ secrets.ACR_REGISTRY }}
           TAG: ${{ needs.build-push.outputs.tag }}
         run: |
+          IMAGE="${ACR_REGISTRY}/${ACR_NAMESPACE}/${ACR_REPO}"
+          case "$IMAGE" in
+            *aliyuncs.com/*) : ;;
+            *) echo "::error::ACR_REGISTRY 拼接异常，拒绝写入: '$IMAGE'"; exit 1 ;;
+          esac
+          echo "target image = ${IMAGE}@${DIGEST:0:19}…"
           # 只写 digest（内容寻址），不写 tag（tag 可被覆盖，回滚时不可靠）
           bash scripts/set-image.sh "$OPS_ENV" "${IMAGE}@${DIGEST}"
           git diff --stat
