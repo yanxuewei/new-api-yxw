@@ -94,8 +94,11 @@ jobs:
       - name: Trivy scan (report only)
         # dev 阶段不阻断（历史基础镜像漏洞未清完）；CRITICAL 数量写进 summary 供跟踪。
         # T5 之后把 exit-code 改成 1 并加 --ignore-unfixed。
+        #
+        # ⚠️ tag 必须带 `v` 前缀且 pin 到 commit SHA：写 `@0.28.0`（无 v）会让整个 job 在
+        #    "Set up job" 阶段就 `Unable to resolve action` 失败（2026-10-27 实测）。
         continue-on-error: true
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: ${{ steps.meta.outputs.image }}@${{ steps.push.outputs.digest }}
           format: table
