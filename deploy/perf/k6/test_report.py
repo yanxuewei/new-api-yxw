@@ -332,6 +332,12 @@ exit "${FIXTURE_RC:-0}"
         self.assertIn("CPU 0.90 核", doc)
         self.assertIn("内存 200 MiB", doc)
 
+    def test_bottleneck_facts_include_memory_usage(self):
+        run = self.run_record(summary(), vus="1700", replicas="1", mem_peak_mi="400")
+        analysis = report.analyse([run])
+        self.assertTrue(any("内存峰值 400 MiB" in f for f in analysis["facts"]))
+        self.assertTrue(any("MiB·千RPS⁻¹" in f for f in analysis["facts"]))
+
     def test_bandwidth_uses_decimal_units_and_only_public_path(self):
         self.assertAlmostEqual(report.parse_summary("data_received..................: 1 MB 1 MB/s\n")["data_mbps"], 8.0)
         cluster = self.run_record(summary(data_rate=10), mode="clusterip")

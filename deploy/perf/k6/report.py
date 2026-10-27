@@ -471,6 +471,9 @@ def analyse(runs: list[dict], eip_mbps: float = 0.0) -> dict:
         facts.append(f"最优通过档 VU={b['vus_i']}：RPS={b['rps']:.1f}、P95={b.get('ttfb_p95', 0):.0f}ms、错误率={b.get('err_pct', 0):.3f}%")
         if b.get("cpu_cores"):
             facts.append(f"该档 CPU 峰值 {b['cpu_cores']:.2f} 核，折合每千 RPS {b['cpu_per_rps'] * 1000:.3f} 核·千RPS⁻¹")
+        if b.get("mem_mi"):
+            facts.append(f"该档内存峰值 {b['mem_mi']:.0f} MiB（全副本合计），"
+                         f"折合每千 RPS {b['mem_mi'] / b['rps'] * 1000:.1f} MiB·千RPS⁻¹")
     a["facts"], a["guesses"] = facts, guesses
     return a
 
