@@ -1,0 +1,18 @@
+[i] 动态选定节点=i-k1afs8wedv35rai4pmx2（DescribeClusterNodes 现取，未写死）
+[i] 取 15 分钟临时私网 kubeconfig
+[i] server=    server: https://10.2.25.173:6443  节点=i-k1afs8wedv35rai4pmx2  RUN_ID=1793098523-45637-16748
+[i] InvokeId=t-ida71apokoys64g
+----- 节点内输出（status=Success）-----
+=== scale deploy/perf-new-api-slave -> 1
+  当前 spec.replicas=2
+  deployment.apps/perf-new-api-slave scaled
+  deployment "perf-new-api-slave" successfully rolled out
+  ready=1/1
+  pods:
+    perf-new-api-slave-6f945ff945-ccjdh   true   2
+    perf-new-api-slave-6f945ff945-mlpxr   true   2
+=== scale 完成
+### remote_rc=0 cleaned=YES
+-----------------------------------
+[i] 凭据清理：本机 已删 / 节点侧 cleaned=YES
+runner_rc=0

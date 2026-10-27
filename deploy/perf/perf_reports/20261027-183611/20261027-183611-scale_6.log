@@ -1,0 +1,24 @@
+[i] 动态选定节点=i-k1afs8wedv35rai4pmx2（DescribeClusterNodes 现取，未写死）
+[i] 取 15 分钟临时私网 kubeconfig
+[i] server=    server: https://10.2.25.173:6443  节点=i-k1afs8wedv35rai4pmx2  RUN_ID=1793097372-39390-2872
+[i] InvokeId=t-ida71anyypu0qgw
+----- 节点内输出（status=Success）-----
+=== scale deploy/mock-upstream -> 6
+  当前 spec.replicas=4
+  deployment.apps/mock-upstream scaled
+  Waiting for deployment "mock-upstream" rollout to finish: 4 of 6 updated replicas are available...
+  Waiting for deployment "mock-upstream" rollout to finish: 5 of 6 updated replicas are available...
+  deployment "mock-upstream" successfully rolled out
+  ready=6/6
+  pods:
+    mock-upstream-5fc4fd4b7d-468jq   true   1
+    mock-upstream-5fc4fd4b7d-5g7nn   true   1
+    mock-upstream-5fc4fd4b7d-b87t8   true   1
+    mock-upstream-5fc4fd4b7d-hfr79   true   1
+    mock-upstream-5fc4fd4b7d-rtw2r   true   1
+    mock-upstream-5fc4fd4b7d-zxtld   true   1
+=== scale 完成
+### remote_rc=0 cleaned=YES
+-----------------------------------
+[i] 凭据清理：本机 已删 / 节点侧 cleaned=YES
+runner_rc=0
