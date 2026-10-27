@@ -1,23 +1,35 @@
 name: dev-build
 
-# 雅加达 dev 环境发布流水线（GitOps）
+# 雅加达 dev 环境发布流水线（GitOps）—— **已降级为手动触发，仅作个人测试**
 #
-# 链路：push develop → 构建镜像 → 推马尼拉 ACR → 回写 ops 仓（写 digest）→ ArgoCD 收敛
+# 链路（手动跑时仍然有效）：构建镜像 → 推马尼拉 ACR → 回写 ops 仓（写 digest）→ 若 ArgoCD 还认这个仓则收敛
 # 真源：new-api-yxw-ops/overlays/jkt-dev/kustomization.yaml
+#
+# ★ 正式链路在 ZYKJ-1688/new-api-likha：那份 workflow 的结构与本文件一致（含踩过的坑的修复）。
+#   改流水线逻辑时**两边同步**，不要把这边当成主战场。
 #
 # 三条红线：
 #   1. 绝不用 tag 触发（本仓 release.yml 监听 tags:'*'，打 tag 会启动三平台二进制构建）
 #   2. 绝不把 kubeconfig 放进 CI（CI 不认识集群，只改 Git）
 #   3. ops 回写失败必须让 job 红（否则「镜像推了但没部署」是最难查的静默失败）
 
+# ⚠️ 2026-10-27 变更：本仓降级为**个人测试仓**，dev 环境的 GitOps 正式链路已迁到
+#    ZYKJ-1688/new-api-likha（业务） + ZYKJ-1688/new-api-likha-ops（清单）。
+#    ArgoCD 的 Application `jkt-dev` 已把源切到 likha-ops，**不再读本仓写的 yxw-ops**。
+#    所以本 workflow 的自动触发已关闭 —— 再自动构建只会写出「看着像部署、实际不生效」的 commit。
+#    仍然保留手动触发，方便在本仓单独验证流水线改动。
+
 on:
-  push:
-    branches: [develop]
-    paths-ignore:
-      - '**/*.md'
-      - 'deploy/**'
-      - 'docs/**'
+  # 自动触发已停用（原因见文件头）。恢复方式：取消下面 5 行的注释。
+  # push:
+  #   branches: [develop]
+  #   paths-ignore:
+  #     - '**/*.md'
   workflow_dispatch:
+    inputs:
+      reason:
+        description: '为什么手动跑（留痕用）'
+        required: false
 
 permissions:
   contents: read
@@ -94,8 +106,11 @@ jobs:
       - name: Trivy scan (report only)
         # dev 阶段不阻断（历史基础镜像漏洞未清完）；CRITICAL 数量写进 summary 供跟踪。
         # T5 之后把 exit-code 改成 1 并加 --ignore-unfixed。
+        #
+        # ⚠️ tag 必须带 `v` 前缀且 pin 到 commit SHA：写 `@0.28.0`（无 v）会让整个 job 在
+        #    "Set up job" 阶段就 `Unable to resolve action` 失败（2026-10-27 实测）。
         continue-on-error: true
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: ${{ steps.meta.outputs.image }}@${{ steps.push.outputs.digest }}
           format: table
@@ -123,9 +138,18 @@ jobs:
         working-directory: ops
         env:
           DIGEST: ${{ needs.build-push.outputs.digest }}
-          IMAGE: ${{ needs.build-push.outputs.image }}
+          # ⚠️ 不要用 needs.build-push.outputs.image：实测传过来是空串，
+          #    导致 newName 被写空、镜像退化成 docker.io/library/newapi-master@sha256:…
+          #    然后 ImagePullBackOff。这里直接重拼，只依赖 secrets + job env。
+          ACR_REGISTRY: ${{ secrets.ACR_REGISTRY }}
           TAG: ${{ needs.build-push.outputs.tag }}
         run: |
+          IMAGE="${ACR_REGISTRY}/${ACR_NAMESPACE}/${ACR_REPO}"
+          case "$IMAGE" in
+            *aliyuncs.com/*) : ;;
+            *) echo "::error::ACR_REGISTRY 拼接异常，拒绝写入: '$IMAGE'"; exit 1 ;;
+          esac
+          echo "target image = ${IMAGE}@${DIGEST:0:19}…"
           # 只写 digest（内容寻址），不写 tag（tag 可被覆盖，回滚时不可靠）
           bash scripts/set-image.sh "$OPS_ENV" "${IMAGE}@${DIGEST}"
           git diff --stat

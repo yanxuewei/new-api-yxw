@@ -1297,7 +1297,7 @@ pre{background:#06281a;color:#d9ffe9;border:1px solid #14532d;padding:14px 16px;
 「网关等其余环节」只在 mock 配置可信时按 waiting−首字估算，仍包含 NAT/ALB/Ingress/鉴权/连接池等；要真正拆分需接 trace/SLS（未做，不填假数据）。</div><div class="note" style="margin-top:10px">各指标均取 <b>p90</b>，但来自不同请求分布：连接可能复用、TLS 可能复用、接收阶段覆盖整段流式响应。因此这些数值<b>不能相加</b>成“一次请求的完整耗时”，也不据此计算占比。mock 首字/吐字只在本次采集到可信 <code>mock_config</code> 时展示，否则不做差值推算。</div>
 
 <h2>瓶颈判定</h2>
-<div class="note"><b>事实</b><ul><li>容量组 1：实测通过最高 VU=1600（不代表容量上限）</li><li>容量组 1：VU=1700 未通过，原因：latency</li><li>容量组 2：实测通过最高 VU=1800（不代表容量上限）</li><li>容量组 2：VU=1650 未通过，原因：latency</li><li>容量组 3：实测通过最高 VU=1650（不代表容量上限）</li><li>容量组 3：VU=1750 未通过，原因：latency</li><li>容量组 4：VU=1500 未通过，原因：error_rate, integrity</li><li>容量组 5：实测通过最高 VU=1500（不代表容量上限）</li><li>公网路径下行峰值 88.00 Mbps（EIP 标称 100 Mbps，利用率 88%）</li><li>最优通过档 VU=1500：RPS=2361.8、P95=404ms、错误率=0.000%</li><li>该档 CPU 峰值 1.90 核，折合每千 RPS 0.803 核·千RPS⁻¹</li></ul></div>
+<div class="note"><b>事实</b><ul><li>容量组 1：实测通过最高 VU=1600（不代表容量上限）</li><li>容量组 1：VU=1700 未通过，原因：latency</li><li>容量组 2：实测通过最高 VU=1800（不代表容量上限）</li><li>容量组 2：VU=1650 未通过，原因：latency</li><li>容量组 3：实测通过最高 VU=1650（不代表容量上限）</li><li>容量组 3：VU=1750 未通过，原因：latency</li><li>容量组 4：VU=1500 未通过，原因：error_rate, integrity</li><li>容量组 5：实测通过最高 VU=1500（不代表容量上限）</li><li>公网路径下行峰值 88.00 Mbps（EIP 标称 100 Mbps，利用率 88%）</li><li>最优通过档 VU=1500：RPS=2361.8、P95=404ms、错误率=0.000%</li><li>该档 CPU 峰值 1.90 核，折合每千 RPS 0.803 核·千RPS⁻¹</li><li>该档内存峰值 345 MiB（全副本合计），折合每千 RPS 146.1 MiB·千RPS⁻¹</li></ul></div>
 <div class="note" style="margin-top:10px"><b>推断（需下钻验证）</b><ul><li>公网下行利用率 ≥85% ⇒ 可能先撞 NAT→EIP 100Mbps；需结合 EIP 实际监控确认，内网档位不受该限制</li></ul></div>
 
 <h2>理想 QPS 与资源</h2>
