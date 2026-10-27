@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>new-api · SSE 容量压测报告 · 2026-10-26 12:04 UTC</title>
+<style>
+:root{--fg:#0b1f16;--mut:#4b6a5c;--line:#cde8d8;--bg:#f2fbf6;--brand:#0f9d58;--accent:#12b76a;--deep:#052e1b;--ok:#0b7a45;--bad:#b42318}
+*{box-sizing:border-box}
+body{margin:0;color:var(--fg);font:14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans SC",sans-serif;
+  background:radial-gradient(1200px 500px at 15% -10%,rgba(18,183,106,.18),transparent 60%),
+             radial-gradient(900px 420px at 100% 0%,rgba(5,46,27,.10),transparent 55%),var(--bg)}
+header{background:linear-gradient(120deg,#052e1b 0%,#0b5d34 55%,#0f9d58 100%);color:#eafff3;padding:30px 34px;border-bottom:3px solid #12b76a;box-shadow:0 8px 24px rgba(5,46,27,.18)}
+header h1{margin:0 0 6px;font-size:22px;font-weight:650}
+header .meta{opacity:.85;font-size:12.5px}
+main{max-width:1180px;margin:0 auto;padding:24px 20px 64px}
+h2{font-size:16px;margin:30px 0 12px;padding-left:10px;border-left:4px solid var(--accent);letter-spacing:.3px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+.card{background:#fff;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:10px;padding:14px 16px;box-shadow:0 2px 10px rgba(5,46,27,.05)}
+.card .k{font-size:12px;color:var(--mut)}
+.card .v{font-size:24px;font-weight:700;color:#0b7a45;font-variant-numeric:tabular-nums}
+.card .v small{font-size:12px;color:var(--mut);font-weight:400}
+.card .s{font-size:11.5px;color:var(--mut);margin-top:4px}
+table{width:100%;border-collapse:collapse;background:#fff;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+th,td{padding:8px 10px;border-bottom:1px solid var(--line);text-align:left;font-variant-numeric:tabular-nums;font-size:12.5px;vertical-align:top}
+th{background:#e6f7ee;font-weight:600;font-size:12px;color:#0b3d27}
+tr:last-child td{border-bottom:none}
+.sub{color:var(--mut);font-size:10.5px}
+.badge{display:inline-block;padding:1px 8px;border-radius:999px;font-size:11px;font-weight:600}
+.badge.ok{background:#d1fadf;color:var(--ok)}
+.badge.bad{background:#fee4e2;color:var(--bad)}
+ul{margin:6px 0 0 20px;padding:0} li{margin:3px 0}
+.note{background:#fff;border:1px dashed var(--line);border-radius:10px;padding:12px 14px;font-size:12.5px;color:#4a5568}
+code{background:#e2f8ec;color:#064e2b;border:1px solid #b7e4c9;padding:1px 6px;border-radius:5px;font-size:12.5px;font-weight:600;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+pre{background:#06281a;color:#d9ffe9;border:1px solid #14532d;padding:14px 16px;border-radius:10px;overflow:auto;font-size:12.5px;line-height:1.6}
+.chart{margin:10px 0 0;background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.chart figcaption{font-size:12px;color:var(--mut);margin-bottom:4px}
+.lim{color:#315244;font-size:12.5px;line-height:1.7}
+.tip{position:fixed;z-index:99;background:#04231a;color:#f2fff8;border:2px solid #22c55e;border-radius:12px;
+  box-shadow:0 16px 40px rgba(2,20,12,.55);padding:14px 16px;font-size:13px;min-width:300px;line-height:1.55}
+.tip-h{font-weight:800;margin-bottom:8px;color:#a7f3d0;display:flex;align-items:center;gap:8px;font-size:13.5px}
+.tip-x{margin-left:auto;cursor:pointer;color:#86efac;font-size:16px;padding:0 4px}
+.tip table, .tip .tip-t{background:transparent !important;border:none !important;border-radius:0;box-shadow:none}
+.tip-t{width:100%;border-collapse:collapse}
+.tip-t td{padding:3px 8px;border:none !important;background:transparent !important;font-size:13px;color:#f4fff9 !important}
+.tip-t td b{color:#86efac}
+.tip-t td:first-child{color:#a7f3d0 !important;white-space:nowrap;font-weight:700}
+.tip-t td.hint{color:#6ee7a8;font-style:italic;font-weight:400}
+</style></head><body>
+<header>
+  <h1>new-api · SSE 容量压测报告</h1>
+  <div class="meta">生成于 2026-10-26 12:04 UTC · 数据源：k6 文本摘要 + 运行时采样 · 集群 new-api-perf（雅加达 ap-southeast-5）</div>
+</header>
+<main>
+<h2>摘要</h2>
+<div class="cards">
+<div class="card"><div class="k">本次运行数</div><div class="v">16</div><div class="s">由所选日志聚合</div></div>
+<div class="card"><div class="k">副本数量</div><div class="v">2</div><div class="s">本报告内出现的副本配置</div></div>
+<div class="card"><div class="k">压测方法</div><div class="v" style="font-size:20px">constant-vus</div><div class="s">k6 executor / 场景类型</div></div>
+<div class="card"><div class="k">SSE 最优通过档</div><div class="v">872.0<small> req/s</small></div><div class="s">VU=1700 · P95=595ms · CPU 1.48 核 · 内存 519 MiB</div></div>
+
+<div class="card"><div class="k">可比容量分组</div><div class="v">0</div><div class="s">固定路径、副本及配置；分别展示实测与估计</div></div>
+<div class="card"><div class="k">1500 VU 副本配置</div><div class="v">2 副本（推测）</div><div class="s">按 2 副本最高通过 VU=1800 折算，约 900 VU/副本；未实测，仅供参考</div></div></div>
+
+<h2>每次运行明细</h2>
+<table>
+<thead><tr><th>Job / 时间</th><th>VU</th><th>路径</th><th>RPS</th><th>P50 首字</th><th>P95 首字</th><th>P99 首字</th><th>P95 端到端（管理面按标签）</th><th>错误率</th><th>完整流成功率 / 管理面 checks</th><th>CPU 峰值(核·全副本合计)</th><th>内存峰值(Mi·全副本合计)</th><th>下行(Mbps)</th><th>判定</th></tr></thead>
+<tbody><tr>
+<td>k6-stage-400<div class="sub">2026-10-26T11:21:44Z</div></td>
+<td>400<div class="sub">2 副本</div></td>
+<td>public-url<div class="sub"><a href="https://perf.likha.hk" target="_blank" style="color:#0b7a45;word-break:break-all">https://perf.likha.hk</a></div></td>
+<td>214.8</td>
+<td>339</td>
+<td><b>344</b></td>
+<td>524</td>
+<td>1,860</td>
+<td>0.000%</td>
+<td>100.000%</td>
+<td>0.41</td>
+<td>209</td>
+<td>20.80</td>
+<td><span class="badge ok">PASS</span><div class="sub">脚本阈值通过</div></td>
+</tr><tr>
+<td>k6-stage-500<div class="sub">2026-10-26T11:24:29Z</div></td>
+<td>500<div class="sub">2 副本</div></td>
+<td>public-url<div class="sub"><a href="https://perf.likha.hk" target="_blank" style="color:#0b7a45;word-break:break-all">https://perf.likha.hk</a></div></td>
+<td>266.9</td>
+<td>340</td>
+<td><b>346</b></td>
+<td>479</td>
+<td>1,860</td>
+<td>0.000%</td>
+<td>100.000%</td>
+<td>0.49</td>
+<td>218</td>
+<td>26.40</td>
+<td><span class="badge ok">PASS</span><div class="sub">脚本阈值通过</div></td>
+</tr><tr>
+<td>k6-stage-600<div class="sub">2026-10-26T11:27:16Z</div></td>
+<td>600<div class="sub">2 副本</div></td>
+<td>public-url<div class="sub"><a href="https://perf.likha.hk" target="_blank" style="color:#0b7a45;word-break:break-all">https://perf.likha.hk</a></div></td>
+<td>320.2</td>
+<td>340</td>
+<td><b>351</b></td>
+<td>528</td>
+<td>1,860</td>
+<td>0.000%</td>
+<td>100.000%</td>
+<td>0.59</td>
+<td>241</td>
+<td>31.20</td>
+<td><span class="badge ok">PASS</span><div class="sub">脚本阈值通过</div></td>
+</tr><tr>
+<td>k6-stage-700<div class="sub">2026-10-26T11:30:01Z</div></td>
+<td>700<div class="sub">2 副本</div></td>
+<td>public-url<div class="sub"><a href="https://perf.likha.hk" target="_blank" style="color:#0b7a45;word-break:break-all">https://perf.likha.hk</a></div></td>
+<td>373.7</td>
+<td>340</td>
+<td><b>350</b></td>
+<td>504</td>
+<td>1,870</td>
+<td>0.000%</td>
+<td>100.000%</td>
+<td>0.68</td>
+<td>274</td>
+<td>36.80</td>
+<td><span class="badge ok">PASS</span><div class="sub">脚本阈值通过</div></td>
+</tr><tr>
+<td>k6-stage-800<div class="sub">2026-10-26T11:32:45Z</div></td>
+<td>800<div class="sub">2 副本</div></td>
+<td>public-url<div class="sub"><a href="https://perf.likha.hk" target="_blank" style="color:#0b7a45;word-break:break-all">https://perf.likha.hk</a></div></td>
+<td>427.6</td>
+<td>340</td>
+<td><b>369</b></td>
+<td>517</td>
+<td>1,880</td>
+<td>0.000%</td>
+<td>100.000%</td>
+<td>0.76</td>
+<td>294</td>
+<td>42.40</td>
+<td><span class="badge ok">PASS</span><div class="sub">脚本阈值通过</div></td>
+</tr><tr>
+<td>k6-stage-900<div class="sub">2026-10-26T11:35:31Z</div></td>
+<td>900<div class="sub">2 副本</div></td>
+<td>public-url<div class="sub"><a href="https://perf.likha.hk" target="_blank" style="color:#0b7a45;word-break:break-all">https://perf.likha.hk</a></div></td>
+<td>479.6</td>
+<td>340</td>
+<td><b>378</b></td>
+<td>512</td>
+<td>1,890</td>
+<td>0.000%</td>
+<td>100.000%</td>
+<td>0.85</td>
+<td>328</td>
+<td>47.20</td>
+<td><span class="badge ok">PASS</span><div class="sub">脚本阈值通过</div></td>
+</tr><tr>
+<td>k6-stage-1000<div class="sub">2026-10-26T11:38:16Z</div></td>
+<td>1000<div class="sub">2 副本</div></td>
+<td>public-url<div class="sub"><a href="https://perf.likha.hk" target="_blank" style="color:#0b7a45;word-break:break-all">https://perf.likha.hk</a></div></td>
+<td>529.6</td>
+<td>340</td>
+<td><b>380</b></td>
+<td>565</td>
+<td>1,920</td>
+<td>0.000%</td>
+<td>100.000%</td>
+<td>0.92</td>
+<td>352</td>
+<td>52.00</td>
+<td><span class="badge ok">PASS</span><div class="sub">脚本阈值通过</div></td>
+</tr><tr>
+<td>k6-stage-1100<div class="sub">2026-10-26T11:41:04Z</div></td>
+<td>1100<div class="sub">2 副本</div></td>
+<td>public-url<div class="sub"><a href="https://perf.likha.hk" target="_blank" style="color:#0b7a45;word-break:break-all">https://perf.likha.hk</a></div></td>
+<td>581.5</td>
+<td>340</td>
+<td><b>394</b></td>
+<td>575</td>
+<td>1,950</td>
+<td>0.000%</td>
+<td>100.000%</td>
+<td>1.01</td>
+<td>375</td>
+<td>56.80</td>
+<td><span class="badge ok">PASS</span><div class="sub">脚本阈值通过</div></td>
+</tr><tr>
+<td>k6-stage-1200<div class="sub">2026-10-26T11:43:50Z</div></td>
+<td>1200<div class="sub">2 副本</div></td>
+<td>public-url<div class="sub"><a href="https://perf.likha.hk" target="_blank" style="color:#0b7a45;word-break:break-all">https://perf.likha.hk</a></div></td>
+<td>633.4</td>
+<td>340</td>
+<td><b>416</b></td>
+<td>636</td>
+<td>1,940</td>
+<td>0.000%</td>
+<td>100.000%</td>
+<td>1.09</td>
+<td>400</td>
+<td>62.40</td>
+<td><span class="badge ok">PASS</span><div class="sub">脚本阈值通过</div></td>
+</tr><tr>
+<td>k6-stage-1300<div class="sub">2026-10-26T11:46:36Z</div></td>
+<td>1300<div class="sub">2 副本</div></td>
+<td>public-url<div class="sub"><a href="https://perf.likha.hk" target="_blank" style="color:#0b7a45;word-break:break-all">https://perf.likha.hk</a></div></td>
+<td>685.5</td>
+<td>341</td>
+<td><b>409</b></td>
+<td>630</td>
+<td>1,940</td>
+<td>0.000%</td>
+<td>100.000%</td>
+<td>1.17</td>
+<td>440</td>
+<td>67.20</td>
+<td><span class="badge ok">PASS</span><div class="sub">脚本阈值通过</div></td>
+</tr><tr>
+<td>k6-stage-1400<div class="sub">2026-10-26T11:49:21Z</div></td>
+<td>1400<div class="sub">2 副本</div></td>
+<td>public-url<div class="sub"><a href="https://perf.likha.hk" target="_blank" style="color:#0b7a45;word-break:break-all">https://perf.likha.hk</a></div></td>
+<td>732.9</td>
+<td>341</td>
+<td><b>498</b></td>
+<td>694</td>
+<td>2,000</td>
+<td>0.000%</td>
+<td>100.000%</td>
+<td>1.26</td>
+<td>447</td>
+<td>72.00</td>
+<td><span class="badge ok">PASS</span><div class="sub">脚本阈值通过</div></td>
+</tr><tr>
+<td>k6-stage-1500<div class="sub">2026-10-26T11:52:10Z</div></td>
+<td>1500<div class="sub">2 副本</div></td>
+<td>public-url<div class="sub"><a href="https://perf.likha.hk" target="_blank" style="color:#0b7a45;word-break:break-all">https://perf.likha.hk</a></div></td>
+<td>782.2</td>
+<td>341</td>
+<td><b>494</b></td>
+<td>722</td>
+<td>2,010</td>
+<td>0.000%</td>
+<td>100.000%</td>
+<td>1.33</td>
+<td>479</td>
+<td>76.80</td>
+<td><span class="badge ok">PASS</span><div class="sub">脚本阈值通过</div></td>
+</tr><tr>
+<td>k6-stage-1600<div class="sub">2026-10-26T11:55:00Z</div></td>
+<td>1600<div class="sub">2 副本</div></td>
+<td>public-url<div class="sub"><a href="https://perf.likha.hk" target="_blank" style="color:#0b7a45;word-break:break-all">https://perf.likha.hk</a></div></td>
+<td>824.6</td>
+<td>342</td>
+<td><b>669</b></td>
+<td>909</td>
+<td>2,120</td>
+<td>0.000%</td>
+<td>100.000%</td>
+<td>1.41</td>
+<td>496</td>
+<td>80.00</td>
+<td><span class="badge ok">PASS</span><div class="sub">脚本阈值通过</div></td>
+</tr><tr>
+<td>k6-stage-1700<div class="sub">2026-10-26T11:57:44Z</div></td>
+<td>1700<div class="sub">2 副本</div></td>
+<td>public-url<div class="sub"><a href="https://perf.likha.hk" target="_blank" style="color:#0b7a45;word-break:break-all">https://perf.likha.hk</a></div></td>
+<td>872.0</td>
+<td>343</td>
+<td><b>595</b></td>
+<td>833</td>
+<td>2,100</td>
+<td>0.000%</td>
+<td>100.000%</td>
+<td>1.48</td>
+<td>519</td>
+<td>88.00</td>
+<td><span class="badge ok">PASS</span><div class="sub">脚本阈值通过</div></td>
+</tr><tr>
+<td>k6-stage-1800<div class="sub">2026-10-26T12:00:49Z</div></td>
+<td>1800<div class="sub">2 副本</div></td>
+<td>public-url<div class="sub"><a href="https://perf.likha.hk" target="_blank" style="color:#0b7a45;word-break:break-all">https://perf.likha.hk</a></div></td>
+<td>749.2</td>
+<td>345</td>
+<td><b>712</b></td>
+<td>954</td>
+<td>2,220</td>
+<td>0.034%</td>
+<td>99.966%</td>
+<td>1.55</td>
+<td>554</td>
+<td>73.60</td>
+<td><span class="badge ok">PASS</span><div class="sub">脚本阈值通过</div></td>
+</tr><tr>
+<td>k6-stage-1900<div class="sub">2026-10-26T12:04:05Z</div></td>
+<td>1900<div class="sub">2 副本</div></td>
+<td>public-url<div class="sub"><a href="https://perf.likha.hk" target="_blank" style="color:#0b7a45;word-break:break-all">https://perf.likha.hk</a></div></td>
+<td>740.6</td>
+<td>351</td>
+<td><b>718</b></td>
+<td>1,000</td>
+<td>2,410</td>
+<td>0.120%</td>
+<td>99.880%</td>
+<td>1.62</td>
+<td>557</td>
+<td>72.80</td>
+<td><span class="badge bad">FAIL</span><div class="sub">error_rate, integrity</div></td>
+</tr></tbody>
+</table>
+<div class="lim">首字使用 k6 <code>http_req_waiting</code>（TTFB 代理）。稳态：P95 &lt; 800ms、请求失败率 &lt; 0.05%、完整流成功率 &gt; 99.95%；突发：P95 &lt; 1500ms、失败率 &lt; 1%、完整流成功率 &gt; 99%；管理面：标签端到端 P95 &lt; 1000ms、失败率 &lt; 1%、业务成功 checks &gt; 99%、丢弃迭代为 0。CPU/内存为采样窗口内同一时刻全副本合计峰值；旧日志只采首个 Pod，数值偏小且不可用于成本换算。旧日志（无 <code>summary_schema</code>）当 checks 计数按每请求 2 项可逐请求核对且全部在错误预算内时，标为 <b>PASS·旧口径</b>：只证明 HTTP 200 且响应含 <code>[DONE]</code>，不证明 <code>finish_reason</code>，也不参与容量拟合；其余缺证据情况仍为“数据不完整”。新日志须有完整流/业务成功计数及 k6 退出状态。故障注入、滚动及长流待定义专属标准；分片缺少共同运行窗口证据时待评估。突发汇总阈值通过不代表已验证恢复时间。</div>
+
+<h2>可比配置容量边界</h2>
+<table><thead><tr><th>分组 / 配置</th><th>实测最高通过 VU</th><th>最小失败 VU</th><th>延迟边界估计（总量）</th><th>说明</th></tr></thead>
+<tbody><tr><td colspan="5">无可用于稳态容量分析的内网运行</td></tr></tbody></table>
+<div class="lim">镜像、负载或 mock 配置未知时只展示观测结果，不插值、不外推；不同副本不得按每副本并发混合拟合。</div>
+
+<h2>趋势</h2>
+<figure class="chart"><figcaption>P95 首字延迟 vs 并发（横轴=并发 VU；纵轴 ms；颜色区分路径类型）</figcaption>
+<svg viewBox="0 0 760 280" role="img" aria-label="P95 首字延迟 vs 并发">
+<line x1="72" y1="212.0" x2="740" y2="212.0" stroke="#e6f4ec"/><text x="64" y="216.0" text-anchor="end" font-size="10.5" fill="#3f6152">0</text><line x1="72" y1="164.5" x2="740" y2="164.5" stroke="#e6f4ec"/><text x="64" y="168.5" text-anchor="end" font-size="10.5" fill="#3f6152">230</text><line x1="72" y1="117.0" x2="740" y2="117.0" stroke="#e6f4ec"/><text x="64" y="121.0" text-anchor="end" font-size="10.5" fill="#3f6152">460</text><line x1="72" y1="69.5" x2="740" y2="69.5" stroke="#e6f4ec"/><text x="64" y="73.5" text-anchor="end" font-size="10.5" fill="#3f6152">690</text><line x1="72" y1="22.0" x2="740" y2="22.0" stroke="#e6f4ec"/><text x="64" y="26.0" text-anchor="end" font-size="10.5" fill="#3f6152">920</text><line x1="199.8" y1="212" x2="199.8" y2="216" stroke="#94a3b8" stroke-width="1"/><text x="199.8" y="228" text-anchor="middle" font-size="10" fill="#315244">400</text><line x1="263.8" y1="212" x2="263.8" y2="216" stroke="#94a3b8" stroke-width="1"/><text x="263.8" y="228" text-anchor="middle" font-size="10" fill="#315244">600</text><line x1="327.7" y1="212" x2="327.7" y2="216" stroke="#94a3b8" stroke-width="1"/><text x="327.7" y="228" text-anchor="middle" font-size="10" fill="#315244">800</text><line x1="391.6" y1="212" x2="391.6" y2="216" stroke="#94a3b8" stroke-width="1"/><text x="391.6" y="228" text-anchor="middle" font-size="10" fill="#315244">1000</text><line x1="455.5" y1="212" x2="455.5" y2="216" stroke="#94a3b8" stroke-width="1"/><text x="455.5" y="228" text-anchor="middle" font-size="10" fill="#315244">1200</text><line x1="519.5" y1="212" x2="519.5" y2="216" stroke="#94a3b8" stroke-width="1"/><text x="519.5" y="228" text-anchor="middle" font-size="10" fill="#315244">1400</text><line x1="583.4" y1="212" x2="583.4" y2="216" stroke="#94a3b8" stroke-width="1"/><text x="583.4" y="228" text-anchor="middle" font-size="10" fill="#315244">1600</text><line x1="647.3" y1="212" x2="647.3" y2="216" stroke="#94a3b8" stroke-width="1"/><text x="647.3" y="228" text-anchor="middle" font-size="10" fill="#315244">1800</text><line x1="72" y1="46.8" x2="740" y2="46.8" stroke="#e11d48" stroke-dasharray="6 4" stroke-width="1.4"/><text x="740" y="40.8" text-anchor="end" font-size="11" fill="#be123c" font-weight="600">SLO 800ms</text><polyline points="199.8,140.9 231.8,140.5 263.8,139.6 295.7,139.6 327.7,135.8 359.7,133.9 391.6,133.5 423.6,130.5 455.5,126.0 487.5,127.4 519.5,109.1 551.4,109.9 583.4,73.8 615.3,89.0 647.3,64.9 679.3,63.7" fill="none" stroke="#f59e0b" stroke-width="2" stroke-dasharray="none" opacity="0.7"/><circle class="pt" data-i="0" cx="199.8" cy="140.9" r="6" fill="#f59e0b" stroke="#ffffff" stroke-width="2" style="cursor:pointer"/><circle class="pt" data-i="1" cx="231.8" cy="140.5" r="6" fill="#f59e0b" stroke="#ffffff" stroke-width="2" style="cursor:pointer"/><circle class="pt" data-i="2" cx="263.8" cy="139.6" r="6" fill="#f59e0b" stroke="#ffffff" stroke-width="2" style="cursor:pointer"/><circle class="pt" data-i="3" cx="295.7" cy="139.6" r="6" fill="#f59e0b" stroke="#ffffff" stroke-width="2" style="cursor:pointer"/><circle class="pt" data-i="4" cx="327.7" cy="135.8" r="6" fill="#f59e0b" stroke="#ffffff" stroke-width="2" style="cursor:pointer"/><circle class="pt" data-i="5" cx="359.7" cy="133.9" r="6" fill="#f59e0b" stroke="#ffffff" stroke-width="2" style="cursor:pointer"/><circle class="pt" data-i="6" cx="391.6" cy="133.5" r="6" fill="#f59e0b" stroke="#ffffff" stroke-width="2" style="cursor:pointer"/><circle class="pt" data-i="7" cx="423.6" cy="130.5" r="6" fill="#f59e0b" stroke="#ffffff" stroke-width="2" style="cursor:pointer"/><circle class="pt" data-i="8" cx="455.5" cy="126.0" r="6" fill="#f59e0b" stroke="#ffffff" stroke-width="2" style="cursor:pointer"/><circle class="pt" data-i="9" cx="487.5" cy="127.4" r="6" fill="#f59e0b" stroke="#ffffff" stroke-width="2" style="cursor:pointer"/><circle class="pt" data-i="10" cx="519.5" cy="109.1" r="6" fill="#f59e0b" stroke="#ffffff" stroke-width="2" style="cursor:pointer"/><circle class="pt" data-i="11" cx="551.4" cy="109.9" r="6" fill="#f59e0b" stroke="#ffffff" stroke-width="2" style="cursor:pointer"/><circle class="pt" data-i="12" cx="583.4" cy="73.8" r="6" fill="#f59e0b" stroke="#ffffff" stroke-width="2" style="cursor:pointer"/><circle class="pt" data-i="13" cx="615.3" cy="89.0" r="6" fill="#f59e0b" stroke="#ffffff" stroke-width="2" style="cursor:pointer"/><circle class="pt" data-i="14" cx="647.3" cy="64.9" r="6" fill="#f59e0b" stroke="#ffffff" stroke-width="2" style="cursor:pointer"/><circle class="pt" data-i="15" cx="679.3" cy="63.7" r="6" fill="#f59e0b" stroke="#ffffff" stroke-width="2" style="cursor:pointer"/><text x="199.8" y="246" text-anchor="end" font-size="9.5" fill="#315244" transform="rotate(-38 199.8 246)">2026-10-26 11:21 perf.likha.hk</text><text x="231.8" y="246" text-anchor="end" font-size="9.5" fill="#315244" transform="rotate(-38 231.8 246)">2026-10-26 11:24 perf.likha.hk</text><text x="263.8" y="246" text-anchor="end" font-size="9.5" fill="#315244" transform="rotate(-38 263.8 246)">2026-10-26 11:27 perf.likha.hk</text><text x="295.7" y="246" text-anchor="end" font-size="9.5" fill="#315244" transform="rotate(-38 295.7 246)">2026-10-26 11:30 perf.likha.hk</text><text x="327.7" y="246" text-anchor="end" font-size="9.5" fill="#315244" transform="rotate(-38 327.7 246)">2026-10-26 11:32 perf.likha.hk</text><text x="359.7" y="246" text-anchor="end" font-size="9.5" fill="#315244" transform="rotate(-38 359.7 246)">2026-10-26 11:35 perf.likha.hk</text><text x="391.6" y="246" text-anchor="end" font-size="9.5" fill="#315244" transform="rotate(-38 391.6 246)">2026-10-26 11:38 perf.likha.hk</text><text x="423.6" y="246" text-anchor="end" font-size="9.5" fill="#315244" transform="rotate(-38 423.6 246)">2026-10-26 11:41 perf.likha.hk</text><text x="455.5" y="246" text-anchor="end" font-size="9.5" fill="#315244" transform="rotate(-38 455.5 246)">2026-10-26 11:43 perf.likha.hk</text><text x="487.5" y="246" text-anchor="end" font-size="9.5" fill="#315244" transform="rotate(-38 487.5 246)">2026-10-26 11:46 perf.likha.hk</text><text x="519.5" y="246" text-anchor="end" font-size="9.5" fill="#315244" transform="rotate(-38 519.5 246)">2026-10-26 11:49 perf.likha.hk</text><text x="551.4" y="246" text-anchor="end" font-size="9.5" fill="#315244" transform="rotate(-38 551.4 246)">2026-10-26 11:52 perf.likha.hk</text><text x="583.4" y="246" text-anchor="end" font-size="9.5" fill="#315244" transform="rotate(-38 583.4 246)">2026-10-26 11:55 perf.likha.hk</text><text x="615.3" y="246" text-anchor="end" font-size="9.5" fill="#315244" transform="rotate(-38 615.3 246)">2026-10-26 11:57 perf.likha.hk</text><text x="647.3" y="246" text-anchor="end" font-size="9.5" fill="#315244" transform="rotate(-38 647.3 246)">2026-10-26 12:00 perf.likha.hk</text><text x="679.3" y="246" text-anchor="end" font-size="9.5" fill="#315244" transform="rotate(-38 679.3 246)">2026-10-26 12:04 perf.likha.hk</text><text x="406.0" y="278" text-anchor="middle" font-size="10.5" fill="#3f6152">并发 VU</text>
+</svg></figure>
+<figure class="chart"><figcaption>吞吐 RPS vs 并发（横轴=并发 VU；纵轴 req/s；颜色区分路径类型）</figcaption>
+<svg viewBox="0 0 760 280" role="img" aria-label="吞吐 RPS vs 并发">
+<line x1="72" y1="212.0" x2="740" y2="212.0" stroke="#e6f4ec"/><text x="64" y="216.0" text-anchor="end" font-size="10.5" fill="#3f6152">0</text><line x1="72" y1="164.5" x2="740" y2="164.5" stroke="#e6f4ec"/><text x="64" y="168.5" text-anchor="end" font-size="10.5" fill="#3f6152">251</text><line x1="72" y1="117.0" x2="740" y2="117.0" stroke="#e6f4ec"/><text x="64" y="121.0" text-anchor="end" font-size="10.5" fill="#3f6152">501</text><line x1="72" y1="69.5" x2="740" y2="69.5" stroke="#e6f4ec"/><text x="64" y="73.5" text-anchor="end" font-size="10.5" fill="#3f6152">752</text><line x1="72" y1="22.0" x2="740" y2="22.0" stroke="#e6f4ec"/><text x="64" y="26.0" text-anchor="end" font-size="10.5" fill="#3f6152">1003</text><line x1="199.8" y1="212" x2="199.8" y2="216" stroke="#94a3b8" stroke-width="1"/><text x="199.8" y="228" text-anchor="middle" font-size="10" fill="#315244">400</text><line x1="263.8" y1="212" x2="263.8" y2="216" stroke="#94a3b8" stroke-width="1"/><text x="263.8" y="228" text-anchor="middle" font-size="10" fill="#315244">600</text><line x1="327.7" y1="212" x2="327.7" y2="216" stroke="#94a3b8" stroke-width="1"/><text x="327.7" y="228" text-anchor="middle" font-size="10" fill="#315244">800</text><line x1="391.6" y1="212" x2="391.6" y2="216" stroke="#94a3b8" stroke-width="1"/><text x="391.6" y="228" text-anchor="middle" font-size="10" fill="#315244">1000</text><line x1="455.5" y1="212" x2="455.5" y2="216" stroke="#94a3b8" stroke-width="1"/><text x="455.5" y="228" text-anchor="middle" font-size="10" fill="#315244">1200</text><line x1="519.5" y1="212" x2="519.5" y2="216" stroke="#94a3b8" stroke-width="1"/><text x="519.5" y="228" text-anchor="middle" font-size="10" fill="#315244">1400</text><line x1="583.4" y1="212" x2="583.4" y2="216" stroke="#94a3b8" stroke-width="1"/><text x="583.4" y="228" text-anchor="middle" font-size="10" fill="#315244">1600</text><line x1="647.3" y1="212" x2="647.3" y2="216" stroke="#94a3b8" stroke-width="1"/><text x="647.3" y="228" text-anchor="middle" font-size="10" fill="#315244">1800</text><polyline points="199.8,171.3 231.8,161.4 263.8,151.3 295.7,141.2 327.7,131.0 359.7,121.1 391.6,111.7 423.6,101.8 455.5,92.0 487.5,82.1 519.5,73.1 551.4,63.8 583.4,55.8 615.3,46.8 647.3,70.1 679.3,71.7" fill="none" stroke="#f59e0b" stroke-width="2" stroke-dasharray="none" opacity="0.7"/><circle class="pt" data-i="0" cx="199.8" cy="171.3" r="6" fill="#f59e0b" stroke="#ffffff" stroke-width="2" style="cursor:pointer"/><circle class="pt" data-i="1" cx="231.8" cy="161.4" r="6" fill="#f59e0b" stroke="#ffffff" stroke-width="2" style="cursor:pointer"/><circle class="pt" data-i="2" cx="263.8" cy="151.3" r="6" fill="#f59e0b" stroke="#ffffff" stroke-width="2" style="cursor:pointer"/><circle class="pt" data-i="3" cx="295.7" cy="141.2" r="6" fill="#f59e0b" stroke="#ffffff" stroke-width="2" style="cursor:pointer"/><circle class="pt" data-i="4" cx="327.7" cy="131.0" r="6" fill="#f59e0b" stroke="#ffffff" stroke-width="2" style="cursor:pointer"/><circle class="pt" data-i="5" cx="359.7" cy="121.1" r="6" fill="#f59e0b" stroke="#ffffff" stroke-width="2" style="cursor:pointer"/><circle class="pt" data-i="6" cx="391.6" cy="111.7" r="6" fill="#f59e0b" stroke="#ffffff" stroke-width="2" style="cursor:pointer"/><circle class="pt" data-i="7" cx="423.6" cy="101.8" r="6" fill="#f59e0b" stroke="#ffffff" stroke-width="2" style="cursor:pointer"/><circle class="pt" data-i="8" cx="455.5" cy="92.0" r="6" fill="#f59e0b" stroke="#ffffff" stroke-width="2" style="cursor:pointer"/><circle class="pt" data-i="9" cx="487.5" cy="82.1" r="6" fill="#f59e0b" stroke="#ffffff" stroke-width="2" style="cursor:pointer"/><circle class="pt" data-i="10" cx="519.5" cy="73.1" r="6" fill="#f59e0b" stroke="#ffffff" stroke-width="2" style="cursor:pointer"/><circle class="pt" data-i="11" cx="551.4" cy="63.8" r="6" fill="#f59e0b" stroke="#ffffff" stroke-width="2" style="cursor:pointer"/><circle class="pt" data-i="12" cx="583.4" cy="55.8" r="6" fill="#f59e0b" stroke="#ffffff" stroke-width="2" style="cursor:pointer"/><circle class="pt" data-i="13" cx="615.3" cy="46.8" r="6" fill="#f59e0b" stroke="#ffffff" stroke-width="2" style="cursor:pointer"/><circle class="pt" data-i="14" cx="647.3" cy="70.1" r="6" fill="#f59e0b" stroke="#ffffff" stroke-width="2" style="cursor:pointer"/><circle class="pt" data-i="15" cx="679.3" cy="71.7" r="6" fill="#f59e0b" stroke="#ffffff" stroke-width="2" style="cursor:pointer"/><text x="199.8" y="246" text-anchor="end" font-size="9.5" fill="#315244" transform="rotate(-38 199.8 246)">2026-10-26 11:21 perf.likha.hk</text><text x="231.8" y="246" text-anchor="end" font-size="9.5" fill="#315244" transform="rotate(-38 231.8 246)">2026-10-26 11:24 perf.likha.hk</text><text x="263.8" y="246" text-anchor="end" font-size="9.5" fill="#315244" transform="rotate(-38 263.8 246)">2026-10-26 11:27 perf.likha.hk</text><text x="295.7" y="246" text-anchor="end" font-size="9.5" fill="#315244" transform="rotate(-38 295.7 246)">2026-10-26 11:30 perf.likha.hk</text><text x="327.7" y="246" text-anchor="end" font-size="9.5" fill="#315244" transform="rotate(-38 327.7 246)">2026-10-26 11:32 perf.likha.hk</text><text x="359.7" y="246" text-anchor="end" font-size="9.5" fill="#315244" transform="rotate(-38 359.7 246)">2026-10-26 11:35 perf.likha.hk</text><text x="391.6" y="246" text-anchor="end" font-size="9.5" fill="#315244" transform="rotate(-38 391.6 246)">2026-10-26 11:38 perf.likha.hk</text><text x="423.6" y="246" text-anchor="end" font-size="9.5" fill="#315244" transform="rotate(-38 423.6 246)">2026-10-26 11:41 perf.likha.hk</text><text x="455.5" y="246" text-anchor="end" font-size="9.5" fill="#315244" transform="rotate(-38 455.5 246)">2026-10-26 11:43 perf.likha.hk</text><text x="487.5" y="246" text-anchor="end" font-size="9.5" fill="#315244" transform="rotate(-38 487.5 246)">2026-10-26 11:46 perf.likha.hk</text><text x="519.5" y="246" text-anchor="end" font-size="9.5" fill="#315244" transform="rotate(-38 519.5 246)">2026-10-26 11:49 perf.likha.hk</text><text x="551.4" y="246" text-anchor="end" font-size="9.5" fill="#315244" transform="rotate(-38 551.4 246)">2026-10-26 11:52 perf.likha.hk</text><text x="583.4" y="246" text-anchor="end" font-size="9.5" fill="#315244" transform="rotate(-38 583.4 246)">2026-10-26 11:55 perf.likha.hk</text><text x="615.3" y="246" text-anchor="end" font-size="9.5" fill="#315244" transform="rotate(-38 615.3 246)">2026-10-26 11:57 perf.likha.hk</text><text x="647.3" y="246" text-anchor="end" font-size="9.5" fill="#315244" transform="rotate(-38 647.3 246)">2026-10-26 12:00 perf.likha.hk</text><text x="679.3" y="246" text-anchor="end" font-size="9.5" fill="#315244" transform="rotate(-38 679.3 246)">2026-10-26 12:04 perf.likha.hk</text><text x="406.0" y="278" text-anchor="middle" font-size="10.5" fill="#3f6152">并发 VU</text>
+</svg></figure>
+
+<h2>阶段耗时参考（不是逐请求链路）</h2><figure class="chart"><figcaption>阶段耗时参考（公网@1700）：k6 客户端各指标 P90，来自不同请求分布，<b>不可相加</b></figcaption>
+<svg viewBox="0 0 760 244" role="img" aria-label="k6 客户端阶段耗时参考">
+<text x="16" y="22" font-size="10.5" fill="#20463a">TCP 连接</text><rect x="226" y="10" width="2.0" height="16" fill="#12b76a" rx="2"/><text x="234.0" y="22" font-size="10.5" fill="#20463a">0.0 ms</text><text x="16" y="48" font-size="10.5" fill="#20463a">TLS 握手</text><rect x="226" y="36" width="2.0" height="16" fill="#12b76a" rx="2"/><text x="234.0" y="48" font-size="10.5" fill="#20463a">0.0 ms</text><text x="16" y="74" font-size="10.5" fill="#20463a">请求发送</text><rect x="226" y="62" width="2.0" height="16" fill="#12b76a" rx="2"/><text x="234.0" y="74" font-size="10.5" fill="#20463a">0.0 ms</text><text x="16" y="100" font-size="10.5" fill="#20463a">等待首字节</text><rect x="226" y="88" width="80.2" height="16" fill="#12b76a" rx="2"/><text x="312.2" y="100" font-size="10.5" fill="#20463a">398.8 ms</text><text x="16" y="126" font-size="10.5" fill="#20463a">接收响应</text><rect x="226" y="114" width="329.6" height="16" fill="#12b76a" rx="2"/><text x="561.6" y="126" font-size="10.5" fill="#20463a">1640.0 ms</text><text x="16" y="152" font-size="10.5" fill="#20463a">总时长</text><rect x="226" y="140" width="400.0" height="16" fill="#12b76a" rx="2"/><text x="632.0" y="152" font-size="10.5" fill="#20463a">1990.0 ms</text><text x="16" y="178" font-size="10.5" fill="#20463a">mock 首字（配置）</text><rect x="226" y="166" width="60.3" height="16" fill="#12b76a" rx="2"/><text x="292.3" y="178" font-size="10.5" fill="#20463a">300.0 ms</text><text x="16" y="204" font-size="10.5" fill="#20463a">mock 流式吐字（配置）</text><rect x="226" y="192" width="301.5" height="16" fill="#12b76a" rx="2"/><text x="533.5" y="204" font-size="10.5" fill="#20463a">1500.0 ms</text><text x="16" y="230" font-size="10.5" fill="#20463a">网关等其余环节（估算）</text><rect x="226" y="218" width="19.9" height="16" fill="#12b76a" rx="2"/><text x="251.9" y="230" font-size="10.5" fill="#20463a">98.8 ms</text>
+</svg></figure>
+<div class="note" style="margin-top:6px">链路路径：<b>公网路径（k6→NAT→EIP→ALB→Ingress→Pod）</b>（https://perf.likha.hk）· VU=1700 · 2026-10-26T11:57</div>
+<table class="mini" style="margin-top:10px"><thead><tr><th>指标</th><th>P90</th><th>数据来源</th></tr></thead><tbody><tr><td>TCP 连接</td><td>0.0 ms</td><td class="src">http_req_connecting p90（含建连阻塞；DNS 未单独采集）</td></tr><tr><td>TLS 握手</td><td>0.0 ms</td><td class="src">http_req_tls_handshaking p90（复用连接时为 0）</td></tr><tr><td>请求发送</td><td>0.0 ms</td><td class="src">http_req_sending p90</td></tr><tr><td>等待首字节</td><td>398.8 ms</td><td class="src">http_req_waiting p90（含网关处理与上游首 token）</td></tr><tr><td>接收响应</td><td>1640.0 ms</td><td class="src">http_req_receiving p90（含流式吐字与传输）</td></tr><tr><td>总时长</td><td>1990.0 ms</td><td class="src">http_req_duration p90</td></tr><tr><td>mock 首字（配置）</td><td>300.0 ms</td><td class="src">mock_config.first_token_delay_ms</td></tr><tr><td>mock 流式吐字（配置）</td><td>1500.0 ms</td><td class="src">tokens_per_response × token_interval_ms</td></tr><tr><td>网关等其余环节（估算）</td><td>98.8 ms</td><td class="src">差值：waiting p90 − mock 首字</td></tr></tbody></table>
+<div class="note" style="margin-top:8px">
+「网关等其余环节」只在 mock 配置可信时按 waiting−首字估算，仍包含 NAT/ALB/Ingress/鉴权/连接池等；要真正拆分需接 trace/SLS（未做，不填假数据）。</div><div class="note" style="margin-top:10px">各指标均取 <b>p90</b>，但来自不同请求分布：连接可能复用、TLS 可能复用、接收阶段覆盖整段流式响应。因此这些数值<b>不能相加</b>成“一次请求的完整耗时”，也不据此计算占比。mock 首字/吐字只在本次采集到可信 <code>mock_config</code> 时展示，否则不做差值推算。</div>
+
+<h2>瓶颈判定</h2>
+<div class="note"><b>事实</b><ul><li>公网路径下行峰值 88.00 Mbps（EIP 标称 100 Mbps，利用率 88%）</li><li>最优通过档 VU=1700：RPS=872.0、P95=595ms、错误率=0.000%</li><li>该档 CPU 峰值 1.48 核，折合每千 RPS 1.697 核·千RPS⁻¹</li></ul></div>
+<div class="note" style="margin-top:10px"><b>推断（需下钻验证）</b><ul><li>公网下行利用率 ≥85% ⇒ 可能先撞 NAT→EIP 100Mbps；需结合 EIP 实际监控确认，内网档位不受该限制</li></ul></div>
+
+<h2>理想 QPS 与资源</h2>
+<table class="mini"><thead><tr><th>指标</th><th>VU=400</th><th>VU=500</th><th>VU=600</th><th>VU=700</th><th>VU=800</th><th>VU=900</th><th>VU=1000</th><th>VU=1100</th><th>VU=1200</th><th>VU=1300</th><th>VU=1400</th><th>VU=1500</th><th>VU=1600</th><th>VU=1700</th><th>VU=1800</th><th>VU=1900</th></tr></thead><tbody><tr><td>副本数</td><td>2</td><td>2</td><td>2</td><td>2</td><td>2</td><td>2</td><td>2</td><td>2</td><td>2</td><td>2</td><td>2</td><td>2</td><td>2</td><td>2</td><td>2</td><td>2</td></tr><tr><td>RPS</td><td>214.8</td><td>266.9</td><td>320.2</td><td>373.7</td><td>427.6</td><td>479.6</td><td>529.6</td><td>581.5</td><td>633.4</td><td>685.5</td><td>732.9</td><td>782.2</td><td>824.6</td><td>872.0</td><td>749.2</td><td>740.6</td></tr><tr><td>P95 首字 (ms)</td><td>344</td><td>346</td><td>351</td><td>350</td><td>369</td><td>378</td><td>380</td><td>394</td><td>416</td><td>409</td><td>498</td><td>494</td><td>669</td><td>595</td><td>712</td><td>718</td></tr><tr><td>错误率</td><td>0.000%</td><td>0.000%</td><td>0.000%</td><td>0.000%</td><td>0.000%</td><td>0.000%</td><td>0.000%</td><td>0.000%</td><td>0.000%</td><td>0.000%</td><td>0.000%</td><td>0.000%</td><td>0.000%</td><td>0.000%</td><td>0.034%</td><td>0.120%</td></tr><tr><td>CPU 峰值 (核)</td><td>0.41</td><td>0.49</td><td>0.59</td><td>0.68</td><td>0.76</td><td>0.85</td><td>0.92</td><td>1.01</td><td>1.09</td><td>1.17</td><td>1.26</td><td>1.33</td><td>1.41</td><td>1.48</td><td>1.55</td><td>1.62</td></tr><tr><td>每千 RPS 用核</td><td>1.91</td><td>1.85</td><td>1.84</td><td>1.82</td><td>1.77</td><td>1.78</td><td>1.74</td><td>1.74</td><td>1.73</td><td>1.71</td><td>1.72</td><td>1.70</td><td>1.71</td><td>1.70</td><td>2.06</td><td>2.18</td></tr></tbody></table>
+<div class="note" style="margin-top:10px">
+当前实测「理想 QPS」= 在 SLO 内可稳定达到的最高吞吐：<b>872.0 req/s</b>
+（2 副本，VU=1700）。
+单副本资源效率：<b>1.70 核 / 千 RPS</b>，
+即约 <b>2,121,139 请求 / 核·小时</b>。
+1500 VU 目标只有相同负载下的实际通过运行才能验证，插值不能替代验收，也不能证明最少副本数。
+</div>
+
+<h2>公式与口径（完整）</h2>
+<div class="note">
+<b>VU（Virtual User，虚拟用户）</b>：k6 里一个 VU 就是一条独立执行循环 + 一条（或一组）连接。SSE 场景下每条请求持续到流结束（本次约 1.9s），
+所以"VU≈同时在途的 SSE 流数≈并发连接数"，不是"每秒请求数"。吞吐与并发的关系由 Little 定律给出：
+<code>RPS ≈ VU ÷ 平均请求时长</code>（例：1500 VU ÷ 2.1s ≈ 714 RPS，与实测 701.6 吻合）。
+</div>
+<table class="mini" style="margin-top:10px">
+<thead><tr><th>Job / 动作</th><th>脚本</th><th>含义</th><th>为什么这么设计（设计目的）</th></tr></thead><tbody>
+<tr><td><code>stage</code></td><td>sse.js</td><td>恒定 VU 打 SSE，单档运行（如 1500 VU）</td><td>固定并发观察 P95/CPU/完整流，用于单点验收</td></tr>
+<tr><td><code>sweep</code></td><td>sse.js</td><td>先 scale 到指定副本，再从 start（默认 400）每档 +step（默认 100）扫到首个失败</td><td>同一路径/副本下逐档找通过上限；每组结束打印本组最优通过档</td></tr>
+<tr><td><code>shard</code></td><td>sse.js</td><td>多个 k6 Job 分摊总 VU（如 2×750）</td><td>排除单客户端 CPU/连接限制，验证是否由客户端先行饱和</td></tr>
+<tr><td><code>arrival</code></td><td>sse_arrival.js</td><td>恒定到达率（如 1500 rps），不受单请求耗时反压</td><td>测真实 QPS 能力；需要按 RATE×耗时为并发预留 VU</td></tr>
+<tr><td><code>dual1500</code></td><td>sse.js</td><td>把 slave 扩到 2 副本，单 Job 打 Service</td><td>用 kube-proxy 自然分摊，复现"多副本入口"形态；避免直连单 Pod 造成失真</td></tr>
+<tr><td><code>burst</code></td><td>s3_burst.js</td><td>0→1500 用 30s 拉起，保持后再降</td><td>验证 HPA/排队/冷启动在突增下的收敛能力（S3），而非稳态容量</td></tr>
+<tr><td><code>admin</code></td><td>s4_admin.js</td><td>恒定到达率打管理面读接口</td><td>管理面是"请求/秒"型负载，用 arrival-rate 而非 VU，才能对准 800 QPS 目标</td></tr>
+<tr><td><code>degrade</code></td><td>sse.js + mock_ctl</td><td>mock 注入 50% 5xx + 5s 延迟</td><td>验证上游劣化时网关"不被拖死"、错误归类正确（S5），不产生级联雪崩</td></tr>
+<tr><td><code>rolling</code></td><td>sse.js + rollout restart</td><td>压测中滚动重启被测负载</td><td>验证发布期间连接是否被优雅摘除（S10），暴露 preStop/就绪延迟缺口</td></tr>
+<tr><td><code>long</code></td><td>s9_long.js</td><td>单请求、超长流（约 12 分钟）</td><td>验证 ALB/网关对长连接是"空闲超时"还是"总时长上限"（S9 口径之争）</td></tr>
+</tbody></table>
+<pre style="margin-top:12px">
+1) 首字延迟（代理）   TTFB_p95 = k6 http_req_waiting 的 p(95)
+   说明：SSE 场景下响应头与首块几乎同时到达；若需真实 token 级首字，需改用自定义流式客户端。
+
+2) 吞吐              RPS = http_reqs / duration
+   实测值直接取 k6 的 http_reqs 速率行（如 "220  10.72/s"）。
+
+3) 并发与驻留（Little 定律）
+   N ≈ RPS × T_avg        N=VU（并发流数），T_avg=http_req_duration 平均（秒）
+   一致性校验：N 计算值应与 vus_max 同量级；若明显偏小，说明大量请求在客户端排队。
+
+4) 每次请求 CPU       C_req = CPU_peak_cores / RPS        （核·秒/请求）
+   每千 RPS 用核       C_k = C_req × 1000
+   每核小时可服务请求    Q_coreh = RPS × 3600 / CPU_peak_cores
+   每百万请求 CPU 小时   H_1M = C_req × 1,000,000 / 3600
+
+5) 稳态 SLO 余量     margin = 1 − TTFB_p95 / 800ms
+6) 同配置延迟边界估计（不是实测通过容量）
+   VU_knee = VU_pass + (800 − P95_pass) / (P95_fail − P95_pass) × (VU_fail − VU_pass)
+   只使用相同路径、目标、副本、镜像、时长、负载及 mock 配置的观测。
+   pass 为最高通过档，fail 为其上方最小失败档，且只能因延迟超标失败。
+   配置缺失、低档失败、高低档冲突、证据不足或无破线档时不拟合，不外推。
+7) 目标验收
+   只记录实际 1500 VU 通过的副本配置；不得从插值推算最少副本数。
+
+8) 判定口径
+   稳态：错误率 &lt; 0.05%、P95 TTFB &lt; 800ms、完整流成功率 &gt; 99.95%。
+   突发：错误率 &lt; 1%、P95 TTFB &lt; 1500ms、完整流成功率 &gt; 99%。
+   管理面：错误率 &lt; 1%、管理面标签 P95 &lt; 1000ms、业务成功 checks &gt; 99%、丢弃迭代为 0。
+   分片逐一判定，不能用加权平均掩盖某分片失败；执行异常/缺数据为 INCOMPLETE。
+   旧日志无 summary_schema 时：checks=2×http_reqs 且各项在错误预算内 ⇒ PASS·旧口径
+   （仅证明 HTTP 200 + 含 [DONE]，不含 finish_reason/退出码，不参与容量拟合）。
+   未定义专属验收标准的场景为 UNASSESSED，不计入通过容量。
+   注意：本环境 mock 上游无真实厂商延迟，且部分档位未含 ALB（clusterip 模式）；
+   URL 模式（https://perf.likha.hk）含 NAT+ALB 入口开销，两种模式不可直接混比。
+
+9) 链路带宽利用率（仅公网路径）
+   U_bw = data_received_rate(Mbps) / EIP_Bandwidth(Mbps)，k6 数据单位按十进制（1 MB = 1000 kB）。
+   ClusterIP 内网流量不经过 EIP，只记录集群内下行峰值，不参与 EIP 饱和度判断。
+   公网路径先撞带宽时表现为 RPS 塌陷 + 连接级失败（超时/重置）而应用侧无 5xx、CPU 不高；
+   该推断仍需 EIP 实际监控确认，不能只凭本报告下结论。
+
+10) 资源口径
+   CPU_peak / Mem_peak = 采样窗口内同一时刻全副本合计峰值（逐 Pod 采样后求和，同刻去重）
+   单 Pod 峰值另存为 cpu_max_pod_m / mem_max_pod_mi；旧日志只采首个 Pod，数值偏小。
+   CPU 上限按部署 limits=2 核记（实际 deployment 以集群为准）。
+</pre>
+
+<h2>复现</h2>
+<pre>bash deploy/perf/k6/run.sh stage https://perf.likha.hk 300 120s
+bash deploy/perf/k6/run.sh stage perf-new-api-slave 900 120s
+bash deploy/perf/k6/run.sh summary</pre>
+
+<p class="lim">本报告由 deploy/perf/k6/report.py 自动生成；点击趋势图上的绿色数据点可查看该次运行明细。</p>
+</main>
+</body></html>
+<div id="tip" class="tip" hidden></div>
+<script>
+const RUNS = [{"job": "k6-stage-400", "ts": "2026-10-26T11:21:44Z", "vus": 400, "replicas": 2, "mode": "public-url", "target": "https://perf.likha.hk", "rps": 214.849664, "ttfb_p50": 339.47, "ttfb_p95": 344.44, "ttfb_p99": 523.62, "dur_p95": 1860.0, "err_pct": 0.0, "admin_p95": null, "complete_pct": 100.0, "checks_pct": 100.0, "cpu": 0.411, "mem": 209.0, "bw": 20.8, "pass": true, "verdict": "PASS", "verdict_reason": "脚本阈值通过", "evidence": "exact"}, {"job": "k6-stage-500", "ts": "2026-10-26T11:24:29Z", "vus": 500, "replicas": 2, "mode": "public-url", "target": "https://perf.likha.hk", "rps": 266.873985, "ttfb_p50": 339.59, "ttfb_p95": 346.05, "ttfb_p99": 478.84, "dur_p95": 1860.0, "err_pct": 0.0, "admin_p95": null, "complete_pct": 100.0, "checks_pct": 100.0, "cpu": 0.494, "mem": 218.0, "bw": 26.4, "pass": true, "verdict": "PASS", "verdict_reason": "脚本阈值通过", "evidence": "exact"}, {"job": "k6-stage-600", "ts": "2026-10-26T11:27:16Z", "vus": 600, "replicas": 2, "mode": "public-url", "target": "https://perf.likha.hk", "rps": 320.234007, "ttfb_p50": 339.71, "ttfb_p95": 350.57, "ttfb_p99": 527.57, "dur_p95": 1860.0, "err_pct": 0.0, "admin_p95": null, "complete_pct": 100.0, "checks_pct": 100.0, "cpu": 0.59, "mem": 241.0, "bw": 31.2, "pass": true, "verdict": "PASS", "verdict_reason": "脚本阈值通过", "evidence": "exact"}, {"job": "k6-stage-700", "ts": "2026-10-26T11:30:01Z", "vus": 700, "replicas": 2, "mode": "public-url", "target": "https://perf.likha.hk", "rps": 373.674641, "ttfb_p50": 339.82, "ttfb_p95": 350.36, "ttfb_p99": 503.69, "dur_p95": 1870.0, "err_pct": 0.0, "admin_p95": null, "complete_pct": 100.0, "checks_pct": 100.0, "cpu": 0.679, "mem": 274.0, "bw": 36.8, "pass": true, "verdict": "PASS", "verdict_reason": "脚本阈值通过", "evidence": "exact"}, {"job": "k6-stage-800", "ts": "2026-10-26T11:32:45Z", "vus": 800, "replicas": 2, "mode": "public-url", "target": "https://perf.likha.hk", "rps": 427.618123, "ttfb_p50": 339.99, "ttfb_p95": 368.93, "ttfb_p99": 516.99, "dur_p95": 1880.0, "err_pct": 0.0, "admin_p95": null, "complete_pct": 100.0, "checks_pct": 100.0, "cpu": 0.758, "mem": 294.0, "bw": 42.4, "pass": true, "verdict": "PASS", "verdict_reason": "脚本阈值通过", "evidence": "exact"}, {"job": "k6-stage-900", "ts": "2026-10-26T11:35:31Z", "vus": 900, "replicas": 2, "mode": "public-url", "target": "https://perf.likha.hk", "rps": 479.601306, "ttfb_p50": 340.07, "ttfb_p95": 378.12, "ttfb_p99": 511.99, "dur_p95": 1890.0, "err_pct": 0.0, "admin_p95": null, "complete_pct": 100.0, "checks_pct": 100.0, "cpu": 0.852, "mem": 328.0, "bw": 47.2, "pass": true, "verdict": "PASS", "verdict_reason": "脚本阈值通过", "evidence": "exact"}, {"job": "k6-stage-1000", "ts": "2026-10-26T11:38:16Z", "vus": 1000, "replicas": 2, "mode": "public-url", "target": "https://perf.likha.hk", "rps": 529.586209, "ttfb_p50": 340.34, "ttfb_p95": 380.1, "ttfb_p99": 564.68, "dur_p95": 1920.0, "err_pct": 0.0, "admin_p95": null, "complete_pct": 100.0, "checks_pct": 100.0, "cpu": 0.924, "mem": 352.0, "bw": 52.0, "pass": true, "verdict": "PASS", "verdict_reason": "脚本阈值通过", "evidence": "exact"}, {"job": "k6-stage-1100", "ts": "2026-10-26T11:41:04Z", "vus": 1100, "replicas": 2, "mode": "public-url", "target": "https://perf.likha.hk", "rps": 581.503254, "ttfb_p50": 340.43, "ttfb_p95": 394.47, "ttfb_p99": 574.61, "dur_p95": 1950.0, "err_pct": 0.0, "admin_p95": null, "complete_pct": 100.0, "checks_pct": 100.0, "cpu": 1.011, "mem": 375.0, "bw": 56.8, "pass": true, "verdict": "PASS", "verdict_reason": "脚本阈值通过", "evidence": "exact"}, {"job": "k6-stage-1200", "ts": "2026-10-26T11:43:50Z", "vus": 1200, "replicas": 2, "mode": "public-url", "target": "https://perf.likha.hk", "rps": 633.365286, "ttfb_p50": 340.45, "ttfb_p95": 416.49, "ttfb_p99": 636.18, "dur_p95": 1940.0, "err_pct": 0.0, "admin_p95": null, "complete_pct": 100.0, "checks_pct": 100.0, "cpu": 1.095, "mem": 400.0, "bw": 62.4, "pass": true, "verdict": "PASS", "verdict_reason": "脚本阈值通过", "evidence": "exact"}, {"job": "k6-stage-1300", "ts": "2026-10-26T11:46:36Z", "vus": 1300, "replicas": 2, "mode": "public-url", "target": "https://perf.likha.hk", "rps": 685.454733, "ttfb_p50": 340.69, "ttfb_p95": 409.42, "ttfb_p99": 629.52, "dur_p95": 1940.0, "err_pct": 0.0, "admin_p95": null, "complete_pct": 100.0, "checks_pct": 100.0, "cpu": 1.171, "mem": 440.0, "bw": 67.2, "pass": true, "verdict": "PASS", "verdict_reason": "脚本阈值通过", "evidence": "exact"}, {"job": "k6-stage-1400", "ts": "2026-10-26T11:49:21Z", "vus": 1400, "replicas": 2, "mode": "public-url", "target": "https://perf.likha.hk", "rps": 732.923451, "ttfb_p50": 340.91, "ttfb_p95": 498.07, "ttfb_p99": 694.42, "dur_p95": 2000.0, "err_pct": 0.0, "admin_p95": null, "complete_pct": 100.0, "checks_pct": 100.0, "cpu": 1.26, "mem": 447.0, "bw": 72.0, "pass": true, "verdict": "PASS", "verdict_reason": "脚本阈值通过", "evidence": "exact"}, {"job": "k6-stage-1500", "ts": "2026-10-26T11:52:10Z", "vus": 1500, "replicas": 2, "mode": "public-url", "target": "https://perf.likha.hk", "rps": 782.151873, "ttfb_p50": 341.24, "ttfb_p95": 494.41, "ttfb_p99": 722.11, "dur_p95": 2009.9999999999998, "err_pct": 0.0, "admin_p95": null, "complete_pct": 100.0, "checks_pct": 100.0, "cpu": 1.328, "mem": 479.0, "bw": 76.8, "pass": true, "verdict": "PASS", "verdict_reason": "脚本阈值通过", "evidence": "exact"}, {"job": "k6-stage-1600", "ts": "2026-10-26T11:55:00Z", "vus": 1600, "replicas": 2, "mode": "public-url", "target": "https://perf.likha.hk", "rps": 824.556541, "ttfb_p50": 342.12, "ttfb_p95": 669.16, "ttfb_p99": 908.69, "dur_p95": 2120.0, "err_pct": 0.0, "admin_p95": null, "complete_pct": 100.0, "checks_pct": 100.0, "cpu": 1.408, "mem": 496.0, "bw": 80.0, "pass": true, "verdict": "PASS", "verdict_reason": "脚本阈值通过", "evidence": "exact"}, {"job": "k6-stage-1700", "ts": "2026-10-26T11:57:44Z", "vus": 1700, "replicas": 2, "mode": "public-url", "target": "https://perf.likha.hk", "rps": 872.024011, "ttfb_p50": 342.99, "ttfb_p95": 595.38, "ttfb_p99": 833.33, "dur_p95": 2100.0, "err_pct": 0.0, "admin_p95": null, "complete_pct": 100.0, "checks_pct": 100.0, "cpu": 1.48, "mem": 519.0, "bw": 88.0, "pass": true, "verdict": "PASS", "verdict_reason": "脚本阈值通过", "evidence": "exact"}, {"job": "k6-stage-1800", "ts": "2026-10-26T12:00:49Z", "vus": 1800, "replicas": 2, "mode": "public-url", "target": "https://perf.likha.hk", "rps": 749.18656, "ttfb_p50": 345.47, "ttfb_p95": 712.22, "ttfb_p99": 953.8, "dur_p95": 2220.0, "err_pct": 0.03360581289736603, "admin_p95": null, "complete_pct": 99.96639418710264, "checks_pct": 99.96639418710264, "cpu": 1.547, "mem": 554.0, "bw": 73.6, "pass": true, "verdict": "PASS", "verdict_reason": "脚本阈值通过", "evidence": "exact"}, {"job": "k6-stage-1900", "ts": "2026-10-26T12:04:05Z", "vus": 1900, "replicas": 2, "mode": "public-url", "target": "https://perf.likha.hk", "rps": 740.597934, "ttfb_p50": 350.67, "ttfb_p95": 718.06, "ttfb_p99": 1000.0, "dur_p95": 2410.0, "err_pct": 0.11972274732199117, "admin_p95": null, "complete_pct": 99.88027725267801, "checks_pct": 99.88027725267801, "cpu": 1.617, "mem": 557.0, "bw": 72.8, "pass": false, "verdict": "FAIL", "verdict_reason": "error_rate, integrity", "evidence": "exact"}];
+const tip = document.getElementById('tip');
+let pinned = false;
+function f(v, n, suf) {
+  if (v === null || v === undefined) return '\u2014';
+  return Number(v).toFixed(n) + (suf || '');
+}
+function head(r) {
+  const cls = r.verdict === 'PASS' ? 'ok' : (r.verdict === 'FAIL' ? 'bad' : 'pending');
+  let label = { INCOMPLETE: '数据不完整', UNASSESSED: '待评估' }[r.verdict] || r.verdict;
+  if (r.evidence === 'legacy' && r.verdict === 'PASS') label = 'PASS·旧口径';
+  return '<div class="tip-h">' + r.job + ' <span class="badge ' + cls + '">'
+    + label + '</span></div>';
+}
+function card(i) {
+  const r = RUNS[i];
+  return head(r) + '<table class="tip-t">'
+    + '<tr><td>\u573a\u666f / \u5e76\u53d1</td><td>' + r.mode + ' \u00b7 ' + r.vus + ' VU</td></tr>'
+    + '<tr><td>RPS</td><td>' + f(r.rps, 1) + '</td></tr>'
+    + '<tr><td>\u9996\u5b57 P95 / P99</td><td>' + f(r.ttfb_p95, 0) + ' / ' + f(r.ttfb_p99, 0) + ' ms</td></tr>'
+    + '<tr><td>\u9519\u8bef\u7387</td><td>' + f(r.err_pct, 3) + '%</td></tr>'
+    + '<tr><td class="hint">\u5355\u51fb\u67e5\u770b\u5b8c\u6574\u660e\u7ec6</td><td></td></tr></table>';
+}
+function detail(i) {
+  const r = RUNS[i];
+  return head(r) + '<table class="tip-t">'
+    + '<tr><td>\u8fd0\u884c\u65f6\u95f4</td><td>' + r.ts + '</td></tr>'
+    + '<tr><td>\u573a\u666f / \u8def\u5f84</td><td>' + r.mode + ' \u00b7 ' + r.target + '</td></tr>'
+    + '<tr><td>\u5e76\u53d1 / \u526f\u672c</td><td>' + r.vus + ' VU / ' + r.replicas + ' \u526f\u672c</td></tr>'
+    + '<tr><td>\u541e\u5410 RPS</td><td><b>' + f(r.rps, 1) + '</b></td></tr>'
+    + '<tr><td>\u9996\u5b57 P50/P95/P99</td><td>' + f(r.ttfb_p50, 0) + ' / ' + f(r.ttfb_p95, 0) + ' / ' + f(r.ttfb_p99, 0) + ' ms</td></tr>'
+    + '<tr><td>\u7aef\u5230\u7aef P95</td><td>' + f(r.dur_p95, 0) + ' ms</td></tr>'
+    + '<tr><td>\u9519\u8bef\u7387 / checks</td><td>' + f(r.err_pct, 3) + '% / ' + f(r.checks_pct, 2) + '%</td></tr>'
+    + '<tr><td>CPU / \u5185\u5b58\u5cf0\u503c</td><td>' + f(r.cpu, 2) + ' \u6838 / ' + f(r.mem, 0) + ' Mi</td></tr>'
+    + '<tr><td>\u4e0b\u884c</td><td>' + f(r.bw, 2) + ' Mbps</td></tr></table>';
+}
+function place(ev) {
+  const pad = 16, w = tip.offsetWidth, h = tip.offsetHeight;
+  let x = ev.clientX + pad, y = ev.clientY + pad;
+  if (x + w > window.innerWidth - 8) x = ev.clientX - w - pad;
+  if (y + h > window.innerHeight - 8) y = ev.clientY - h - pad;
+  tip.style.left = x + 'px'; tip.style.top = y + 'px';
+}
+document.querySelectorAll('circle.pt').forEach(function (el) {
+  const i = Number(el.dataset.i);
+  el.addEventListener('mouseenter', function (ev) {
+    if (pinned) return;
+    tip.innerHTML = card(i); tip.hidden = false; place(ev);
+  });
+  el.addEventListener('mousemove', function (ev) { if (!pinned) place(ev); });
+  el.addEventListener('mouseleave', function () { if (!pinned) tip.hidden = true; });
+  el.addEventListener('click', function (ev) {
+    ev.stopPropagation();
+    pinned = true;
+    tip.innerHTML = detail(i); tip.hidden = false; place(ev);
+  });
+});
+document.addEventListener('click', function () { pinned = false; tip.hidden = true; });
+document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') { pinned = false; tip.hidden = true; } });
+</script>
+</body></html>
