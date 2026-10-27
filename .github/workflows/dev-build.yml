@@ -1,23 +1,35 @@
 name: dev-build
 
-# 雅加达 dev 环境发布流水线（GitOps）
+# 雅加达 dev 环境发布流水线（GitOps）—— **已降级为手动触发，仅作个人测试**
 #
-# 链路：push develop → 构建镜像 → 推马尼拉 ACR → 回写 ops 仓（写 digest）→ ArgoCD 收敛
+# 链路（手动跑时仍然有效）：构建镜像 → 推马尼拉 ACR → 回写 ops 仓（写 digest）→ 若 ArgoCD 还认这个仓则收敛
 # 真源：new-api-yxw-ops/overlays/jkt-dev/kustomization.yaml
+#
+# ★ 正式链路在 ZYKJ-1688/new-api-likha：那份 workflow 的结构与本文件一致（含踩过的坑的修复）。
+#   改流水线逻辑时**两边同步**，不要把这边当成主战场。
 #
 # 三条红线：
 #   1. 绝不用 tag 触发（本仓 release.yml 监听 tags:'*'，打 tag 会启动三平台二进制构建）
 #   2. 绝不把 kubeconfig 放进 CI（CI 不认识集群，只改 Git）
 #   3. ops 回写失败必须让 job 红（否则「镜像推了但没部署」是最难查的静默失败）
 
+# ⚠️ 2026-10-27 变更：本仓降级为**个人测试仓**，dev 环境的 GitOps 正式链路已迁到
+#    ZYKJ-1688/new-api-likha（业务） + ZYKJ-1688/new-api-likha-ops（清单）。
+#    ArgoCD 的 Application `jkt-dev` 已把源切到 likha-ops，**不再读本仓写的 yxw-ops**。
+#    所以本 workflow 的自动触发已关闭 —— 再自动构建只会写出「看着像部署、实际不生效」的 commit。
+#    仍然保留手动触发，方便在本仓单独验证流水线改动。
+
 on:
-  push:
-    branches: [develop]
-    paths-ignore:
-      - '**/*.md'
-      - 'deploy/**'
-      - 'docs/**'
+  # 自动触发已停用（原因见文件头）。恢复方式：取消下面 5 行的注释。
+  # push:
+  #   branches: [develop]
+  #   paths-ignore:
+  #     - '**/*.md'
   workflow_dispatch:
+    inputs:
+      reason:
+        description: '为什么手动跑（留痕用）'
+        required: false
 
 permissions:
   contents: read
