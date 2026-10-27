@@ -1,0 +1,173 @@
+name: dev-build
+
+# 雅加达 dev 环境发布流水线（GitOps）
+#
+# 链路：push develop → 构建镜像 → 推马尼拉 ACR → 回写 ops 仓（写 digest）→ ArgoCD 收敛
+# 真源：new-api-yxw-ops/overlays/jkt-dev/kustomization.yaml
+#
+# 三条红线：
+#   1. 绝不用 tag 触发（本仓 release.yml 监听 tags:'*'，打 tag 会启动三平台二进制构建）
+#   2. 绝不把 kubeconfig 放进 CI（CI 不认识集群，只改 Git）
+#   3. ops 回写失败必须让 job 红（否则「镜像推了但没部署」是最难查的静默失败）
+
+on:
+  push:
+    branches: [develop]
+    paths-ignore:
+      - '**/*.md'
+      - 'deploy/**'
+      - 'docs/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dev-build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ACR_NAMESPACE: newapi-dev
+  ACR_REPO: newapi-master
+  OPS_REPO: yanxuewei/new-api-yxw-ops
+  OPS_ENV: jkt-dev
+  SMOKE_URL: https://dev.likha.hk/api/status
+
+jobs:
+  build-push:
+    name: Build & push image
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      digest: ${{ steps.push.outputs.digest }}
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 1
+
+      - name: Compute tag
+        id: meta
+        run: |
+          TAG="dev-$(date -u +%Y%m%d)-$(git rev-parse --short=7 HEAD)"
+          IMAGE="${{ secrets.ACR_REGISTRY }}/${ACR_NAMESPACE}/${ACR_REPO}"
+          echo "tag=$TAG"     >> "$GITHUB_OUTPUT"
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+          echo "TAG=$TAG"     >> "$GITHUB_ENV"
+          echo "### 本次构建" >> "$GITHUB_STEP_SUMMARY"
+          echo "- tag: \`$TAG\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- repo: \`$IMAGE\`" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Stamp VERSION（镜像内版本号，供 /api/status 反查）
+        # 上游 Dockerfile 从 ./VERSION 读版本（COPY ./VERSION /build/VERSION + go build -ldflags）。
+        # 仓库里这个文件是空的 ⇒ 不注入就永远查不到线上跑的是哪个 commit（impl_tech §6.6 硬性约束 3）。
+        run: echo "$TAG" > VERSION
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Login ACR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ${{ secrets.ACR_REGISTRY }}
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
+
+      - name: Build & push
+        id: push
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ steps.meta.outputs.tag }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          cache-from: type=gha,scope=devbuild
+          cache-to: type=gha,mode=max,scope=devbuild
+
+      - name: Trivy scan (report only)
+        # dev 阶段不阻断（历史基础镜像漏洞未清完）；CRITICAL 数量写进 summary 供跟踪。
+        # T5 之后把 exit-code 改成 1 并加 --ignore-unfixed。
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ steps.meta.outputs.image }}@${{ steps.push.outputs.digest }}
+          format: table
+          severity: CRITICAL
+          exit-code: "0"
+
+      - name: Summary
+        run: |
+          echo "- digest: \`${{ steps.push.outputs.digest }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- 推送完成，下一步回写 ops 仓" >> "$GITHUB_STEP_SUMMARY"
+
+  bump-ops:
+    name: Bump ops repo (jkt-dev)
+    needs: build-push
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Clone ops repo
+        env:
+          OPS_REPO_TOKEN: ${{ secrets.OPS_REPO_TOKEN }}
+        run: |
+          git clone --depth 1 "https://x-access-token:${OPS_REPO_TOKEN}@github.com/${OPS_REPO}.git" ops
+
+      - name: Set image digest
+        working-directory: ops
+        env:
+          DIGEST: ${{ needs.build-push.outputs.digest }}
+          IMAGE: ${{ needs.build-push.outputs.image }}
+          TAG: ${{ needs.build-push.outputs.tag }}
+        run: |
+          # 只写 digest（内容寻址），不写 tag（tag 可被覆盖，回滚时不可靠）
+          bash scripts/set-image.sh "$OPS_ENV" "${IMAGE}@${DIGEST}"
+          git diff --stat
+
+      - name: Commit & push
+        working-directory: ops
+        env:
+          OPS_REPO_TOKEN: ${{ secrets.OPS_REPO_TOKEN }}
+          TAG: ${{ needs.build-push.outputs.tag }}
+          DIGEST: ${{ needs.build-push.outputs.digest }}
+        run: |
+          git config user.name  "gitops-bot"
+          git config user.email "gitops-bot@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "manifest 无变化，跳过提交"
+            exit 0
+          fi
+          git commit -m "chore(${OPS_ENV}): ${TAG} (src=${GITHUB_SHA:0:7})"
+          # 禁止 force push：被并发发布抢先就 rebase 后重推
+          git pull --rebase --autostash origin main || true
+          git push origin HEAD:main
+
+  smoke:
+    name: Smoke (non-blocking)
+    needs: [build-push, bump-ops]
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    continue-on-error: true
+    steps:
+      - name: Wait for ArgoCD rollout then check version
+        env:
+          TAG: ${{ needs.build-push.outputs.tag }}
+        run: |
+          for i in $(seq 1 14); do
+            code=$(curl -s -o /tmp/status.json -w '%{http_code}' -m 10 "$SMOKE_URL" || true)
+            if [ "$code" = "200" ]; then
+              if grep -q "$TAG" /tmp/status.json; then
+                echo "✓ 已看到新版本 $TAG"
+                exit 0
+              fi
+            fi
+            sleep 20
+          done
+          echo "::warning::4.5 分钟内未在 /api/status 看到 $TAG（ArgoCD 轮询 3min + 滚动 30s，可再等等）"
