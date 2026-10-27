@@ -230,3 +230,65 @@ cd /e/git_code/new-api-yxw-ops && git revert <commit> && git push
 | Application revision | `d25b028` |
 | ArgoCD Ingress order | `60`（dev 现有：1/2/3/4/50/51/52/53） |
 | 节点 | `10.2.25.190`(5a) / `10.2.36.198`(5b) / `10.2.90.173`(5c) |
+
+---
+
+## 9. 补记 · 2026-10-27：CI 闭环打通
+
+### 9.1 结果：端到端跑通
+
+```
+push develop (c3a96e62e)
+  → dev-build run 40444294566 success（约 5 min，GHA 缓存后）
+  → ACR: newapi-dev/newapi-master:dev-20261027-c3a96e6 @ sha256:dab54390…
+  → ops 仓自动 commit: cf21ae9 "chore(jkt-dev): dev-20261027-c3a96e6 (src=c3a96e6)"
+  → ArgoCD: Synced + Healthy, rev=cf21ae9
+  → 线上 /api/status: {"version":"dev-20261027-c3a96e6"} ✅
+```
+
+**V4 / V7 / V10 验收通过**：一次合并 → 自动上线 → 版本可反查，全程无人工 kubectl。
+
+### 9.2 ACR 密码来源（fanyan 提供）
+
+在 `/home/fanyan/.bashrc`（第 285–286 行）：
+
+```bash
+export ACR_USER=...
+export ACR_PASSWORD="..."   # 12 位
+```
+
+⚠️ **两个认知修正**：
+
+1. 变量在 **fanyan** 用户下、且 `.bashrc` 属非交互守卫范围 ⇒ `wsl -u root bash -c` 读不到；
+   必须 `bash -lc` 或用脚本解析 `.bashrc` 文件本身。
+2. **ACR EE 走 Bearer token 流程**：`GET /v2/` 带 Basic 凭据**必然 401**（返回
+   `WWW-Authenticate: Bearer realm="https://dockerauth-ap-southeast-6.aliyuncs.com/auth"`）。
+   验证凭据正确姿势是打 token 端点：
+
+   ```bash
+   curl -u "$ACR_USER:$ACR_PASSWORD" \
+     "https://dockerauth-ap-southeast-6.aliyuncs.com/auth?service=registry.aliyuncs.com:ap-southeast-6:international:cri-avfqy9xkqi5bj8ee&scope=repository:newapi-dev/newapi-master:pull"
+   ```
+   返回 JSON 含 `token` 即为有效。**不要用 `/v2/` 的 401 判断密码错。**
+
+### 9.3 新踩的 4 个坑
+
+| # | 现象 | 根因 | 修法 |
+|---|---|---|---|
+| **K7** | dev-build 在 `Set up job` 3 秒失败 | `aquasecurity/trivy-action@0.28.0` —— tag **必须带 `v` 前缀**（`v0.36.0`），否则 `Unable to resolve action` | 改为 pin commit SHA `ed142fd…` (v0.36.0)，同时满足「action 必须 pin SHA」的规范 |
+| **K8** | 新 Pod `ImagePullBackOff`，事件里镜像变成 `docker.io/library/newapi-master@sha256:…` | `needs.build-push.outputs.image` 传过去是**空串** ⇒ `set-image.sh` 收到 `@sha256:…` ⇒ `newName:` 被写空 ⇒ kustomize 渲染出裸名 ⇒ kubelet 去 docker.io 找 | ① bump-ops job 用 `secrets.ACR_REGISTRY + env` 自拼，并校验含 `aliyuncs.com` ② `set-image.sh` 增加「repo 为空/非三段地址即拒绝」防呆 ③ `kubectl get events` 是第一现场，一眼能看出名字退化了 |
+| **K9** | ops 仓 `verify` 两次 failure，日志里没有任何脚本输出 | GitHub 额度/账单：`The job was not started because recent account payments have failed or your spending limit needs to be increased` | **需 fanyan 在 GitHub Billing 处理**；这类失败不会消耗 runner，job 直接不启动，日志为空白，很容易误判成 workflow 写错 |
+| **K10** | （正向）`/api/status` 的 `version` 生效 | CI 里 `echo "$TAG" > VERSION` + 上游 Dockerfile 的 `-ldflags -X ...common.Version=$(cat VERSION)` | 补上了 `impl_tech.md` §6.6 硬性约束 3 的缺口（R-02）：线上版本从 tag 可反查 |
+
+### 9.4 新增工具
+
+| 脚本 | 用途 |
+|---|---|
+| `deploy/gitops/bootstrap/verify-e2e.sh` | 一条命令跑完「CI run → ops commit → overlay digest → ArgoCD → 线上 version」五段验收；判据是第 5 段的 version 必须等于第 1 段的 head sha7 |
+
+### 9.5 仍待办
+
+1. **GitHub Billing**（K9）—— 不处理的话 ops 仓门禁随时failure。
+2. **T4**：`selfHeal → true`（现在仍是 `false`，手工 `kubectl set image` 不会被拉回）。
+3. **T5**：`prune → true`；trivy `exit-code → 1`。
+4. `OPS_REPO_TOKEN` 换细粒度 PAT。
