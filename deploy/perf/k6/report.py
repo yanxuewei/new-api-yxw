@@ -159,8 +159,11 @@ def parse_summary(text: str) -> dict:
     return out
 
 
-STEADY_MODES = {"clusterip", "clusterip-dual", "clusterip-shard", "public-url"}
-CAPACITY_MODES = STEADY_MODES - {"public-url"}
+STEADY_MODES = {"clusterip", "clusterip-dual", "clusterip-shard", "public-url",
+                "clusterip-arrival", "public-arrival"}
+# 开环档的横轴是「目标 rps」而不是 VU ⇒ 不参与按 VU 的容量拟合，但沿用同一套 SLO 判定
+ARRIVAL_MODES = {"clusterip-arrival", "public-arrival"}
+CAPACITY_MODES = STEADY_MODES - {"public-url"} - ARRIVAL_MODES
 
 
 def evaluate_run(run: dict, text: str) -> None:
@@ -218,7 +221,8 @@ def evaluate_run(run: dict, text: str) -> None:
         reasons.append("error_rate")
     if any(v >= latency_limit for v in latencies):
         reasons.append("latency")
-    if is_admin and run["dropped_iterations"] > 0:
+    if (is_admin or mode in ARRIVAL_MODES) and run["dropped_iterations"] > 0:
+        # 开环档的 dropped 表示客户端发不出目标 rps，≠ 服务端失败；仍单列原因便于区分
         reasons.append("dropped_iterations")
     integrity = run["checks_counts"] if is_admin else run["complete_counts"]
     integrity_valid = (len(integrity) == count
@@ -322,7 +326,9 @@ def load_runs(paths: list[str], eip_mbps: float = 0.0) -> list[dict]:
                 if not math.isfinite(value) or value < 0:
                     raise ValueError("invalid numeric metadata")
                 if key in {"vus_i", "replicas_i"}:
-                    if not value.is_integer() or value <= 0:
+                    # 开环（constant-arrival-rate）没有 VU 轴 ⇒ 允许 vus=0；其它场景仍必须 >0
+                    arrival = str(meta.get("method", "")).startswith("constant-arrival")
+                    if not value.is_integer() or value < 0 or (value == 0 and not (key == "vus_i" and arrival)):
                         raise ValueError("invalid topology metadata")
                     value = int(value)
                 run[key] = value / 1000 if key == "cpu_cores" else value

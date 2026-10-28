@@ -1,0 +1,67 @@
+[i] 动态选定节点=i-k1afs8wedv35rai4pmx2（DescribeClusterNodes 现取，未写死）
+[i] 取 15 分钟临时私网 kubeconfig
+[i] server=    server: https://10.2.25.173:6443  节点=i-k1afs8wedv35rai4pmx2  RUN_ID=1793149397-127185-24770
+[i] InvokeId=t-ida71ctbjvcdmo0
+----- 节点内输出（status=Success）-----
+=== target=perf-new-api-slave (clusterip-arrival)  总目标=200 rps  shards=2  dur=30s
+=== 生效：mode=clusterip-arrival replicas=2
+=== 下发分片 Job（基础 rate=100/s，前 0 片各 +1）
+  shard-0 -> 100 rps（preAllocated=200 max=400）
+  shard-1 -> 100 rps（preAllocated=200 max=400）
+=== 等待所有分片
+  all_done=1 cpu_peak_sum=204m cpu_peak_pod=114m mem_peak_sum=147Mi pods=2 samples=34
+===RUN_META===
+target=perf-new-api-slave x2
+base=http://172.23.2.189
+mode=clusterip-arrival
+vus=0
+rate=200
+dur=30s
+cpu_peak_m=204
+cpu_max_pod_m=114
+mem_peak_mi=147
+mem_max_pod_mi=90
+pods_peak=2
+sample_rows=34
+token_mode=multi
+method=constant-arrival-rate
+load_config=k6-0.54.0:sse_arrival.js@c79a15840638:const-arrival-rate:model=mock-gpt:shards=2
+mock_config=first_token_delay_ms=300,token_interval_ms=30,tokens_per_response=50,token_text_bytes=12,error_rate=0,error_status=500,extra_latency_ms=0
+replicas_before=
+replicas=2
+job=k6-arr-0..1
+ts=2026-10-28T01:04:42Z
+images=mock-upstream=acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com/newapi-dev/mock-upstream:20261019-4788bec2e;perf-new-api-master=acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com/newapi-dev/newapi-master:20261015-c62445555;perf-new-api-slave=acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com/newapi-dev/newapi-master:20261015-c62445555;
+summary_schema=2
+shards=2
+k6_exit_codes=0,0
+===END_META===
+----- shard-0
+     checks.........................: 100.00% 6000 out of 6000
+   ✓ dropped_iterations.............: 0       0/s
+     http_req_connecting............: avg=55.17µs  min=0s      med=0s       p(90)=0s       p(95)=746.32µs p(99)=853.83µs max=5.09ms  
+     http_req_duration..............: avg=1.83s    min=1.82s   med=1.83s    p(90)=1.84s    p(95)=1.84s    p(99)=1.85s    max=1.86s   
+   ✓ http_req_failed................: 0.00%   0 out of 3000
+     http_req_receiving.............: avg=1.5s     min=1.48s   med=1.5s     p(90)=1.51s    p(95)=1.51s    p(99)=1.51s    max=1.52s   
+     http_req_sending...............: avg=14.95µs  min=9.46µs  med=12.64µs  p(90)=21.63µs  p(95)=31.12µs  p(99)=42.44µs  max=158.78µs
+     http_req_tls_handshaking.......: avg=0s       min=0s      med=0s       p(90)=0s       p(95)=0s       p(99)=0s       max=0s      
+     http_req_waiting...............: avg=335.95ms min=332.5ms med=335.65ms p(90)=338.59ms p(95)=339.61ms p(99)=343.73ms max=348.32ms
+     ✓ { type:sse }.................: avg=335.95ms min=332.5ms med=335.65ms p(90)=338.59ms p(95)=339.61ms p(99)=343.73ms max=348.32ms
+     http_reqs......................: 3000    94.251401/s
+   ✓ sse_complete...................: 100.00% 3000 out of 3000
+     vus_max........................: 200     min=200          max=200
+----- shard-1
+     checks.........................: 100.00% 6002 out of 6002
+   ✓ dropped_iterations.............: 0       0/s
+     http_req_connecting............: avg=57.04µs  min=0s       med=0s       p(90)=0s       p(95)=757.44µs p(99)=850.3µs  max=5.45ms 
+     http_req_duration..............: avg=1.83s    min=1.82s    med=1.83s    p(90)=1.84s    p(95)=1.84s    p(99)=1.85s    max=1.86s  
+   ✓ http_req_failed................: 0.00%   0 out of 3001
+     http_req_receiving.............: avg=1.5s     min=1.48s    med=1.49s    p(90)=1.5s     p(95)=1.51s    p(99)=1.51s    max=1.52s  
+     http_req_sending...............: avg=17.27µs  min=9.41µs   med=12.53µs  p(90)=21.7µs   p(95)=29.67µs  p(99)=42.97µs  max=7.22ms 
+     http_req_tls_handshaking.......: avg=0s       min=0s       med=0s       p(90)=0s       p(95)=0s       p(99)=0s       max=0s     
+     http_req_waiting...............: avg=336.13ms min=332.47ms med=336.19ms p(90)=338.68ms p(95)=339.28ms p(99)=342.92ms max=349.9ms
+     ✓ { type:sse }.................: avg=336.13ms min=332.47ms med=336.19ms p(90)=338.68ms p(95)=339.28ms p(99)=342.92ms max=349.9ms
+     http_reqs......................: 3001    94.26571/s
+   ✓ sse_complete...................: 100.00% 3001 out of 3001
+     vus_max........................: 200     min=200          max=200
+runner_rc=0

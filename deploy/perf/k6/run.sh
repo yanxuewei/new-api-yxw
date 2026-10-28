@@ -6,6 +6,7 @@
 #
 # usage:
 #   bash deploy/perf/k6/run.sh stage <target-svc|url> <vus> <duration>                 # 单档，如 stage perf-new-api-slave 300 120s
+#   bash deploy/perf/k6/run.sh arrival <target-svc|url> <total-rps> [dur] [shards] [reps] # 开环到达率（回答"网关能接多少 QPS"），默认 120s / 3 分片
 #   bash deploy/perf/k6/run.sh sweep <target-svc|url> [reps] [start] [step] [max] [dur] # 固定副本数逐档扫描，默认 1 副本、400 起、+100、上限2000、每档120s
 #   bash deploy/perf/k6/run.sh ramp  <target-svc> [start] [step] [max] [duration]      # 阶梯递增找瓶颈，默认 300→3000 步长300 每阶段90s
 #   bash deploy/perf/k6/run.sh ladder <target-svc> [start] [step] [max] [dur] [reps]     # 副本阶梯：1 副本压到瓶颈→扩到 2 副本同参数重压（默认 reps=1,2）
@@ -84,7 +85,7 @@ run_body() {
   umask 077
   local full cm=""
   case "$body" in
-    stage.sh|dual1500.sh|sharded.sh|scenario.sh)
+    stage.sh|dual1500.sh|sharded.sh|arrival.sh|scenario.sh)
       cm=$(script_cm)
       echo "[perf-k6] 下发脚本 ConfigMap：$cm"
       install_script_configmap "$cm" || { echo "[!] 脚本下发失败，终止"; return 2; } ;;
@@ -137,9 +138,15 @@ run_body() {
       python3 "$HERE/report.py" "${DIRS[@]}" --out "$AGG" --eip-mbps "${EIP_MBPS:-100}" || true
       cp -f "$AGG" "$REPORT_DIR/perf_report_ALL_latest.html" 2>/dev/null || true
       echo "[perf-k6] 完整报告：$AGG（副本 $REPORT_DIR/perf_report_ALL_latest.html）" ;;
+    arrival_*)
+      # 开环档只出单次报告、不并入 ALL：横轴是 rps 而不是 VU，混进 VU 曲线会误导
+      safe=$(printf '%s' "${DESC:-$tag}" | tr -c 'A-Za-z0-9._-' '-' | sed 's/--*/-/g;s/-*$//')
+      local html="$run_dir/perf_report_${safe}_${run_ts}.html"
+      python3 "$HERE/report.py" --logs "$log" --out "$html" --json "$run_dir/${run_ts}-${tag}.json" --eip-mbps "${EIP_MBPS:-100}" || true
+      echo "[perf-k6] 本次报告：$html（开环档不并入 ALL）" ;;
   esac
   case "$body" in
-    stage.sh|dual1500.sh|sharded.sh|scenario.sh)
+    stage.sh|dual1500.sh|sharded.sh|arrival.sh|scenario.sh)
       local verdict check_rc=0
       verdict=$(python3 "$HERE/report.py" --check "$log" --eip-mbps "${EIP_MBPS:-100}" 2>&1) || check_rc=$?
       printf '%s\n' "$verdict"
@@ -346,5 +353,14 @@ case "$ACTION" in
     M="${1:-13}"
     K6JS_FILE="$HERE/s9_long.js"; DESC="s9-long-${M}min"
     run_body scenario.sh "s9_${M}" "MODE=long" "MIN=$M" "BASE_URL=${BASE_URL:-https://perf.likha.hk}" ;;
-  *) echo "[!] 未知动作：$ACTION（stage|ramp|ladder|dual1500|summary|readback）"; exit 2 ;;
+  arrival)
+    # 开环到达率：按目标 rps 发请求，不受单请求耗时反压 ⇒ 才能回答"网关能接多少 QPS"
+    TGT="${1:?arrival 需要 <target-svc|url>}"; R="${2:?arrival 需要 <总目标 rps>}"
+    D="${3:-120s}"; N="${4:-3}"
+    K6JS_FILE="$HERE/sse_arrival.js"
+    DESC="arrival-${TGT//[^a-zA-Z0-9]/_}-${R}rps-dur${D}-s${N}"
+    ARGS=("TARGET_SVC=$TGT" "TOTAL_RATE=$R" "DUR=$D" "SHARDS=$N")
+    [ -n "${5:-}" ] && ARGS+=("REQ_REPLICAS=$5")
+    run_body arrival.sh "arrival_${R}" "${ARGS[@]}" ;;
+  *) echo "[!] 未知动作：$ACTION（stage|arrival|sweep|ramp|ladder|dual1500|shard|summary|readback）"; exit 2 ;;
 esac

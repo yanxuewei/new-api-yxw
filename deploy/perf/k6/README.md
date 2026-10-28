@@ -11,6 +11,7 @@
 | `run.sh` | 本机 | 入口：打包 `sse.js` + 动作体，投递到节点执行 |
 | `bodies/stage.sh` | 节点 | 单档压测（恒定 VU × DUR），采 CPU 峰值并打印摘要；`REQ_REPLICAS` 可先 scale 再压 |
 | `bodies/dual1500.sh` | 节点 | 双副本并行（master/slave 各 `VUS_EACH`，默认 750+750=1500） |
+| `bodies/arrival.sh` | 节点 | **开环**到达率：N 分片各跑 `constant-arrival-rate`（脚本 `sse_arrival.js`），分片切的是 rps 不是 VU |
 | `bodies/scale.sh` | 节点 | 只调副本数并等就绪（压测后恢复现场） |
 | `bodies/summary.sh` | 节点 | 打印 k6 Job 摘要（不传参=最近 3 个） |
 | `bodies/readback.sh` | 节点 | 只读回读：副本/CPU/mock 指标/Service 端点/DNS 自检 |
@@ -33,6 +34,10 @@ bash deploy/perf/k6/run.sh scale 2
 
 # 1500 并发验收（双副本并行）
 bash deploy/perf/k6/run.sh dual1500            # 默认 750+750 × 120s
+
+# 开环到达率：回答"网关能接多少 QPS"（不受单请求耗时反压）
+bash deploy/perf/k6/run.sh arrival perf-new-api-slave 800 120s 3   # 800 rps 总目标 / 3 分片
+bash deploy/perf/k6/run.sh arrival https://perf.likha.hk 800 120s 3 2  # 第 5 参 = 副本数
 bash deploy/perf/k6/run.sh dual1500 900 90s   # 也可自定义每副本 VU 与时长
 
 # 看结果
@@ -63,6 +68,8 @@ kubectl label node <node3> perf-role=load    --overwrite
 - **首字延迟 = `http_req_waiting`（TTFB 代理）**：k6 不做半流式读取，SSE 下响应头+首块几乎同时到达，可作近似；毫秒级 P95 由 k6 统计，节点侧只做秒级粗验。
 - **稳态判据**：请求失败率 `< 0.05%`、`P95 TTFB < 800ms`、完整流成功率 `> 99.95%`，等于边界也不通过。完整流须 HTTP 200、包含成功 `finish_reason`、随后收到完整 `[DONE]` 事件，不能只有网关补发的结束标记。
 - **其他场景**：突发场景为 P95 `< 1500ms`、失败率 `< 1%`、完整流成功率 `> 99%`；管理面为 `type:admin` 端到端 P95 `< 1000ms`、失败率 `< 1%`、业务成功 checks `> 99%`，且不能丢弃计划迭代。突发汇总通过不代表已验证恢复时间。
+- **开环 `arrival` 判据分两层**：`dropped_iterations > 0` ⇒ 客户端发不出目标 rps（工具容量不足，不是服务端问题）；`http_req_failed > 0.05%` / `sse_complete` 掉 ⇒ 服务端接不住。开环报告只出单次 HTML，**不并入** `perf_report_ALL_latest.html`（横轴是 rps，不是 VU）。
+- **闭环 RPS 是算术量**：`RPS ≈ VU ÷ 单次请求耗时`。比较副本扩展性必须固定「每副本并发」（如 2 副本×750 VU vs 1 副本×750 VU），否则测到的只是延迟差异；推导见 `../瓶颈分析.md` §十五。
 - **四态判定**：`PASS`（通过）、`FAIL`（已知指标失败）、`INCOMPLETE`（执行异常/数据不完整）、`UNASSESSED`（尚无专属验收标准）。旧日志（无 `summary_schema`）若 `checks=2×http_reqs` 且全部在错误预算内，标为 `PASS·旧口径`：只证明 HTTP 200 且响应含 `[DONE]`，不含 `finish_reason` 与退出码，也不参与容量拟合；无法逐请求核对时仍为 `INCOMPLETE`。`degrade`、`rolling`、`long` 暂为待评估。
 - **资源采样**：每 5s 逐 Pod 记录 `时刻/Pod/CPU/内存`，结束后按同一时刻求和得到**全副本合计峰值**，另存单 Pod 峰值与采样到的 Pod 数；原始序列落到 `<run>/*.samples.tsv`，日志只保留可解析摘要。
 - **配置快照**：`load_config`（k6 版本 + 脚本 SHA + executor/model）、`mock_config`（各副本 `/__state` 一致才记录，否则 `changed`/`mixed`/`unavailable`）、`images`（网关与 mock）；任一项缺失或不可信时禁止容量拟合。
