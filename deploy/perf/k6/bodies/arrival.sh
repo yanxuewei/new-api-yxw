@@ -45,7 +45,9 @@ echo "=== 下发分片 Job（基础 rate=${BASE_RATE}/s，前 ${REM} 片各 +1�
 for i in $(seq 0 $((SHARDS - 1))); do
   R=$BASE_RATE
   [ "$i" -lt "$REM" ] && R=$((R + 1))
-  PRE=$((R * 2)); MAX=$((R * 4))
+  # 单请求耗时 ≈2.0s（mock 1.8s + 开销）⇒ 需要 rate×2.05 个并发；池子按 3 倍留余量，
+  # 否则 k6 会在运行中临时扩容 VU，扩容窗口里的迭代会被计成 dropped（实测 48/分片）。
+  PRE=$((R * 3)); MAX=$((R * 5))
   kubectl apply -f - >/dev/null <<YAML
 apiVersion: batch/v1
 kind: Job

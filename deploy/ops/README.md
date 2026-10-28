@@ -22,7 +22,7 @@
 # 列出 service_ops 下所有模块（有 Dockerfile 的会标记）
 bash deploy/ops/push.sh --list
 
-# 构建并推送（tag 默认 = 日期-主仓 git 短 sha）
+# 构建并推送（tag 默认 = 日期-时分秒-主仓 git 短 sha，Asia/Shanghai）
 bash deploy/ops/push.sh -n dev --module ~/git_code/service_ops/mock-upstream
 # 指定 tag
 bash deploy/ops/push.sh -n dev --module ~/git_code/service_ops/mock-upstream -t 20261021-hotfix

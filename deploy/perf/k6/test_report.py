@@ -189,7 +189,7 @@ class ReportTests(unittest.TestCase):
         self.assertIn("待评估", doc)
         self.assertIn("数据不完整", doc)
         self.assertIn("无通过档", doc)
-        self.assertIn("没有可用于推测的通过记录", doc)
+        self.assertIn("没有可用于折算的通过记录", doc)
         self.assertIn("副本数量", doc)
         self.assertIn("压测方法", doc)
         self.assertNotIn("Replicas = ceil", doc)
@@ -327,10 +327,12 @@ exit "${FIXTURE_RC:-0}"
         out = self.root / "estimate.html"
         report.render([run], report.analyse([run]), str(out))
         doc = out.read_text()
-        self.assertIn("3 副本（推测）", doc)
-        self.assertIn("最高通过 VU=600", doc)
-        self.assertIn("CPU 0.90 核", doc)
-        self.assertIn("内存 200 MiB", doc)
+        # 只有 1 副本数据 ⇒ 卡片按 ×2 折算并标注“推测”
+        self.assertIn("2 副本最优通过档（推测）", doc)
+        self.assertIn("按 1 副本 VU=600 ×2 折算", doc)
+        self.assertIn("VU=1200", doc)
+        self.assertIn("CPU 1.80 核", doc)
+        self.assertIn("内存 400 MiB", doc)
 
     def test_bottleneck_facts_include_memory_usage(self):
         run = self.run_record(summary(), vus="1700", replicas="1", mem_peak_mi="400")

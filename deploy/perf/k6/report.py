@@ -372,7 +372,8 @@ def analyse(runs: list[dict], eip_mbps: float = 0.0) -> dict:
     if not runs:
         return a
     passing = [r for r in runs if r["pass"]]
-    sse = [r for r in passing if r.get("mode") in STEADY_MODES]
+    # 开环档没有 VU 轴，不能参与「最优通过档 / 容量」这类按 VU 读的卡片与图表
+    sse = [r for r in passing if r.get("mode") in STEADY_MODES and r.get("mode") not in ARRIVAL_MODES]
     adm = [r for r in passing if r.get("mode") == "admin"]
     a["best"] = max(sse, key=lambda r: r["rps"]) if sse else None
     a["best_admin"] = max(adm, key=lambda r: r["rps"]) if adm else None
@@ -450,6 +451,20 @@ def analyse(runs: list[dict], eip_mbps: float = 0.0) -> dict:
                 "basis_replicas": base_rep,
                 "basis_vus": int(per * base_rep),
             }
+    # 2 副本卡片：优先用**实测**的 2 副本通过档；只有 1 副本数据时按 ×2 折算并明确标注
+    a["two_rep"] = None
+    two = [r for r in sse if r["replicas_i"] == 2 and r["vus_i"] > 0]
+    one = [r for r in sse if r["replicas_i"] == 1 and r["vus_i"] > 0]
+    if two:
+        b = max(two, key=lambda r: r["rps"])
+        a["two_rep"] = {"measured": True, "rps": b["rps"], "vus": b["vus_i"],
+                        "p95": b.get("ttfb_p95"), "cpu": b.get("cpu_cores") or 0,
+                        "mem": b.get("mem_mi") or 0, "base_vus": b["vus_i"], "base_rep": 2}
+    elif one:
+        b = max(one, key=lambda r: r["rps"])
+        a["two_rep"] = {"measured": False, "rps": b["rps"] * 2, "vus": b["vus_i"] * 2,
+                        "p95": b.get("ttfb_p95"), "cpu": (b.get("cpu_cores") or 0) * 2,
+                        "mem": (b.get("mem_mi") or 0) * 2, "base_vus": b["vus_i"], "base_rep": 1}
     facts, guesses = [], []
     for i, group in enumerate(groups, 1):
         if group["best"]:
@@ -708,18 +723,21 @@ def render(runs: list[dict], a: dict, out_path: str, eip_mbps: float = 0.0) -> N
 <td>{badge(r["verdict"], r.get("evidence") == "legacy")}<div class="sub">{esc(r["verdict_reason"])}</div></td>
 </tr>'''
     best = a.get("best")
-    verified = "、".join(str(n) for n in a.get("verified_replicas", []))
     replicas_seen = " / ".join(str(n) for n in a.get("replicas_seen", [])) or "—"
     methods = "、".join(a.get("methods", [])) or "—"
-    estimate = a.get("target_estimate")
-    if verified:
-        target_value, target_note = verified, "同条件实测通过；不外推其它配置"
-    elif estimate and best:
-        target_value = f"{estimate['replicas']} 副本（推测）"
-        target_note = (f"按 {estimate['basis_replicas']} 副本最高通过 VU={estimate['basis_vus']} 折算，"
-                       f"约 {estimate['per_replica']:.0f} VU/副本；未实测，仅供参考")
+    tr = a.get("two_rep")
+    if tr:
+        tag = "实测" if tr["measured"] else "推测"
+        sub = (f"VU={tr['vus']} · P95={fmt(tr['p95'], 0)}ms · CPU {fmt(tr['cpu'], 2)} 核 · "
+               f"内存 {fmt(tr['mem'], 0)} MiB")
+        if not tr["measured"]:
+            sub += f"（按 1 副本 VU={tr['base_vus']} ×2 折算）"
+        card_two = (f'<div class="card"><div class="k">2 副本最优通过档（{tag}）</div>'
+                    f'<div class="v">{fmt(tr["rps"], 1)}<small> req/s</small></div>'
+                    f'<div class="s">{sub}</div></div>')
     else:
-        target_value, target_note = "无通过档", "没有可用于推测的通过记录"
+        card_two = ('<div class="card"><div class="k">2 副本最优通过档</div><div class="v">无通过档</div>'
+                    '<div class="s">没有可用于折算的通过记录</div></div>')
     best_res = (f"CPU {best['cpu_cores']:.2f} 核 · 内存 {best['mem_mi']:.0f} MiB") if best else ""
     cards = f'''
 <div class="card"><div class="k">本次运行数</div><div class="v">{a["n"]}</div><div class="s">由所选日志聚合</div></div>
@@ -728,7 +746,7 @@ def render(runs: list[dict], a: dict, out_path: str, eip_mbps: float = 0.0) -> N
 <div class="card"><div class="k">SSE 最优通过档</div><div class="v">{fmt(best["rps"], 1) if best else "无通过档"}<small>{" req/s" if best else ""}</small></div><div class="s">VU={best["vus_i"] if best else "—"} · P95={fmt(best.get("ttfb_p95"), 0) if best else "—"}ms{f" · {best_res}" if best_res else ""}</div></div>
 {f'<div class="card"><div class="k">管理面最优通过档（读接口）</div><div class="v">{fmt(a["best_admin"]["rps"],1)}<small> req/s</small></div><div class="s">管理面 P95 {fmt(a["best_admin"].get("admin_p95"),1)}ms</div></div>' if a.get("best_admin") else ''}
 <div class="card"><div class="k">可比容量分组</div><div class="v">{len(a.get("capacity_groups", []))}</div><div class="s">固定路径、副本及配置；分别展示实测与估计</div></div>
-<div class="card"><div class="k">{TARGET_VUS} VU 副本配置</div><div class="v">{target_value}</div><div class="s">{esc(target_note)}</div></div>'''
+{card_two}'''
     capacity_rows = ""
     for i, group in enumerate(a.get("capacity_groups", []), 1):
         first = group["runs"][0]

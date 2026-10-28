@@ -1,0 +1,172 @@
+{
+  "generated_at": "2026-10-28T05:32:17+00:00",
+  "runs": [
+    {
+      "target": "perf-new-api-slave x2",
+      "base": "http://172.23.2.189",
+      "mode": "clusterip-arrival",
+      "vus": "0",
+      "rate": "12000",
+      "dur": "120s",
+      "cpu_peak_m": "3069",
+      "cpu_max_pod_m": "1765",
+      "mem_peak_mi": "1466",
+      "mem_max_pod_mi": "775",
+      "pods_peak": "2",
+      "sample_rows": "300",
+      "token_mode": "multi",
+      "method": "constant-arrival-rate",
+      "load_config": "k6-0.54.0:sse_arrival.js@c79a15840638:const-arrival-rate:model=mock-gpt:shards=16",
+      "mock_config": "first_token_delay_ms=300,token_interval_ms=30,tokens_per_response=23,token_text_bytes=12,error_rate=0,error_status=500,extra_latency_ms=0",
+      "replicas_before": "2",
+      "replicas": "2",
+      "job": "k6-arr-0..15",
+      "ts": "2026-10-28T05:32:12Z",
+      "images": "mock-upstream=acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com/newapi-dev/mock-upstream:20261019-4788bec2e;perf-new-api-master=acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com/newapi-dev/newapi-master:20261015-c62445555;perf-new-api-slave=acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com/newapi-dev/newapi-master:20261015-c62445555;",
+      "summary_schema": "2",
+      "shards": "16",
+      "k6_exit_codes": "99,99,99,99,99,99,99,99,99,137,99,99,99,99,99,0",
+      "reqs": 270003,
+      "rps": 2225.374829,
+      "streams": 3,
+      "dropped_iterations": 0,
+      "err_n": 0,
+      "reqs_total": 360003,
+      "err_pct": 0.0,
+      "ttfb_avg": 516.22,
+      "ttfb_med": 448.72,
+      "ttfb_p90": 817.27,
+      "ttfb_p95": 894.96,
+      "ttfb_p99": 1030.0,
+      "ttfb_max": 1500.0,
+      "dur_avg": 1280.0,
+      "dur_med": 1220.0,
+      "dur_p90": 1570.0,
+      "dur_p95": 1660.0,
+      "dur_p99": 1830.0,
+      "checks_counts": [
+        [
+          180002,
+          180002
+        ],
+        [
+          180002,
+          180002
+        ],
+        [
+          180000,
+          180000
+        ],
+        [
+          180002,
+          180002
+        ]
+      ],
+      "checks_pct": 100.0,
+      "complete_counts": [
+        [
+          90001,
+          90001
+        ],
+        [
+          90001,
+          90001
+        ],
+        [
+          90001,
+          90001
+        ]
+      ],
+      "complete_pct": 100.0,
+      "vus_max": 2250,
+      "request_counts": [
+        90001,
+        90001,
+        90001
+      ],
+      "error_counts": [
+        [
+          0,
+          90001
+        ],
+        [
+          0,
+          90001
+        ],
+        [
+          0,
+          90000
+        ],
+        [
+          0,
+          90001
+        ]
+      ],
+      "p95_values": {
+        "http_req_connecting": [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "http_req_duration": [
+          1650.0,
+          1650.0,
+          1660.0,
+          1020.0
+        ],
+        "http_req_receiving": [
+          927.61,
+          920.73,
+          910.0,
+          683.96
+        ],
+        "http_req_sending": [
+          0.07696,
+          0.10538,
+          0.1038,
+          0.02535
+        ],
+        "http_req_tls_handshaking": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "http_req_waiting": [
+          889.74,
+          894.96,
+          341.88
+        ],
+        "http_req_waiting{type:sse}": [
+          889.74,
+          894.96,
+          341.88
+        ]
+      },
+      "metadata_valid": true,
+      "vus_i": 0,
+      "replicas_i": 2,
+      "cpu_cores": 3.069,
+      "mem_mi": 1466.0,
+      "dur_s": 120.0,
+      "source": "20261028-131929-arrival_12000.log",
+      "phase_connecting": 0.0,
+      "phase_tls": 0.0,
+      "phase_sending": 0.02899,
+      "phase_waiting": 806.81,
+      "phase_receiving": 873.38,
+      "phase_duration": 1560.0,
+      "pass": false,
+      "verdict": "INCOMPLETE",
+      "failure_reasons": [],
+      "evidence_complete": false,
+      "verdict_reason": "分片摘要数量不完整",
+      "cpu_per_rps": 0.0013790935171937276,
+      "cpu_h_per_mreq": 0.3830815325538132,
+      "reqs_per_core_h": 2610410.3565982403,
+      "rps_per_replica": 1112.6874145,
+      "vus_per_replica": 0.0,
+      "little_vus": 2848.47978112
+    }
+  ]
+}

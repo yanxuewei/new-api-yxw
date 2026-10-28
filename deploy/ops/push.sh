@@ -232,7 +232,7 @@ deploy/ops/push.sh — 镜像 build/推送 ACR 一键脚本（双模式）
       --list               列出 $SERVICE_OPS_DIR 下所有模块（Dockerfile 标记）
 
 常用
-  -t, --tag <tag>         镜像 tag；默认 <yyyymmdd>-<git短SHA>
+  -t, --tag <tag>         镜像 tag；默认 <yyyymmdd-HHMMSS>-<git短SHA>（Asia/Shanghai）
   -r, --repo <name>       仓库名；模式 A 默认 newapi-master，模式 B 默认模块目录名
   -i, --image <name:tag>  本地镜像名；模式 B 默认 <module>:local
       --extra-tags <a,b>  额外 tag，如 latest,stable（逐个推送）
@@ -382,12 +382,16 @@ if [[ "$DOCKERFILE_EXPLICIT" != "1" && -f "${REPO_ROOT}/Dockerfile.mac" ]]; then
   DOCKERFILE="Dockerfile.mac"; DOCKERFILE_AUTO=1
 fi
 
-# 默认 tag：<yyyymmdd>-<git短SHA>，非法字符归一为 '-'
+# 默认 tag：<yyyymmdd-HHMMSS>-<git短SHA>，非法字符归一为 '-'
 sanitize_tag() { printf '%s' "$1" | sed 's/[^A-Za-z0-9_.-]/-/g'; }
 
 if [[ -z "$TAG" ]]; then
   _sha="$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null)"
-  if [[ -n "$_sha" ]]; then TAG="$(date +%Y%m%d)-${_sha}"; else TAG="$(date +%Y%m%d-%H%M%S)"; fi
+  # 精确到秒 + 固定时区 Asia/Shanghai：
+  #   ① ACR 仓库（newapi-dev 等）开了「tag 不可变」，只到天的话同一 commit 当天第二次
+  #      推送会撞同名 tag 被拒；② 跨时区开发者生成的 tag 才能互相比较、按名排序即按时间排序。
+  _ts="$(TZ='Asia/Shanghai' date +%Y%m%d-%H%M%S)"
+  if [[ -n "$_sha" ]]; then TAG="${_ts}-${_sha}"; else TAG="${_ts}"; fi
 fi
 TAG="$(sanitize_tag "$TAG")"
 

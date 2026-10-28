@@ -1,0 +1,166 @@
+[i] 动态选定节点=i-k1afs8wedv35rai4pmx2（DescribeClusterNodes 现取，未写死）
+[i] 取 15 分钟临时私网 kubeconfig
+[i] server=    server: https://10.2.25.173:6443  节点=i-k1afs8wedv35rai4pmx2  RUN_ID=1793160290-167045-3431
+[i] InvokeId=t-ida71d9ij1joykg
+----- 节点内输出（status=Success）-----
+=== target=perf-new-api-slave (clusterip-arrival)  总目标=4000 rps  shards=8  dur=120s
+=== 目标副本数=2（压测前 ready=2）
+  deployment.apps/perf-new-api-slave scaled
+  deployment "perf-new-api-slave" successfully rolled out
+=== 生效：mode=clusterip-arrival replicas=2
+=== 下发分片 Job（基础 rate=500/s，前 0 片各 +1）
+  shard-0 -> 500 rps（preAllocated=1500 max=2500）
+  shard-1 -> 500 rps（preAllocated=1500 max=2500）
+  shard-2 -> 500 rps（preAllocated=1500 max=2500）
+  shard-3 -> 500 rps（preAllocated=1500 max=2500）
+  shard-4 -> 500 rps（preAllocated=1500 max=2500）
+  shard-5 -> 500 rps（preAllocated=1500 max=2500）
+  shard-6 -> 500 rps（preAllocated=1500 max=2500）
+  shard-7 -> 500 rps（preAllocated=1500 max=2500）
+=== 等待所有分片
+  all_done=1 cpu_peak_sum=2318m cpu_peak_pod=1210m mem_peak_sum=1118Mi pods=2 samples=156
+===RUN_META===
+target=perf-new-api-slave x2
+base=http://172.23.2.189
+mode=clusterip-arrival
+vus=0
+rate=4000
+dur=120s
+cpu_peak_m=2318
+cpu_max_pod_m=1210
+mem_peak_mi=1118
+mem_max_pod_mi=569
+pods_peak=2
+sample_rows=156
+token_mode=multi
+method=constant-arrival-rate
+load_config=k6-0.54.0:sse_arrival.js@c79a15840638:const-arrival-rate:model=mock-gpt:shards=8
+mock_config=first_token_delay_ms=300,token_interval_ms=14,tokens_per_response=50,token_text_bytes=12,error_rate=0,error_status=500,extra_latency_ms=0
+replicas_before=2
+replicas=2
+job=k6-arr-0..7
+ts=2026-10-28T04:11:24Z
+images=mock-upstream=acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com/newapi-dev/mock-upstream:20261019-4788bec2e;perf-new-api-master=acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com/newapi-dev/newapi-master:20261015-c62445555;perf-new-api-slave=acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com/newapi-dev/newapi-master:20261015-c62445555;
+summary_schema=2
+shards=8
+k6_exit_codes=99,99,99,99,99,99,0,0
+===END_META===
+----- shard-0
+     checks.........................: 100.00% 106234 out of 106234
+   ✗ dropped_iterations.............: 6877    56.052876/s
+     http_req_connecting............: avg=1.54ms   min=0s       med=0s       p(90)=0s      p(95)=0s       p(99)=7.7ms   max=3.78s
+     http_req_duration..............: avg=2.71s    min=1.03s    med=2.58s    p(90)=3.82s   p(95)=4.35s    p(99)=5.52s   max=7.62s
+   ✓ http_req_failed................: 0.00%   0 out of 53117
+     http_req_receiving.............: avg=1.97s    min=26.92µs  med=1.9s     p(90)=3.02s   p(95)=3.65s    p(99)=4.87s   max=7.1s 
+     http_req_sending...............: avg=12.02ms  min=3.1µs    med=6.53µs   p(90)=31.21µs p(95)=375.61µs p(99)=641.9ms max=3.68s
+     http_req_tls_handshaking.......: avg=0s       min=0s       med=0s       p(90)=0s      p(95)=0s       p(99)=0s      max=0s   
+     http_req_waiting...............: avg=729.42ms min=318.06ms med=570.01ms p(90)=1.23s   p(95)=1.59s    p(99)=3.39s   max=4.2s 
+     ✗ { type:sse }.................: avg=729.42ms min=318.06ms med=570.01ms p(90)=1.23s   p(95)=1.59s    p(99)=3.39s   max=4.2s 
+     http_reqs......................: 53117   432.944685/s
+   ✓ sse_complete...................: 100.00% 53117 out of 53117
+     vus_max........................: 1645    min=1500             max=1645
+time="2026-10-28T04:06:59Z" level=error msg="thresholds on metrics 'dropped_iterations, http_req_waiting{type:sse}' have been crossed"
+----- shard-1
+     checks.........................: 100.00% 107270 out of 107270
+   ✗ dropped_iterations.............: 6363    52.067738/s
+     http_req_connecting............: avg=1.76ms   min=0s       med=0s      p(90)=0s     p(95)=0s       p(99)=6.26ms   max=3.18s
+     http_req_duration..............: avg=2.76s    min=1.03s    med=2.62s   p(90)=3.84s  p(95)=4.48s    p(99)=5.76s    max=8.9s 
+   ✓ http_req_failed................: 0.00%   0 out of 53635
+     http_req_receiving.............: avg=1.95s    min=24.38µs  med=1.86s   p(90)=3.05s  p(95)=3.66s    p(99)=5.1s     max=8.45s
+     http_req_sending...............: avg=15.93ms  min=2.72µs   med=6.6µs   p(90)=32µs   p(95)=405.04µs p(99)=518.49ms max=3.24s
+     http_req_tls_handshaking.......: avg=0s       min=0s       med=0s      p(90)=0s     p(95)=0s       p(99)=0s       max=0s   
+     http_req_waiting...............: avg=786.72ms min=317.64ms med=608.7ms p(90)=1.43s  p(95)=1.88s    p(99)=2.75s    max=4.5s 
+     ✗ { type:sse }.................: avg=786.72ms min=317.64ms med=608.7ms p(90)=1.43s  p(95)=1.88s    p(99)=2.75s    max=4.5s 
+     http_reqs......................: 53635   438.88938/s
+   ✓ sse_complete...................: 100.00% 53635 out of 53635
+     vus_max........................: 1722    min=1500             max=1722
+time="2026-10-28T04:06:59Z" level=error msg="thresholds on metrics 'dropped_iterations, http_req_waiting{type:sse}' have been crossed"
+----- shard-2
+     checks.........................: 100.00% 104986 out of 104986
+   ✗ dropped_iterations.............: 6857    55.897535/s
+     http_req_connecting............: avg=1.11ms   min=0s       med=0s       p(90)=0s      p(95)=0s     p(99)=13.47ms  max=2.66s
+     http_req_duration..............: avg=2.89s    min=1.05s    med=2.8s     p(90)=3.91s   p(95)=4.38s  p(99)=5.56s    max=7.97s
+   ✓ http_req_failed................: 0.00%   0 out of 52493
+     http_req_receiving.............: avg=2.03s    min=24.96µs  med=1.99s    p(90)=3.13s   p(95)=3.67s  p(99)=4.89s    max=6.58s
+     http_req_sending...............: avg=23.6ms   min=2.82µs   med=6.38µs   p(90)=37.56µs p(95)=3.74ms p(99)=830.06ms max=4.28s
+     http_req_tls_handshaking.......: avg=0s       min=0s       med=0s       p(90)=0s      p(95)=0s     p(99)=0s       max=0s   
+     http_req_waiting...............: avg=837.44ms min=317.77ms med=635.96ms p(90)=1.55s   p(95)=1.96s  p(99)=3.18s    max=4.42s
+     ✗ { type:sse }.................: avg=837.44ms min=317.77ms med=635.96ms p(90)=1.55s   p(95)=1.96s  p(99)=3.18s    max=4.42s
+     http_reqs......................: 52493   427.917359/s
+   ✓ sse_complete...................: 100.00% 52493 out of 52493
+     vus_max........................: 1772    min=1500             max=1772
+time="2026-10-28T04:06:59Z" level=error msg="thresholds on metrics 'dropped_iterations, http_req_waiting{type:sse}' have been crossed"
+----- shard-3
+     checks.........................: 100.00% 109748 out of 109748
+   ✗ dropped_iterations.............: 5072    41.27552/s
+     http_req_connecting............: avg=1.79ms   min=0s       med=0s       p(90)=0s      p(95)=0s       p(99)=21.57ms max=1.76s
+     http_req_duration..............: avg=2.71s    min=1.07s    med=2.69s    p(90)=3.49s   p(95)=3.77s    p(99)=4.36s   max=6.63s
+   ✓ http_req_failed................: 0.00%   0 out of 54874
+     http_req_receiving.............: avg=1.88s    min=22.15µs  med=1.92s    p(90)=2.79s   p(95)=3.08s    p(99)=3.65s   max=5.64s
+     http_req_sending...............: avg=6.17ms   min=3.15µs   med=6.66µs   p(90)=29.26µs p(95)=274.67µs p(99)=80.72ms max=2.82s
+     http_req_tls_handshaking.......: avg=0s       min=0s       med=0s       p(90)=0s      p(95)=0s       p(99)=0s      max=0s   
+     http_req_waiting...............: avg=821.71ms min=317.19ms med=681.24ms p(90)=1.43s   p(95)=1.81s    p(99)=2.41s   max=4.36s
+     ✗ { type:sse }.................: avg=821.71ms min=317.19ms med=681.24ms p(90)=1.43s   p(95)=1.81s    p(99)=2.41s   max=4.36s
+     http_reqs......................: 54874   446.560115/s
+   ✓ sse_complete...................: 100.00% 54874 out of 54874
+     vus_max........................: 1681    min=1500             max=1681
+time="2026-10-28T04:09:08Z" level=error msg="thresholds on metrics 'dropped_iterations, http_req_waiting{type:sse}' have been crossed"
+----- shard-4
+     checks.........................: 100.00% 104344 out of 104344
+   ✗ dropped_iterations.............: 7745    62.733587/s
+     http_req_connecting............: avg=1.93ms   min=0s       med=0s       p(90)=0s      p(95)=0s      p(99)=15.97ms  max=3.32s 
+     http_req_duration..............: avg=2.85s    min=1.06s    med=2.71s    p(90)=3.9s    p(95)=4.55s   p(99)=5.71s    max=9.19s 
+   ✓ http_req_failed................: 0.00%   0 out of 52172
+     http_req_receiving.............: avg=2.03s    min=24.31µs  med=1.95s    p(90)=3.1s    p(95)=3.66s   p(99)=5.01s    max=7.84s 
+     http_req_sending...............: avg=9.92ms   min=3.24µs   med=6.59µs   p(90)=38.87µs p(95)=1.17ms  p(99)=342.47ms max=5.61s 
+     http_req_tls_handshaking.......: avg=0s       min=0s       med=0s       p(90)=0s      p(95)=0s      p(99)=0s       max=0s    
+     http_req_waiting...............: avg=802.49ms min=317.58ms med=619.33ms p(90)=1.3s    p(95)=2.05s   p(99)=3.32s    max=4.54s 
+     ✗ { type:sse }.................: avg=802.49ms min=317.58ms med=619.33ms p(90)=1.3s    p(95)=2.05s   p(99)=3.32s    max=4.54s 
+     http_reqs......................: 52172   422.587051/s
+   ✓ sse_complete...................: 100.00% 52172 out of 52172
+     vus_max........................: 1744    min=1500             max=1744
+time="2026-10-28T04:09:09Z" level=error msg="thresholds on metrics 'dropped_iterations, http_req_waiting{type:sse}' have been crossed"
+----- shard-5
+     checks.........................: 100.00% 109696 out of 109696
+   ✗ dropped_iterations.............: 5291    42.971436/s
+     http_req_connecting............: avg=703.94µs min=0s       med=0s       p(90)=0s      p(95)=0s      p(99)=4.28ms   max=2.43s
+     http_req_duration..............: avg=2.79s    min=1.04s    med=2.76s    p(90)=3.62s   p(95)=3.94s   p(99)=4.74s    max=7.29s
+   ✓ http_req_failed................: 0.00%   0 out of 54848
+     http_req_receiving.............: avg=1.93s    min=22.08µs  med=1.96s    p(90)=2.9s    p(95)=3.21s   p(99)=4.05s    max=6.42s
+     http_req_sending...............: avg=5.75ms   min=3.17µs   med=6.39µs   p(90)=31.67µs p(95)=319.5µs p(99)=263.53ms max=2.73s
+     http_req_tls_handshaking.......: avg=0s       min=0s       med=0s       p(90)=0s      p(95)=0s      p(99)=0s       max=0s   
+     http_req_waiting...............: avg=856.93ms min=317.03ms med=683.61ms p(90)=1.52s   p(95)=2s      p(99)=2.89s    max=4.46s
+     ✗ { type:sse }.................: avg=856.93ms min=317.03ms med=683.61ms p(90)=1.52s   p(95)=2s      p(99)=2.89s    max=4.46s
+     http_reqs......................: 54848   445.454038/s
+   ✓ sse_complete...................: 100.00% 54848 out of 54848
+     vus_max........................: 1796    min=1500             max=1796
+time="2026-10-28T04:09:08Z" level=error msg="thresholds on metrics 'dropped_iterations, http_req_waiting{type:sse}' have been crossed"
+----- shard-6
+     checks.........................: 100.00% 120000 out of 120000
+   ✓ dropped_iterations.............: 0       0/s
+     http_req_connecting............: avg=36.58µs  min=0s       med=0s       p(90)=0s       p(95)=0s       p(99)=919.03µs max=15.79ms 
+     http_req_duration..............: avg=1.07s    min=1.03s    med=1.06s    p(90)=1.11s    p(95)=1.13s    p(99)=1.17s    max=1.28s   
+   ✓ http_req_failed................: 0.00%   0 out of 60000
+     http_req_receiving.............: avg=747.49ms min=626.22ms med=740.09ms p(90)=782.74ms p(95)=804.17ms p(99)=839.41ms max=932.01ms
+     http_req_sending...............: avg=29.25µs  min=3.25µs   med=12.77µs  p(90)=26µs     p(95)=35.47µs  p(99)=109.33µs max=34.24ms 
+     http_req_tls_handshaking.......: avg=0s       min=0s       med=0s       p(90)=0s       p(95)=0s       p(99)=0s       max=0s      
+     http_req_waiting...............: avg=327ms    min=316.42ms med=322.73ms p(90)=342.16ms p(95)=355.27ms p(99)=375.41ms max=481.58ms
+     ✓ { type:sse }.................: avg=327ms    min=316.42ms med=322.73ms p(90)=342.16ms p(95)=355.27ms p(99)=375.41ms max=481.58ms
+     http_reqs......................: 60000   495.691912/s
+   ✓ sse_complete...................: 100.00% 60000 out of 60000
+     vus_max........................: 1500    min=1500             max=1500
+----- shard-7
+     checks.........................: 100.00% 120000 out of 120000
+   ✓ dropped_iterations.............: 0       0/s
+     http_req_connecting............: avg=41.28µs  min=0s       med=0s       p(90)=0s       p(95)=0s       p(99)=898.93µs max=42.32ms 
+     http_req_duration..............: avg=1.07s    min=1.03s    med=1.06s    p(90)=1.11s    p(95)=1.13s    p(99)=1.17s    max=1.28s   
+   ✓ http_req_failed................: 0.00%   0 out of 60000
+     http_req_receiving.............: avg=747.53ms min=570.4ms  med=740.06ms p(90)=783.29ms p(95)=805.11ms p(99)=839.89ms max=968.84ms
+     http_req_sending...............: avg=35.13µs  min=3.33µs   med=12.63µs  p(90)=25.57µs  p(95)=34.92µs  p(99)=125.98µs max=66.95ms 
+     http_req_tls_handshaking.......: avg=0s       min=0s       med=0s       p(90)=0s       p(95)=0s       p(99)=0s       max=0s      
+     http_req_waiting...............: avg=327ms    min=316.34ms med=322.69ms p(90)=342.08ms p(95)=355.1ms  p(99)=375.59ms max=500.98ms
+     ✓ { type:sse }.................: avg=327ms    min=316.34ms med=322.69ms p(90)=342.08ms p(95)=355.1ms  p(99)=375.59ms max=500.98ms
+     http_reqs......................: 60000   495.59789/s
+   ✓ sse_complete...................: 100.00% 60000 out of 60000
+     vus_max........................: 1500    min=1500             max=1500
+runner_rc=0
