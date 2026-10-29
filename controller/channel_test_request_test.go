@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"net/http/httptest"
 	"testing"
 
@@ -213,6 +214,31 @@ func TestOpenAIChatTokenLimitCompatibility(t *testing.T) {
 				assert.JSONEq(t, string(wantJSON), string(encoded))
 			})
 		}
+	}
+}
+
+func TestBuildTestRequestVolcengineSeedreamBuildsImageRequest(t *testing.T) {
+	const seedream = "doubao-seedream-5-0-flash-260915"
+
+	imageRequest, ok := buildTestRequest(seedream, "", &model.Channel{Type: constant.ChannelTypeVolcEngine}, false).(*dto.ImageRequest)
+	require.True(t, ok)
+	assert.Equal(t, seedream, imageRequest.Model)
+	assert.Equal(t, "1024x1024", imageRequest.Size)
+	assert.Nil(t, imageRequest.N)
+
+	// 其它渠道类型下同名模型仍走 chat，避免改变既有自动检测行为
+	_, ok = buildTestRequest(seedream, "", &model.Channel{Type: constant.ChannelTypeOpenAI}, false).(*dto.GeneralOpenAIRequest)
+	require.True(t, ok)
+}
+
+func TestChannelTestRejectsVideoGenerationModels(t *testing.T) {
+	volcengine := &model.Channel{Type: constant.ChannelTypeVolcEngine}
+
+	for _, modelName := range []string{"doubao-seedance-2-0-fast-260128", "doubao-seedance-2-5-260628"} {
+		result := testChannel(context.Background(), volcengine, 1, modelName, "", false)
+		require.Error(t, result.localErr)
+		assert.Contains(t, result.localErr.Error(), "/v1/videos")
+		assert.Nil(t, result.newAPIError)
 	}
 }
 

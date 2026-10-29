@@ -41,6 +41,42 @@ type testResult struct {
 	newAPIError *types.NewAPIError
 }
 
+// isChannelTestImageModel reports whether the synthesized test request must go
+// to the image generation endpoint even when no endpoint type is specified.
+// VolcEngine routes Seedream models by model name, so the request path and the
+// request body have to agree on this predicate.
+func isChannelTestImageModel(channel *model.Channel, testModel string) bool {
+	return channel != nil &&
+		channel.Type == constant.ChannelTypeVolcEngine &&
+		strings.Contains(strings.ToLower(testModel), "seedream")
+}
+
+// newImageTestRequest builds the image generation test body shared by the
+// explicit endpoint type and the auto-detected VolcEngine path. Ark's image API
+// does not document the OpenAI-only `n` (it uses sequential_image_generation),
+// so Seedream tests send only the documented minimum.
+func newImageTestRequest(modelName string, channel *model.Channel) *dto.ImageRequest {
+	request := &dto.ImageRequest{
+		Model:  modelName,
+		Prompt: "a cute cat",
+		Size:   "1024x1024",
+	}
+	if !isChannelTestImageModel(channel, modelName) {
+		request.N = lo.ToPtr(uint(1))
+	}
+	return request
+}
+
+// isChannelTestVideoModel reports whether the model is served by the async
+// video task API instead of a synchronous relay endpoint. VolcEngine Seedance
+// models only exist behind /v1/videos, so building a chat or image request for
+// them produces a misleading upstream 400 rather than a real connectivity check.
+func isChannelTestVideoModel(channel *model.Channel, testModel string) bool {
+	return channel != nil &&
+		channel.Type == constant.ChannelTypeVolcEngine &&
+		strings.Contains(strings.ToLower(testModel), "seedance")
+}
+
 func normalizeChannelTestEndpoint(channel *model.Channel, endpointType string) string {
 	normalized := strings.TrimSpace(endpointType)
 	if normalized != "" {
@@ -110,6 +146,15 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 
 	endpointType = normalizeChannelTestEndpoint(channel, endpointType)
 
+	// 视频模型只能通过 /v1/videos 异步任务验证，渠道测试没有对应端点；
+	// 硬套 chat / image 端点只会拿回上游的 "image generation is only supported
+	// by certain models" 这类误导性 400。
+	if isChannelTestVideoModel(channel, testModel) {
+		return testResult{
+			localErr: fmt.Errorf("%s is a video generation model; verify it through the /v1/videos task API", testModel),
+		}
+	}
+
 	requestPath := "/v1/chat/completions"
 
 	// 如果指定了端点类型，使用指定的端点类型
@@ -134,7 +179,7 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 		}
 
 		// VolcEngine 图像生成模型
-		if channel.Type == constant.ChannelTypeVolcEngine && strings.Contains(testModel, "seedream") {
+		if isChannelTestImageModel(channel, testModel) {
 			requestPath = "/v1/images/generations"
 		}
 
@@ -712,12 +757,7 @@ func buildTestRequest(model string, endpointType string, channel *model.Channel,
 			}
 		case constant.EndpointTypeImageGeneration:
 			// 返回 ImageRequest
-			return &dto.ImageRequest{
-				Model:  model,
-				Prompt: "a cute cat",
-				N:      lo.ToPtr(uint(1)),
-				Size:   "1024x1024",
-			}
+			return newImageTestRequest(model, channel)
 		case constant.EndpointTypeJinaRerank:
 			// 返回 RerankRequest
 			return &dto.RerankRequest{
@@ -801,6 +841,13 @@ func buildTestRequest(model string, endpointType string, channel *model.Channel,
 			Model: model,
 			Input: []any{"hello world"},
 		}
+	}
+
+	// VolcEngine 图像生成模型：端点判定见 testChannel，两头必须用同一条件，
+	// 否则 RelayMode 是 ImageGenerations 而请求体是 chat，转换阶段会报
+	// "invalid image request type"。
+	if isChannelTestImageModel(channel, model) {
+		return newImageTestRequest(model, channel)
 	}
 
 	// Responses-only models (e.g. codex series)
