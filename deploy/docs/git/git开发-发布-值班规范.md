@@ -113,7 +113,7 @@ git remote set-url --push upstream DISABLED          # 双保险：物理禁止 
 
 | 分支 | 直接 push | 合并要求 | 其他 |
 |------|-----------|----------|------|
-| `main` | 禁止 | ≥2 名 reviewer 批准 + CI 全绿 | 必须 up-to-date 后才可合并；禁止 force push |
+| `main` | 禁止 | ≥1 名 reviewer 批准 + CI 全绿 | 必须 up-to-date 后才可合并；禁止 force push |
 | `release/*` | 禁止 | ≥1 名 reviewer 批准 + CI 全绿 | 仅 bugfix/chore 允许进入 |
 | `develop` | 禁止 | ≥1 名 reviewer 批准 + CI 全绿 | 允许 squash merge |
 | 其余个人分支 | 允许 | — | rebase 自由 |
