@@ -53,6 +53,9 @@ spec:
               valueFrom: {secretKeyRef: {name: perf-load-test-credentials, key: token_key}}
             - name: TOKENS
               valueFrom: {secretKeyRef: {name: perf-load-test-credentials, key: tokens, optional: true}}
+            - {name: STREAM, value: "${STREAM:-true}"}
+            - {name: MAX_TOKENS, value: "${MAX_TOKENS:-1000}"}
+            - {name: MODEL, value: "${MODEL:-mock-gpt}"}
           volumeMounts: [{name: scripts, mountPath: /scripts}]
           resources: {requests: {cpu: 500m, memory: 256Mi}, limits: {cpu: "2", memory: 1Gi}}
       nodeSelector: {perf-role: load}

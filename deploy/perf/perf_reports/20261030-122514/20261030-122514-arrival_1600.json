@@ -1,0 +1,217 @@
+{
+  "generated_at": "2026-10-30T04:31:40+00:00",
+  "runs": [
+    {
+      "target": "perf-new-api-slave x2",
+      "base": "http://172.23.2.189",
+      "mode": "clusterip-arrival",
+      "vus": "0",
+      "rate": "1600",
+      "dur": "120s",
+      "cpu_peak_m": "384",
+      "cpu_max_pod_m": "195",
+      "mem_peak_mi": "595",
+      "mem_max_pod_mi": "315",
+      "pods_peak": "2",
+      "sample_rows": "150",
+      "token_mode": "multi",
+      "method": "constant-arrival-rate",
+      "load_config": "k6-0.54.0:relay-chat.js@1b3c4b2d42fd:const-arrival-rate:model=mock-gpt:shards=8",
+      "mock_config": "first_token_delay_ms=0,token_interval_ms=30,tokens_per_response=128,token_text_bytes=12,error_rate=0,error_status=500,extra_latency_ms=0",
+      "replicas_before": "2",
+      "replicas": "2",
+      "job": "k6-arr-0..7",
+      "ts": "2026-10-30T04:31:36Z",
+      "images": "mock-upstream=acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com/newapi-dev/mock-upstream:20261019-4788bec2e;perf-new-api-master=acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com/newapi-dev/newapi-master:20261015-c62445555;perf-new-api-slave=acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com/newapi-dev/newapi-master:20261015-c62445555;",
+      "summary_schema": "2",
+      "shards": "8",
+      "k6_exit_codes": "0,0,0,0,0,0,0,0",
+      "reqs": 192003,
+      "rps": 1599.8951240000001,
+      "streams": 8,
+      "dropped_iterations": 0,
+      "err_n": 0,
+      "reqs_total": 192003,
+      "err_pct": 0.0,
+      "ttfb_avg": 6.6,
+      "ttfb_med": 7.38,
+      "ttfb_p90": 8.74,
+      "ttfb_p95": 8.94,
+      "ttfb_p99": 11.81,
+      "ttfb_max": 298.0,
+      "dur_avg": 6.64,
+      "dur_med": 7.41,
+      "dur_p90": 8.77,
+      "dur_p95": 8.98,
+      "dur_p99": 11.87,
+      "checks_counts": [
+        [
+          24000,
+          24000
+        ],
+        [
+          24000,
+          24000
+        ],
+        [
+          24001,
+          24001
+        ],
+        [
+          24001,
+          24001
+        ],
+        [
+          24000,
+          24000
+        ],
+        [
+          24000,
+          24000
+        ],
+        [
+          24000,
+          24000
+        ],
+        [
+          24001,
+          24001
+        ]
+      ],
+      "checks_pct": 100.0,
+      "complete_counts": [],
+      "vus_max": 600,
+      "request_counts": [
+        24000,
+        24000,
+        24001,
+        24001,
+        24000,
+        24000,
+        24000,
+        24001
+      ],
+      "error_counts": [
+        [
+          0,
+          24000
+        ],
+        [
+          0,
+          24000
+        ],
+        [
+          0,
+          24001
+        ],
+        [
+          0,
+          24001
+        ],
+        [
+          0,
+          24000
+        ],
+        [
+          0,
+          24000
+        ],
+        [
+          0,
+          24000
+        ],
+        [
+          0,
+          24001
+        ]
+      ],
+      "p95_values": {
+        "http_req_connecting": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "http_req_duration": [
+          8.92,
+          8.94,
+          8.94,
+          8.94,
+          8.91,
+          8.98,
+          8.91,
+          8.96
+        ],
+        "http_req_receiving": [
+          0.032619999999999996,
+          0.03395,
+          0.033729999999999996,
+          0.034530000000000005,
+          0.033490000000000006,
+          0.03533,
+          0.033229999999999996,
+          0.03339
+        ],
+        "http_req_sending": [
+          0.01795,
+          0.01752,
+          0.017320000000000002,
+          0.01641,
+          0.01572,
+          0.01763,
+          0.01786,
+          0.01745
+        ],
+        "http_req_tls_handshaking": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "http_req_waiting": [
+          8.89,
+          8.9,
+          8.9,
+          8.9,
+          8.88,
+          8.94,
+          8.87,
+          8.92
+        ]
+      },
+      "metadata_valid": true,
+      "vus_i": 0,
+      "replicas_i": 2,
+      "cpu_cores": 0.384,
+      "mem_mi": 595.0,
+      "dur_s": 120.0,
+      "source": "20261030-122514-arrival_1600.log",
+      "phase_connecting": 0.0,
+      "phase_tls": 0.0,
+      "phase_sending": 0.01425,
+      "phase_waiting": 8.65,
+      "phase_receiving": 0.0293,
+      "phase_duration": 8.69,
+      "pass": false,
+      "verdict": "INCOMPLETE",
+      "failure_reasons": [],
+      "evidence_complete": false,
+      "evidence": "insufficient",
+      "verdict_reason": "缺少新版完整流/业务成功计数或执行状态，旧 checks 不能证明完整性",
+      "cpu_per_rps": 0.00024001573243122152,
+      "cpu_h_per_mreq": 0.06667103678645042,
+      "reqs_per_core_h": 14999016.787500001,
+      "rps_per_replica": 799.9475620000001,
+      "vus_per_replica": 0.0,
+      "little_vus": 10.62330362336
+    }
+  ]
+}

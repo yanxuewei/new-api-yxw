@@ -1,0 +1,13 @@
+# perf/vegeta/targets —— S1 非流式 chat 的常量 QPS 目标（交叉验证 k6 开环结果）
+#
+# 用法（vegeta 与 k6 跑同一目标，比较两工具的 success_rate / latency）：
+#   export TOKEN=<perf 专用 token>
+#   vegeta attack -targets=perf/vegeta/targets -rate=800/s -duration=120s \
+#     | vegeta report -type=json > /tmp/s1-vegeta.json
+#
+# 注意：vegeta 在集群内运行时才接近真实路径；本机跑会引入公网 RTT，不能与 k6 数字直接比较。
+
+POST http://perf-new-api-slave.new-api-perf.svc.cluster.local/v1/chat/completions
+Authorization: Bearer __TOKEN__
+Content-Type: application/json
+@perf/vegeta/body.json

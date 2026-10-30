@@ -22,7 +22,9 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../../.." && pwd)"
 REMOTE="$ROOT/deploy/lib/ack_remote_jkt_dev.sh"
 BODIES="$HERE/bodies"
-K6JS_FILE="$HERE/sse.js"   # 每个动作可切换（burst/admin/long 用各自脚本）
+K6JS_FILE="${K6JS_FILE:-$HERE/sse.js}"   # 可被 env 覆盖，用于接入 perf/k6/*.js（S1/S2/S3）
+K6JS_OVERRIDE="$K6JS_FILE"               # 记住外部指定值：各动作体内会重新赋默认脚本，需在 run_body 里纠正
+[ "$K6JS_OVERRIDE" = "$HERE/sse.js" ] && K6JS_OVERRIDE=""
 
 [ -s "$K6JS_FILE" ] || { echo "[!] 缺 $K6JS_FILE"; exit 1; }
 [ -x "$REMOTE" ] || { echo "[!] 缺通道脚本 $REMOTE"; exit 1; }
@@ -81,6 +83,8 @@ install_script_configmap() {
 
 run_body() {
   local body="$1" tag="$2"; shift 2
+  # 外部指定了脚本就以它为准（动作体内的 K6JS_FILE=默认脚本 只是兜底）
+  [ -n "${K6JS_OVERRIDE:-}" ] && K6JS_FILE="$K6JS_OVERRIDE"
   [ -s "$BODIES/$body" ] || { echo "[!] 缺 body：$BODIES/$body"; exit 1; }
   umask 077
   local full cm=""

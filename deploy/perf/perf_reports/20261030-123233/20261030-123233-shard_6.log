@@ -1,0 +1,106 @@
+[i] 动态选定节点=i-k1afs8wedv35rai4pmx2（DescribeClusterNodes 现取，未写死）
+[i] 取 15 分钟临时私网 kubeconfig
+[i] server=    server: https://10.2.25.173:6443  节点=i-k1afs8wedv35rai4pmx2  RUN_ID=1793334754-679897-636
+[i] InvokeId=t-ida71kgwed5dlog
+----- 节点内输出（status=Success）-----
+=== 分片压测：total=3000 VU  shards=6  dur=120s  base=http://172.23.2.189  后端副本=2
+=== 下发分片 Job
+  shard-0 -> 500 VU
+  shard-1 -> 500 VU
+  shard-2 -> 500 VU
+  shard-3 -> 500 VU
+  shard-4 -> 500 VU
+  shard-5 -> 500 VU
+=== 等待所有分片
+  all_done=1 cpu_peak_sum=3048m cpu_peak_pod=1533m mem_peak_sum=655Mi pods=2 samples=104
+===RUN_META===
+target=perf-new-api-slave x2
+base=http://172.23.2.189
+mode=clusterip-shard
+vus=3000
+dur=120s
+cpu_peak_m=3048
+cpu_max_pod_m=1533
+mem_peak_mi=655
+mem_max_pod_mi=361
+pods_peak=2
+sample_rows=104
+token_mode=multi
+method=constant-vus
+load_config=k6-0.54.0:relay-chat.js@1b3c4b2d42fd:const-vus:model=mock-gpt:shards=6
+mock_config=first_token_delay_ms=0,token_interval_ms=2,tokens_per_response=1000,token_text_bytes=12,error_rate=0,error_status=500,extra_latency_ms=0
+replicas=2
+job=k6-shard-0..5
+ts=2026-10-30T04:36:59Z
+images=mock-upstream=acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com/newapi-dev/mock-upstream:20261019-4788bec2e;perf-new-api-master=acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com/newapi-dev/newapi-master:20261015-c62445555;perf-new-api-slave=acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com/newapi-dev/newapi-master:20261015-c62445555;
+summary_schema=2
+shards=6
+k6_exit_codes=0,0,0,0,0,0
+===END_META===
+----- shard-0
+     checks.........................: 100.00% 17586 out of 17586
+     http_req_connecting............: avg=1.52ms   med=0s       p(90)=0s       p(95)=11.13ms  p(99)=46.33ms  max=55.86ms 
+     http_req_duration..............: avg=6.97s    med=6.88s    p(90)=8.26s    p(95)=8.67s    p(99)=9.57s    max=11.24s  
+     http_req_failed................: 0.00%   0 out of 8793
+     http_req_receiving.............: avg=4.56s    med=4.36s    p(90)=5.75s    p(95)=6.1s     p(99)=6.54s    max=7.21s   
+     http_req_sending...............: avg=131.28µs med=15.96µs  p(90)=42.6µs   p(95)=516.49µs p(99)=2.75ms   max=25.36ms 
+     http_req_tls_handshaking.......: avg=0s       med=0s       p(90)=0s       p(95)=0s       p(99)=0s       max=0s      
+     http_req_waiting...............: avg=2.41s    med=2.57s    p(90)=3.67s    p(95)=3.88s    p(99)=4.43s    max=5.18s   
+     http_reqs......................: 8793    70.048612/s
+     vus_max........................: 500     min=500            max=500
+----- shard-1
+     checks.........................: 100.00% 17532 out of 17532
+     http_req_connecting............: avg=1.3ms    med=0s       p(90)=0s       p(95)=3.31ms   p(99)=40.92ms max=64.6ms  
+     http_req_duration..............: avg=7s       med=6.94s    p(90)=8.28s    p(95)=8.72s    p(99)=9.51s   max=11.2s   
+     http_req_failed................: 0.00%   0 out of 8766
+     http_req_receiving.............: avg=4.56s    med=4.28s    p(90)=5.95s    p(95)=6.98s    p(99)=7.59s   max=8.2s    
+     http_req_sending...............: avg=194.4µs  med=15.78µs  p(90)=39.72µs  p(95)=405.43µs p(99)=3.88ms  max=33.28ms 
+     http_req_tls_handshaking.......: avg=0s       med=0s       p(90)=0s       p(95)=0s       p(99)=0s      max=0s      
+     http_req_waiting...............: avg=2.43s    med=2.42s    p(90)=3.64s    p(95)=3.9s     p(99)=4.76s   max=5.26s   
+     http_reqs......................: 8766    70.556996/s
+     vus_max........................: 500     min=500            max=500
+----- shard-2
+     checks.........................: 100.00% 17494 out of 17494
+     http_req_connecting............: avg=1.1ms   med=0s       p(90)=0s       p(95)=1.1ms    p(99)=44.64ms  max=67.81ms 
+     http_req_duration..............: avg=7.02s   med=6.96s    p(90)=8.29s    p(95)=8.71s    p(99)=9.5s     max=10.73s  
+     http_req_failed................: 0.00%   0 out of 8747
+     http_req_receiving.............: avg=4.57s   med=4.28s    p(90)=6.02s    p(95)=6.99s    p(99)=7.8s     max=8.17s   
+     http_req_sending...............: avg=1.15ms  med=16.04µs  p(90)=38.64µs  p(95)=196.99µs p(99)=69.9ms   max=81.47ms 
+     http_req_tls_handshaking.......: avg=0s      med=0s       p(90)=0s       p(95)=0s       p(99)=0s       max=0s      
+     http_req_waiting...............: avg=2.44s   med=2.44s    p(90)=3.63s    p(95)=3.9s     p(99)=4.81s    max=5.25s   
+     http_reqs......................: 8747    70.433981/s
+     vus_max........................: 500     min=500            max=500
+----- shard-3
+     checks.........................: 100.00% 17796 out of 17796
+     http_req_connecting............: avg=593.71µs med=0s       p(90)=0s       p(95)=816.57µs p(99)=18.12ms  max=33.47ms 
+     http_req_duration..............: avg=6.86s    med=6.82s    p(90)=8.39s    p(95)=8.7s     p(99)=9.52s    max=10.39s  
+     http_req_failed................: 0.00%   0 out of 8898
+     http_req_receiving.............: avg=4.62s    med=4.43s    p(90)=5.71s    p(95)=6.3s     p(99)=7.28s    max=7.71s   
+     http_req_sending...............: avg=56.16µs  med=15.35µs  p(90)=39.46µs  p(95)=92.95µs  p(99)=936.8µs  max=31.93ms 
+     http_req_tls_handshaking.......: avg=0s       med=0s       p(90)=0s       p(95)=0s       p(99)=0s       max=0s      
+     http_req_waiting...............: avg=2.24s    med=2.31s    p(90)=3.82s    p(95)=4.11s    p(99)=4.58s    max=4.95s   
+     http_reqs......................: 8898    71.093549/s
+     vus_max........................: 500     min=500            max=500
+----- shard-4
+     checks.........................: 100.00% 17338 out of 17338
+     http_req_connecting............: avg=1.54ms   med=0s       p(90)=0s       p(95)=2.36ms   p(99)=53.55ms  max=70.07ms 
+     http_req_duration..............: avg=7.02s    med=7.08s    p(90)=8.36s    p(95)=8.64s    p(99)=9.27s    max=10.29s  
+     http_req_failed................: 0.00%   0 out of 8669
+     http_req_receiving.............: avg=4.65s    med=4.44s    p(90)=5.89s    p(95)=6.49s    p(99)=7.35s    max=7.73s   
+     http_req_sending...............: avg=1.24ms   med=15µs     p(90)=38.42µs  p(95)=190.89µs p(99)=53.77ms  max=68.25ms 
+     http_req_tls_handshaking.......: avg=0s       med=0s       p(90)=0s       p(95)=0s       p(99)=0s       max=0s      
+     http_req_waiting...............: avg=2.37s    med=2.37s    p(90)=3.64s    p(95)=4.08s    p(99)=4.66s    max=5.1s    
+     http_reqs......................: 8669    69.562745/s
+     vus_max........................: 500     min=500            max=500
+----- shard-5
+     checks.........................: 100.00% 17428 out of 17428
+     http_req_connecting............: avg=336.18µs med=0s       p(90)=0s       p(95)=790.12µs p(99)=10.68ms  max=30.14ms 
+     http_req_duration..............: avg=6.99s    med=7s       p(90)=8.35s    p(95)=8.6s     p(99)=9.19s    max=10.34s  
+     http_req_failed................: 0.00%   0 out of 8714
+     http_req_receiving.............: avg=4.64s    med=4.43s    p(90)=5.85s    p(95)=6.49s    p(99)=7.33s    max=7.75s   
+     http_req_sending...............: avg=76.12µs  med=15.34µs  p(90)=38.77µs  p(95)=72.97µs  p(99)=740.25µs max=38ms    
+     http_req_tls_handshaking.......: avg=0s       med=0s       p(90)=0s       p(95)=0s       p(99)=0s       max=0s      
+     http_req_waiting...............: avg=2.34s    med=2.35s    p(90)=3.65s    p(95)=4.08s    p(99)=4.66s    max=5.09s   
+     http_reqs......................: 8714    69.942035/s
+     vus_max........................: 500     min=500            max=500
+runner_rc=0

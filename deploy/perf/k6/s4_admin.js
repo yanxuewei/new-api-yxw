@@ -36,16 +36,22 @@ export function setup() {
 }
 
 export default (data) => {
-  const res = http.get(`${BASE}/api/channel/`, {
-    headers: { Authorization: `Bearer ${data.token}` },
-    tags: { type: 'admin' }, timeout: '10s',
-  });
-  let success = false;
-  try {
-    const body = res.json();
-    success = res.status === 200 && body !== null && body.success === true;
-  } catch (_) {
-    success = false;
+  const headers = { Authorization: `Bearer ${data.token}` };
+  // §3.9 S3 要求同时覆盖「渠道列表」与「日志分页」；两次请求沿用同一 tag(type=admin)，
+  // 以复用文件上方已有的 thresholds（否则阈值因无样本而报 error）。
+  const urls = [
+    `${BASE}/api/channel/?p=0&page_size=100`,
+    `${BASE}/api/log/?p=0&page_size=100&type=0`,
+  ];
+  for (const url of urls) {
+    const res = http.get(url, { headers, tags: { type: 'admin' }, timeout: '10s' });
+    let success = false;
+    try {
+      const body = res.json();
+      success = res.status === 200 && body !== null && body.success === true;
+    } catch (_) {
+      success = false;
+    }
+    check(res, { 'admin success': () => success });
   }
-  check(res, { 'admin success': () => success });
 };

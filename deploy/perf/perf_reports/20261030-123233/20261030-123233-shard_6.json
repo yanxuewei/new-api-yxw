@@ -1,0 +1,187 @@
+{
+  "generated_at": "2026-10-30T04:37:01+00:00",
+  "runs": [
+    {
+      "target": "perf-new-api-slave x2",
+      "base": "http://172.23.2.189",
+      "mode": "clusterip-shard",
+      "vus": "3000",
+      "dur": "120s",
+      "cpu_peak_m": "3048",
+      "cpu_max_pod_m": "1533",
+      "mem_peak_mi": "655",
+      "mem_max_pod_mi": "361",
+      "pods_peak": "2",
+      "sample_rows": "104",
+      "token_mode": "multi",
+      "method": "constant-vus",
+      "load_config": "k6-0.54.0:relay-chat.js@1b3c4b2d42fd:const-vus:model=mock-gpt:shards=6",
+      "mock_config": "first_token_delay_ms=0,token_interval_ms=2,tokens_per_response=1000,token_text_bytes=12,error_rate=0,error_status=500,extra_latency_ms=0",
+      "replicas": "2",
+      "job": "k6-shard-0..5",
+      "ts": "2026-10-30T04:36:59Z",
+      "images": "mock-upstream=acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com/newapi-dev/mock-upstream:20261019-4788bec2e;perf-new-api-master=acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com/newapi-dev/newapi-master:20261015-c62445555;perf-new-api-slave=acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com/newapi-dev/newapi-master:20261015-c62445555;",
+      "summary_schema": "2",
+      "shards": "6",
+      "k6_exit_codes": "0,0,0,0,0,0",
+      "reqs": 52587,
+      "rps": 421.637918,
+      "streams": 6,
+      "dropped_iterations": 0,
+      "err_n": 0,
+      "reqs_total": 52587,
+      "err_pct": 0.0,
+      "ttfb_avg": 2440.0,
+      "ttfb_med": 2570.0,
+      "ttfb_p90": 3820.0,
+      "ttfb_p95": 4110.0,
+      "ttfb_p99": 4810.0,
+      "ttfb_max": 5260.0,
+      "dur_avg": 7020.0,
+      "dur_med": 7080.0,
+      "dur_p90": 8390.0,
+      "dur_p95": 8720.0,
+      "dur_p99": 9570.0,
+      "checks_counts": [
+        [
+          17586,
+          17586
+        ],
+        [
+          17532,
+          17532
+        ],
+        [
+          17494,
+          17494
+        ],
+        [
+          17796,
+          17796
+        ],
+        [
+          17338,
+          17338
+        ],
+        [
+          17428,
+          17428
+        ]
+      ],
+      "checks_pct": 100.0,
+      "complete_counts": [],
+      "vus_max": 500,
+      "request_counts": [
+        8793,
+        8766,
+        8747,
+        8898,
+        8669,
+        8714
+      ],
+      "error_counts": [
+        [
+          0,
+          8793
+        ],
+        [
+          0,
+          8766
+        ],
+        [
+          0,
+          8747
+        ],
+        [
+          0,
+          8898
+        ],
+        [
+          0,
+          8669
+        ],
+        [
+          0,
+          8714
+        ]
+      ],
+      "p95_values": {
+        "http_req_connecting": [
+          11.13,
+          3.31,
+          1.1,
+          0.81657,
+          2.36,
+          0.79012
+        ],
+        "http_req_duration": [
+          8670.0,
+          8720.0,
+          8710.0,
+          8700.0,
+          8640.0,
+          8600.0
+        ],
+        "http_req_receiving": [
+          6100.0,
+          6980.0,
+          6990.0,
+          6300.0,
+          6490.0,
+          6490.0
+        ],
+        "http_req_sending": [
+          0.51649,
+          0.40543,
+          0.19699000000000003,
+          0.09295,
+          0.19089,
+          0.07297000000000001
+        ],
+        "http_req_tls_handshaking": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "http_req_waiting": [
+          3880.0,
+          3900.0,
+          3900.0,
+          4110.0,
+          4080.0,
+          4080.0
+        ]
+      },
+      "metadata_valid": true,
+      "vus_i": 3000,
+      "replicas_i": 2,
+      "cpu_cores": 3.048,
+      "mem_mi": 655.0,
+      "dur_s": 120.0,
+      "source": "20261030-123233-shard_6.log",
+      "phase_connecting": 0.0,
+      "phase_tls": 0.0,
+      "phase_sending": 0.0426,
+      "phase_waiting": 3670.0,
+      "phase_receiving": 5750.0,
+      "phase_duration": 8260.0,
+      "pass": false,
+      "verdict": "FAIL",
+      "failure_reasons": [
+        "latency"
+      ],
+      "evidence_complete": false,
+      "evidence": "insufficient",
+      "verdict_reason": "latency；缺少新版完整流/业务成功计数或执行状态，旧 checks 不能证明完整性",
+      "cpu_per_rps": 0.007228951358212522,
+      "cpu_h_per_mreq": 2.0080420439479227,
+      "reqs_per_core_h": 497997.54094488185,
+      "rps_per_replica": 210.818959,
+      "vus_per_replica": 1500.0,
+      "little_vus": 2959.8981843600004
+    }
+  ]
+}

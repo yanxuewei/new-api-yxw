@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>new-api · SSE 容量压测报告 · 2026-10-28 03:01 UTC</title>
+<title>new-api · SSE 容量压测报告 · 2026-10-30 04:37 UTC</title>
 <style>
 :root{--fg:#0b1f16;--mut:#4b6a5c;--line:#cde8d8;--bg:#f2fbf6;--brand:#0f9d58;--accent:#12b76a;--deep:#052e1b;--ok:#0b7a45;--bad:#b42318}
 *{box-sizing:border-box}
@@ -47,64 +47,68 @@ pre{background:#06281a;color:#d9ffe9;border:1px solid #14532d;padding:14px 16px;
 </style></head><body>
 <header>
   <h1>new-api · SSE 容量压测报告</h1>
-  <div class="meta">生成于 2026-10-28 03:01 UTC · 数据源：k6 文本摘要 + 运行时采样 · 集群 new-api-perf（雅加达 ap-southeast-5）</div>
+  <div class="meta">生成于 2026-10-30 04:37 UTC · 数据源：k6 文本摘要 + 运行时采样 · 集群 new-api-perf（雅加达 ap-southeast-5）</div>
 </header>
 <main>
 <h2>摘要</h2>
 <div class="cards">
 <div class="card"><div class="k">本次运行数</div><div class="v">1</div><div class="s">由所选日志聚合</div></div>
-<div class="card"><div class="k">副本数量</div><div class="v">1</div><div class="s">本报告内出现的副本配置</div></div>
-<div class="card"><div class="k">压测方法</div><div class="v" style="font-size:20px">constant-arrival-rate</div><div class="s">k6 executor / 场景类型</div></div>
+<div class="card"><div class="k">副本数量</div><div class="v">2</div><div class="s">本报告内出现的副本配置</div></div>
+<div class="card"><div class="k">压测方法</div><div class="v" style="font-size:20px">constant-vus</div><div class="s">k6 executor / 场景类型</div></div>
 <div class="card"><div class="k">SSE 最优通过档</div><div class="v">无通过档<small></small></div><div class="s">VU=— · P95=—ms</div></div>
 
-<div class="card"><div class="k">可比容量分组</div><div class="v">0</div><div class="s">固定路径、副本及配置；分别展示实测与估计</div></div>
-<div class="card"><div class="k">1500 VU 副本配置</div><div class="v">无通过档</div><div class="s">没有可用于推测的通过记录</div></div></div>
+<div class="card"><div class="k">可比容量分组</div><div class="v">1</div><div class="s">固定路径、副本及配置；分别展示实测与估计</div></div>
+<div class="card"><div class="k">2 副本最优通过档</div><div class="v">无通过档</div><div class="s">没有可用于折算的通过记录</div></div></div>
 
 <h2>每次运行明细</h2>
 <table>
 <thead><tr><th>Job / 时间</th><th>VU</th><th>路径</th><th>RPS</th><th>P50 首字</th><th>P95 首字</th><th>P99 首字</th><th>P95 端到端（管理面按标签）</th><th>错误率</th><th>完整流成功率 / 管理面 checks</th><th>CPU 峰值(核·全副本合计)</th><th>内存峰值(Mi·全副本合计)</th><th>下行(Mbps)</th><th>判定</th></tr></thead>
 <tbody><tr>
-<td>k6-arr-0..5<div class="sub">2026-10-28T03:01:56Z</div></td>
-<td>0<div class="sub">1 副本</div></td>
-<td>clusterip-arrival<div class="sub"><a href="perf-new-api-slave x1" target="_blank" style="color:#0b7a45;word-break:break-all">perf-new-api-slave x1</a></div></td>
-<td>1,724.5</td>
-<td>2,120</td>
-<td><b>2,870</b></td>
-<td>2,990</td>
-<td>4,420</td>
+<td>k6-shard-0..5<div class="sub">2026-10-30T04:36:59Z</div></td>
+<td>3000<div class="sub">2 副本</div></td>
+<td>clusterip-shard<div class="sub"><a href="perf-new-api-slave x2" target="_blank" style="color:#0b7a45;word-break:break-all">perf-new-api-slave x2</a></div></td>
+<td>421.6</td>
+<td>2,570</td>
+<td><b>4,110</b></td>
+<td>4,810</td>
+<td>8,720</td>
 <td>0.000%</td>
-<td>100.000%</td>
-<td>1.42</td>
-<td>643</td>
+<td>—%</td>
+<td>3.05</td>
+<td>655</td>
 <td>—</td>
-<td><span class="badge bad">FAIL</span><div class="sub">latency, dropped_iterations</div></td>
+<td><span class="badge bad">FAIL</span><div class="sub">latency；缺少新版完整流/业务成功计数或执行状态，旧 checks 不能证明完整性</div></td>
 </tr></tbody>
 </table>
 <div class="lim">首字使用 k6 <code>http_req_waiting</code>（TTFB 代理）。稳态：P95 &lt; 800ms、请求失败率 &lt; 0.05%、完整流成功率 &gt; 99.95%；突发：P95 &lt; 1500ms、失败率 &lt; 1%、完整流成功率 &gt; 99%；管理面：标签端到端 P95 &lt; 1000ms、失败率 &lt; 1%、业务成功 checks &gt; 99%、丢弃迭代为 0。CPU/内存为采样窗口内同一时刻全副本合计峰值；旧日志只采首个 Pod，数值偏小且不可用于成本换算。旧日志（无 <code>summary_schema</code>）当 checks 计数按每请求 2 项可逐请求核对且全部在错误预算内时，标为 <b>PASS·旧口径</b>：只证明 HTTP 200 且响应含 <code>[DONE]</code>，不证明 <code>finish_reason</code>，也不参与容量拟合；其余缺证据情况仍为“数据不完整”。新日志须有完整流/业务成功计数及 k6 退出状态。故障注入、滚动及长流待定义专属标准；分片缺少共同运行窗口证据时待评估。突发汇总阈值通过不代表已验证恢复时间。</div>
 
 <h2>可比配置容量边界</h2>
 <table><thead><tr><th>分组 / 配置</th><th>实测最高通过 VU</th><th>最小失败 VU</th><th>延迟边界估计（总量）</th><th>说明</th></tr></thead>
-<tbody><tr><td colspan="5">无可用于稳态容量分析的内网运行</td></tr></tbody></table>
+<tbody><tr><td>1 · clusterip-shard<div class="sub">perf-new-api-slave x2 · 2 副本<br>images=mock-upstream=acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com/newapi-dev/mock-upstream:20261019-4788bec2e;perf-new-api-master=acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com/newapi-dev/newapi-master:20261015-c62445555;perf-new-api-slave=acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com/newapi-dev/newapi-master:20261015-c62445555; · dur=120s · load_config=k6-0.54.0:relay-chat.js@1b3c4b2d42fd:const-vus:model=mock-gpt:shards=6 · mock_config=first_token_delay_ms=0,token_interval_ms=2,tokens_per_response=1000,token_text_bytes=12,error_rate=0,error_status=500,extra_latency_ms=0</div></td>
+<td>无通过档</td>
+<td>3,000</td>
+<td>— VU / — req/s</td>
+<td>存在不完整运行，补齐数据后再估计边界</td></tr></tbody></table>
 <div class="lim">镜像、负载或 mock 配置未知时只展示观测结果，不插值、不外推；不同副本不得按每副本并发混合拟合。</div>
 
 <h2>趋势</h2>
 <figure class="chart"><figcaption>P95 首字延迟 vs 并发（横轴=并发 VU；纵轴 ms；颜色区分路径类型）</figcaption>
 <svg viewBox="0 0 760 280" role="img" aria-label="P95 首字延迟 vs 并发">
-<line x1="72" y1="212.0" x2="740" y2="212.0" stroke="#e6f4ec"/><text x="64" y="216.0" text-anchor="end" font-size="10.5" fill="#3f6152">0</text><line x1="72" y1="164.5" x2="740" y2="164.5" stroke="#e6f4ec"/><text x="64" y="168.5" text-anchor="end" font-size="10.5" fill="#3f6152">825</text><line x1="72" y1="117.0" x2="740" y2="117.0" stroke="#e6f4ec"/><text x="64" y="121.0" text-anchor="end" font-size="10.5" fill="#3f6152">1650</text><line x1="72" y1="69.5" x2="740" y2="69.5" stroke="#e6f4ec"/><text x="64" y="73.5" text-anchor="end" font-size="10.5" fill="#3f6152">2475</text><line x1="72" y1="22.0" x2="740" y2="22.0" stroke="#e6f4ec"/><text x="64" y="26.0" text-anchor="end" font-size="10.5" fill="#3f6152">3300</text><line x1="72.0" y1="212" x2="72.0" y2="216" stroke="#94a3b8" stroke-width="1"/><text x="72.0" y="228" text-anchor="middle" font-size="10" fill="#315244">0</text><line x1="72" y1="165.9" x2="740" y2="165.9" stroke="#e11d48" stroke-dasharray="6 4" stroke-width="1.4"/><text x="740" y="159.9" text-anchor="end" font-size="11" fill="#be123c" font-weight="600">SLO 800ms</text><circle class="pt" data-i="0" cx="72.0" cy="46.8" r="6" fill="#94a3b8" stroke="#ffffff" stroke-width="2" style="cursor:pointer"/><text x="72.0" y="246" text-anchor="end" font-size="9.5" fill="#315244" transform="rotate(-38 72.0 246)">2026-10-28 03:01 perf-new-api-slave x</text><text x="406.0" y="278" text-anchor="middle" font-size="10.5" fill="#3f6152">并发 VU</text>
+<line x1="72" y1="212.0" x2="740" y2="212.0" stroke="#e6f4ec"/><text x="64" y="216.0" text-anchor="end" font-size="10.5" fill="#3f6152">0</text><line x1="72" y1="164.5" x2="740" y2="164.5" stroke="#e6f4ec"/><text x="64" y="168.5" text-anchor="end" font-size="10.5" fill="#3f6152">1182</text><line x1="72" y1="117.0" x2="740" y2="117.0" stroke="#e6f4ec"/><text x="64" y="121.0" text-anchor="end" font-size="10.5" fill="#3f6152">2363</text><line x1="72" y1="69.5" x2="740" y2="69.5" stroke="#e6f4ec"/><text x="64" y="73.5" text-anchor="end" font-size="10.5" fill="#3f6152">3545</text><line x1="72" y1="22.0" x2="740" y2="22.0" stroke="#e6f4ec"/><text x="64" y="26.0" text-anchor="end" font-size="10.5" fill="#3f6152">4726</text><line x1="679.3" y1="212" x2="679.3" y2="216" stroke="#94a3b8" stroke-width="1"/><text x="679.3" y="228" text-anchor="middle" font-size="10" fill="#315244">3000</text><line x1="72" y1="179.8" x2="740" y2="179.8" stroke="#e11d48" stroke-dasharray="6 4" stroke-width="1.4"/><text x="740" y="173.8" text-anchor="end" font-size="11" fill="#be123c" font-weight="600">SLO 800ms</text><circle class="pt" data-i="0" cx="679.3" cy="46.8" r="6" fill="#94a3b8" stroke="#ffffff" stroke-width="2" style="cursor:pointer"/><text x="679.3" y="246" text-anchor="end" font-size="9.5" fill="#315244" transform="rotate(-38 679.3 246)">2026-10-30 04:36 perf-new-api-slave x</text><text x="406.0" y="278" text-anchor="middle" font-size="10.5" fill="#3f6152">并发 VU</text>
 </svg></figure>
 <figure class="chart"><figcaption>吞吐 RPS vs 并发（横轴=并发 VU；纵轴 req/s；颜色区分路径类型）</figcaption>
 <svg viewBox="0 0 760 280" role="img" aria-label="吞吐 RPS vs 并发">
-<line x1="72" y1="212.0" x2="740" y2="212.0" stroke="#e6f4ec"/><text x="64" y="216.0" text-anchor="end" font-size="10.5" fill="#3f6152">0</text><line x1="72" y1="164.5" x2="740" y2="164.5" stroke="#e6f4ec"/><text x="64" y="168.5" text-anchor="end" font-size="10.5" fill="#3f6152">496</text><line x1="72" y1="117.0" x2="740" y2="117.0" stroke="#e6f4ec"/><text x="64" y="121.0" text-anchor="end" font-size="10.5" fill="#3f6152">992</text><line x1="72" y1="69.5" x2="740" y2="69.5" stroke="#e6f4ec"/><text x="64" y="73.5" text-anchor="end" font-size="10.5" fill="#3f6152">1487</text><line x1="72" y1="22.0" x2="740" y2="22.0" stroke="#e6f4ec"/><text x="64" y="26.0" text-anchor="end" font-size="10.5" fill="#3f6152">1983</text><line x1="72.0" y1="212" x2="72.0" y2="216" stroke="#94a3b8" stroke-width="1"/><text x="72.0" y="228" text-anchor="middle" font-size="10" fill="#315244">0</text><circle class="pt" data-i="0" cx="72.0" cy="46.8" r="6" fill="#94a3b8" stroke="#ffffff" stroke-width="2" style="cursor:pointer"/><text x="72.0" y="246" text-anchor="end" font-size="9.5" fill="#315244" transform="rotate(-38 72.0 246)">2026-10-28 03:01 perf-new-api-slave x</text><text x="406.0" y="278" text-anchor="middle" font-size="10.5" fill="#3f6152">并发 VU</text>
+<line x1="72" y1="212.0" x2="740" y2="212.0" stroke="#e6f4ec"/><text x="64" y="216.0" text-anchor="end" font-size="10.5" fill="#3f6152">0</text><line x1="72" y1="164.5" x2="740" y2="164.5" stroke="#e6f4ec"/><text x="64" y="168.5" text-anchor="end" font-size="10.5" fill="#3f6152">121</text><line x1="72" y1="117.0" x2="740" y2="117.0" stroke="#e6f4ec"/><text x="64" y="121.0" text-anchor="end" font-size="10.5" fill="#3f6152">242</text><line x1="72" y1="69.5" x2="740" y2="69.5" stroke="#e6f4ec"/><text x="64" y="73.5" text-anchor="end" font-size="10.5" fill="#3f6152">364</text><line x1="72" y1="22.0" x2="740" y2="22.0" stroke="#e6f4ec"/><text x="64" y="26.0" text-anchor="end" font-size="10.5" fill="#3f6152">485</text><line x1="679.3" y1="212" x2="679.3" y2="216" stroke="#94a3b8" stroke-width="1"/><text x="679.3" y="228" text-anchor="middle" font-size="10" fill="#315244">3000</text><circle class="pt" data-i="0" cx="679.3" cy="46.8" r="6" fill="#94a3b8" stroke="#ffffff" stroke-width="2" style="cursor:pointer"/><text x="679.3" y="246" text-anchor="end" font-size="9.5" fill="#315244" transform="rotate(-38 679.3 246)">2026-10-30 04:36 perf-new-api-slave x</text><text x="406.0" y="278" text-anchor="middle" font-size="10.5" fill="#3f6152">并发 VU</text>
 </svg></figure>
 
 
 
 <h2>瓶颈判定</h2>
-<div class="note"><b>事实</b><ul><li>（数据不足）</li></ul></div>
+<div class="note"><b>事实</b><ul><li>容量组 1：VU=3000 未通过，原因：latency；缺少新版完整流/业务成功计数或执行状态，旧 checks 不能证明完整性</li></ul></div>
 <div class="note" style="margin-top:10px"><b>推断（需下钻验证）</b><ul><li>（数据不足，暂不推断）</li></ul></div>
 
 <h2>理想 QPS 与资源</h2>
-<table class="mini"><thead><tr><th>指标</th><th>VU=0</th></tr></thead><tbody><tr><td>副本数</td><td>1</td></tr><tr><td>RPS</td><td>1,724.5</td></tr><tr><td>P95 首字 (ms)</td><td>2,870</td></tr><tr><td>错误率</td><td>0.000%</td></tr><tr><td>CPU 峰值 (核)</td><td>1.42</td></tr><tr><td>每千 RPS 用核</td><td>0.82</td></tr></tbody></table>
+<table class="mini"><thead><tr><th>指标</th><th>VU=3000</th></tr></thead><tbody><tr><td>副本数</td><td>2</td></tr><tr><td>RPS</td><td>421.6</td></tr><tr><td>P95 首字 (ms)</td><td>4,110</td></tr><tr><td>错误率</td><td>0.000%</td></tr><tr><td>CPU 峰值 (核)</td><td>3.05</td></tr><tr><td>每千 RPS 用核</td><td>7.23</td></tr></tbody></table>
 <div class="note" style="margin-top:10px">
 当前实测「理想 QPS」= 在 SLO 内可稳定达到的最高吞吐：<b>— req/s</b>
 （，VU=—）。
@@ -190,7 +194,7 @@ bash deploy/perf/k6/run.sh summary</pre>
 </body></html>
 <div id="tip" class="tip" hidden></div>
 <script>
-const RUNS = [{"job": "k6-arr-0..5", "ts": "2026-10-28T03:01:56Z", "vus": 0, "replicas": 1, "mode": "clusterip-arrival", "target": "perf-new-api-slave x1", "rps": 1724.494474, "ttfb_p50": 2120.0, "ttfb_p95": 2870.0, "ttfb_p99": 2990.0, "dur_p95": 4420.0, "err_pct": 0.0, "admin_p95": null, "complete_pct": 100.0, "checks_pct": 100.0, "cpu": 1.421, "mem": 643.0, "bw": 0, "pass": false, "verdict": "FAIL", "verdict_reason": "latency, dropped_iterations", "evidence": "exact"}];
+const RUNS = [{"job": "k6-shard-0..5", "ts": "2026-10-30T04:36:59Z", "vus": 3000, "replicas": 2, "mode": "clusterip-shard", "target": "perf-new-api-slave x2", "rps": 421.637918, "ttfb_p50": 2570.0, "ttfb_p95": 4110.0, "ttfb_p99": 4810.0, "dur_p95": 8720.0, "err_pct": 0.0, "admin_p95": null, "complete_pct": null, "checks_pct": 100.0, "cpu": 3.048, "mem": 655.0, "bw": 0, "pass": false, "verdict": "FAIL", "verdict_reason": "latency；缺少新版完整流/业务成功计数或执行状态，旧 checks 不能证明完整性", "evidence": "insufficient"}];
 const tip = document.getElementById('tip');
 let pinned = false;
 function f(v, n, suf) {

@@ -8,6 +8,9 @@
 | 文件 | 位置 | 作用 |
 |---|---|---|
 | `sse.js` | 集群内 k6 | SSE 打流；`VUS`/`DUR`/`BASE`/`MODEL`/`TOKEN` 全走 env；首字用 `http_req_waiting`(TTFB) 代理 |
+| `sse_arrival.js` | 集群内 k6 | 开环到达率脚本（`bodies/arrival.sh` 用）：`RATE`/`PRE_VUS`/`MAX_VUS`/`SHARD` |
+| `relay-chat.js` | 集群内 k6 | **S1 非流式 / S2 流式**（§3.9 场景）；`STREAM`/`MAX_TOKENS` 走 env，开环/闭环按是否注入 `RATE` 自动推断；用 `K6JS_FILE=` 指定 |
+| `s4_admin.js` | 集群内 k6 | **S3 管理面列表**（§3.9 场景）：`setup` 登录拿 JWT，每轮打 `/api/channel/` + `/api/log/`（PageSize=100） |
 | `run.sh` | 本机 | 入口：打包 `sse.js` + 动作体，投递到节点执行 |
 | `bodies/stage.sh` | 节点 | 单档压测（恒定 VU × DUR），采 CPU 峰值并打印摘要；`REQ_REPLICAS` 可先 scale 再压 |
 | `bodies/dual1500.sh` | 节点 | 双副本并行（master/slave 各 `VUS_EACH`，默认 750+750=1500） |
