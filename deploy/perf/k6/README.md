@@ -15,6 +15,7 @@
 | `bodies/stage.sh` | 节点 | 单档压测（恒定 VU × DUR），采 CPU 峰值并打印摘要；`REQ_REPLICAS` 可先 scale 再压 |
 | `bodies/dual1500.sh` | 节点 | 双副本并行（master/slave 各 `VUS_EACH`，默认 750+750=1500） |
 | `bodies/arrival.sh` | 节点 | **开环**到达率：N 分片各跑 `constant-arrival-rate`（脚本 `sse_arrival.js`），分片切的是 rps 不是 VU |
+| `bodies/qps_ladder.sh` | 节点 | **开环阶梯**：一次调用内连续升档（`qps` 动作），首个 FAIL 即停，直接给出最高通过 QPS |
 | `bodies/scale.sh` | 节点 | 只调副本数并等就绪（压测后恢复现场） |
 | `bodies/summary.sh` | 节点 | 打印 k6 Job 摘要（不传参=最近 3 个） |
 | `bodies/readback.sh` | 节点 | 只读回读：副本/CPU/mock 指标/Service 端点/DNS 自检 |

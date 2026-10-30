@@ -7,6 +7,7 @@
 # usage:
 #   bash deploy/perf/k6/run.sh stage <target-svc|url> <vus> <duration>                 # 单档，如 stage perf-new-api-slave 300 120s
 #   bash deploy/perf/k6/run.sh arrival <target-svc|url> <total-rps> [dur] [shards] [reps] # 开环到达率（回答"网关能接多少 QPS"），默认 120s / 3 分片
+#   bash deploy/perf/k6/run.sh qps <target-svc|url> [start] [step] [max] [dur] [shards] [reps] # 阶梯自动找 QPS 上限（默认非流式 relay-chat.js）
 #   bash deploy/perf/k6/run.sh sweep <target-svc|url> [reps] [start] [step] [max] [dur] # 固定副本数逐档扫描，默认 1 副本、400 起、+100、上限2000、每档120s
 #   bash deploy/perf/k6/run.sh ramp  <target-svc> [start] [step] [max] [duration]      # 阶梯递增找瓶颈，默认 300→3000 步长300 每阶段90s
 #   bash deploy/perf/k6/run.sh ladder <target-svc> [start] [step] [max] [dur] [reps]     # 副本阶梯：1 副本压到瓶颈→扩到 2 副本同参数重压（默认 reps=1,2）
@@ -28,6 +29,17 @@ K6JS_OVERRIDE="$K6JS_FILE"               # 记住外部指定值：各动作体�
 
 [ -s "$K6JS_FILE" ] || { echo "[!] 缺 $K6JS_FILE"; exit 1; }
 [ -x "$REMOTE" ] || { echo "[!] 缺通道脚本 $REMOTE"; exit 1; }
+
+# 集群内压测只需要这几个**本机**工具：k6 在集群里以 Job 镜像运行，本机无需安装
+for _c in gzip base64 python3; do
+  command -v "$_c" >/dev/null 2>&1 || {
+    echo "[!] 本机缺 $_c（打包脚本/生成报告需要；k6 本身在集群内跑，无需本机安装）"
+    echo "    Debian/Ubuntu: sudo apt-get install -y $_c"
+    echo "    macOS:         brew install $_c"
+    echo "    Windows:       在 WSL 内执行上述命令"
+    exit 1
+  }
+done
 
 ACTION="${1:?action: stage|sweep|ramp|ladder|dual1500|summary|readback}"; shift || true
 
@@ -89,7 +101,7 @@ run_body() {
   umask 077
   local full cm=""
   case "$body" in
-    stage.sh|dual1500.sh|sharded.sh|arrival.sh|scenario.sh)
+    stage.sh|dual1500.sh|sharded.sh|arrival.sh|qps_ladder.sh|scenario.sh)
       cm=$(script_cm)
       echo "[perf-k6] 下发脚本 ConfigMap：$cm"
       install_script_configmap "$cm" || { echo "[!] 脚本下发失败，终止"; return 2; } ;;
@@ -148,6 +160,9 @@ run_body() {
       local html="$run_dir/perf_report_${safe}_${run_ts}.html"
       python3 "$HERE/report.py" --logs "$log" --out "$html" --json "$run_dir/${run_ts}-${tag}.json" --eip-mbps "${EIP_MBPS:-100}" || true
       echo "[perf-k6] 本次报告：$html（开环档不并入 ALL）" ;;
+    qps_*)
+      # 多档阶梯不是"一次运行"，report.py 的单次口径套不上：结论直接看 body 打印的 [QPS] 行
+      echo "[perf-k6] 阶梯结果见上方 [QPS] 行与末行结论；未生成 HTML" ;;
   esac
   case "$body" in
     stage.sh|dual1500.sh|sharded.sh|arrival.sh|scenario.sh)
@@ -366,5 +381,16 @@ case "$ACTION" in
     ARGS=("TARGET_SVC=$TGT" "TOTAL_RATE=$R" "DUR=$D" "SHARDS=$N")
     [ -n "${5:-}" ] && ARGS+=("REQ_REPLICAS=$5")
     run_body arrival.sh "arrival_${R}" "${ARGS[@]}" ;;
+  qps)
+    # 开环阶梯：一次调用内连续升档，首个 FAIL 即停 ⇒ 直接给出「最高通过 QPS」
+    # 默认用 relay-chat.js（非流式）；流式请显式 K6JS_FILE=$HERE/relay-chat.js 并置 STREAM=true 的环境语义
+    TGT="${1:?qps 需要 <target-svc|url>}"
+    S="${2:-200}"; SP="${3:-200}"; M="${4:-4000}"; D="${5:-60s}"; N="${6:-8}"
+    # 注意：K6JS_FILE 在脚本开头已被初始化为 sse.js，这里必须优先取「外部覆盖值」
+    K6JS_FILE="${K6JS_OVERRIDE:-$HERE/relay-chat.js}"
+    DESC="qps-${TGT//[^a-zA-Z0-9]/_}-${S}-${M}"
+    ARGS=("TARGET_SVC=$TGT" "START=$S" "STEP=$SP" "MAX=$M" "DUR=$D" "SHARDS=$N")
+    [ -n "${7:-}" ] && ARGS+=("REQ_REPLICAS=$7")
+    run_body qps_ladder.sh "qps_${S}_${M}" "${ARGS[@]}" ;;
   *) echo "[!] 未知动作：$ACTION（stage|arrival|sweep|ramp|ladder|dual1500|shard|summary|readback）"; exit 2 ;;
 esac

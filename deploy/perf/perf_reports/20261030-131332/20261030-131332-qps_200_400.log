@@ -1,0 +1,29 @@
+[i] 动态选定节点=i-k1afs8wedv35rai4pmx2（DescribeClusterNodes 现取，未写死）
+[i] 取 15 分钟临时私网 kubeconfig
+[i] server=    server: https://10.2.25.173:6443  节点=i-k1afs8wedv35rai4pmx2  RUN_ID=1793337213-700041-29351
+[i] InvokeId=t-ida71kkjzm6zev4
+----- 节点内输出（status=Success）-----
+=== 阶梯：target=perf-new-api-slave (clusterip-arrival) 200→400 步长 200  每档 20s  4 分片
+=== SLO：错误率<0.05%  P95<800ms  dropped=0  实得≥0.98×目标
+  [QPS] rate=200    achieved=48     p95=421.32ms err=0%      dropped=0     FAIL
+QPSROW	200	48	421.32	0	0	FAIL
+=== 首个失败档 = 200，停止上探
+===RUN_META===
+target=perf-new-api-slave x2
+base=http://172.23.2.189
+mode=clusterip-arrival
+vus=0
+rate=200-400/200
+dur=20s
+replicas=2
+job=k6-qps-0..3
+ts=2026-10-30T05:14:33Z
+method=constant-arrival-rate-ladder
+summary_schema=2
+shards=4
+===END_META===
+=== 结论：最高通过 QPS 档 = 0（实得 0、P95 0ms、err 0%）
+### remote_rc=0 cleaned=YES
+-----------------------------------
+[i] 凭据清理：本机 已删 / 节点侧 cleaned=YES
+runner_rc=0
