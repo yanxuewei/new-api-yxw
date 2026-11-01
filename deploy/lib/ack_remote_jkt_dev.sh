@@ -10,6 +10,12 @@
 #
 # usage: bash deploy/lib/ack_remote_jkt_dev.sh <body.sh> [node_id]
 #   body.sh 里直接用 kubectl（KUBECONFIG 已注入）
+#
+# 节点环境（2026-11-01 复核）：Alibaba Cloud Linux 3.2104 U13.3，自带 dnf / python3 / curl / wget，
+#   原有节点自 2026-10-19 起**无 jq**（body 里用 jq 会 rc=127）。2026-11-01 已用
+#   `deploy/ops/bodies/ensure_jq.sh` 手工给 2 台节点装上 jq 1.6，**但新节点（扩容/升级/换盘）没有** ⇒
+#   节点侧 body 仍须零依赖：优先 `kubectl -o custom-columns` / jsonpath / go-template + awk，
+#   需要结构化处理时用 `command -v jq` 探测后回落 python3（节点自带）。
 set -uo pipefail
 
 REGION=ap-southeast-5

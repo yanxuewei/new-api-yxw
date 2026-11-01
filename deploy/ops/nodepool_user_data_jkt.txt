@@ -1,0 +1,44 @@
+# jkt dev 节点池「实例自定义数据」——节点初始化后执行的运维基线
+# 维护：deploy/ops/nodepool_user_data_jkt.txt（内容即源），下发用 deploy/logs/jkt_apply_userdata2.sh
+# 约定：
+#   * 不要在此加 `set -e` / `exit`，任何一步失败都不能影响节点加入集群；
+#   * 所有步骤必须幂等（节点可能因任何原因重跑）；
+#   * 完整执行日志见 /var/log/newapi-node-init.log。
+{
+  echo "=== $(date -Is) node-init user-data begin ==="
+
+  # 1) jq —— 节点侧排查用；装不上不影响业务
+  if ! command -v jq >/dev/null 2>&1; then
+    timeout 180 dnf -y -q install jq 2>&1 | tail -3
+  fi
+
+  # 2) 每日镜像清理（CST 04:00 = UTC 20:00）
+  cat > /usr/local/sbin/newapi-image-prune.sh <<'EOS'
+#!/bin/bash
+set -uo pipefail
+LOG=/var/log/newapi-image-prune.log
+if [ -f "$LOG" ] && [ "$(stat -c%s "$LOG")" -gt 10485760 ]; then
+  tail -c 1000000 "$LOG" > "$LOG.t" && mv "$LOG.t" "$LOG"
+fi
+img_before=$(crictl images -q 2>/dev/null | wc -l)
+pct_before=$(df --output=pcent / | tail -1 | tr -dc '0-9')
+crictl rmi --prune >/dev/null 2>&1
+img_after=$(crictl images -q 2>/dev/null | wc -l)
+pct_after=$(df --output=pcent / | tail -1 | tr -dc '0-9')
+echo "$(date -Is) images ${img_before}->${img_after} root_used ${pct_before}%->${pct_after}%" >> "$LOG"
+EOS
+  chmod 755 /usr/local/sbin/newapi-image-prune.sh
+
+  cat > /etc/cron.d/newapi-image-prune <<'EOC'
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# UTC 20:00 = CST 04:00，每日清理未被任何容器引用的镜像
+0 20 * * * root /usr/local/sbin/newapi-image-prune.sh
+EOC
+  chmod 644 /etc/cron.d/newapi-image-prune
+  systemctl is-active crond >/dev/null 2>&1 || systemctl enable --now crond >/dev/null 2>&1
+
+  # 3) 自证：把结果写进日志，便于新节点上线后回查
+  echo "jq=$(command -v jq || echo missing) crond=$(systemctl is-active crond 2>/dev/null) cron_file=$([ -f /etc/cron.d/newapi-image-prune ] && echo ok || echo missing)"
+  echo "=== $(date -Is) node-init user-data end ==="
+} >> /var/log/newapi-node-init.log 2>&1
