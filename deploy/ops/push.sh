@@ -33,16 +33,30 @@
 set -uo pipefail
 
 # ============================ 路径 ============================
-# 脚本位于 deploy/ops/；REPO_ROOT = 仓库根（上溯两级）
+# REPO_ROOT（被构建的仓库根）按以下优先级确定：
+#   ① 环境变量 PUSH_REPO_ROOT（显式指定）
+#   ② 当前目录所在的 git 仓库根（git rev-parse --show-toplevel）—— 便于复用同一份脚本
+#      去构建任意 checkout（如在 new-api-likha 下调用 yxw 的 deploy/ops/push.sh）
+#   ③ 回落：脚本所在目录上溯两级（脚本位于 deploy/ops/）
+# 若当前目录不在任何 git 仓库内（如 /tmp、容器内），走 ③，行为与旧版一致。
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$HERE/../.." && pwd)"
+SCRIPT_ROOT="$(cd "$HERE/../.." && pwd)"
+if [[ -n "${PUSH_REPO_ROOT:-}" ]]; then
+  REPO_ROOT="${PUSH_REPO_ROOT}"
+elif _TOP="$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null)" && [[ -n "$_TOP" ]]; then
+  REPO_ROOT="$_TOP"
+else
+  REPO_ROOT="$SCRIPT_ROOT"
+fi
 
 # ============================ 默认值 ============================
 REGISTRY="${ACR_REGISTRY:-acr-newapi-mnl-registry.ap-southeast-6.cr.aliyuncs.com}"
 ACR_USER="${ACR_USER:-yanxuewei@5108890064395960}"
 ACR_PASSWORD="${ACR_PASSWORD:-}"
 NS_INPUT=""
+NS_SHORT=""               # 命名空间简写：prod|pre|test|dev（由 NS_INPUT 归一得出）
 TAG=""
+TAG_PREFIX="${ACR_TAG_PREFIX:-}"   # 默认 tag 前缀；空 = 用命名空间简写
 REPO_NAME="${ACR_REPO_NAME:-newapi-master}"
 REPO_NAME_EXPLICIT=0      # 是否由 -r/--repo 显式指定
 LOCAL_IMAGE="${ACR_LOCAL_IMAGE:-new-api:local}"
@@ -77,8 +91,9 @@ NPM_REGISTRY_SKIPPED=0
 # Go 模块源：本地默认走 goproxy.cn（官方源 proxy.golang.org 国内多数网络不可达 → go mod download EOF）
 GO_PROXY_SEL="${ACR_GO_PROXY:-cn}"
 GO_PROXY_SKIPPED=0
-# 构建期代理：auto = 本机 Clash。注入 Docker 预定义 ARG，因此**无需改 Dockerfile**
-BUILD_PROXY="${ACR_BUILD_PROXY:-}"
+# 构建期代理：默认 auto = 自动探测（环境变量里的 HTTP(S)_PROXY，其次本机 Clash 127.0.0.1:7890），
+# 探测不到则不启用。注入 Docker 预定义 ARG，因此**无需改 Dockerfile** 即可让 go mod / bun install 走代理
+BUILD_PROXY="${ACR_BUILD_PROXY:-auto}"
 NO_PROXY_LIST="${ACR_NO_PROXY:-localhost,127.0.0.1,.aliyuncs.com}"
 DRY_RUN=0
 PLAIN=0
@@ -86,7 +101,7 @@ VERBOSE=0
 REGION="${ACR_REGION:-ap-southeast-6}"
 INSTANCE_ID="${ACR_INSTANCE_ID:-cri-avfqy9xkqi5bj8ee}"
 
-# 脚本位于 deploy/ops/；REPO_ROOT 已在文件头部上溯两级确定。
+# REPO_ROOT 已在文件头部确定（PUSH_REPO_ROOT > 当前目录 git 仓库根 > 脚本上溯两级）。
 # ── 模块模式（--module）相关 ──
 MODULE=""                     # --module/-m <dir>：模块目录路径
 MODULE_MODE=0                 # 1 = 模块模式
@@ -232,7 +247,9 @@ deploy/ops/push.sh — 镜像 build/推送 ACR 一键脚本（双模式）
       --list               列出 $SERVICE_OPS_DIR 下所有模块（Dockerfile 标记）
 
 常用
-  -t, --tag <tag>         镜像 tag；默认 <yyyymmdd-HHMMSS>-<git短SHA>（Asia/Shanghai）
+  -t, --tag <tag>         镜像 tag；默认 <prefix>-<yyyymmdd-HHMMSS>-<git短SHA>（Asia/Shanghai）
+      --prefix <p>        默认 tag 前缀；不传时取命名空间简写 prod|pre|test|dev
+                          仅影响未显式 -t 时的默认 tag，不作用于 --extra-tags
   -r, --repo <name>       仓库名；模式 A 默认 newapi-master，模式 B 默认模块目录名
   -i, --image <name:tag>  本地镜像名；模式 B 默认 <module>:local
       --extra-tags <a,b>  额外 tag，如 latest,stable（逐个推送）
@@ -251,14 +268,16 @@ deploy/ops/push.sh — 镜像 build/推送 ACR 一键脚本（双模式）
   -h, --help              显示帮助
 
 构建
-  -f, --dockerfile <path> 默认自动选择：模式 A 下仓库存在 Dockerfile.mac 时用它（本地增强版），
-                          否则用 Dockerfile；模式 B 默认模块目录内的 Dockerfile。
+  -f, --dockerfile <path> 默认自动选择：模式 A 下仅 macOS 且仓库存在 Dockerfile.mac 时用它
+                          （本地增强版），其他平台用 Dockerfile；模式 B 默认模块目录内的 Dockerfile。
                           显式 -f 则以你给的为准。
       --upstream          强制使用上游原版 Dockerfile（等价 -f Dockerfile，仅模式 A）
   -c, --context <path>    构建上下文；模式 B 默认模块目录，模式 A 默认仓库根目录
   -p, --platform <plat>   默认 linux/amd64。若走 buildx，会自动加 --provenance=false --sbom=false
       --build-arg K=V     （可重复）
-      --proxy <url|auto>  构建期 HTTP(S) 代理；auto = http://host.docker.internal:7890（本机 Clash）
+      --proxy <url|auto>  构建期 HTTP(S) 代理，默认 auto：复用当前 shell 的 HTTP(S)_PROXY，
+                          其次回落 127.0.0.1:7890（127.0.0.1/localhost 自动改写为
+                          host.docker.internal）；都不可达则不启用代理
       --no-proxy <list>   NO_PROXY 列表，默认 localhost,127.0.0.1,.aliyuncs.com
       --no-cache          构建禁用缓存
       --pull              构建前拉取基础镜像新版本
@@ -274,6 +293,9 @@ deploy/ops/push.sh — 镜像 build/推送 ACR 一键脚本（双模式）
       --password <pwd>    不推荐（会进 shell history）；建议 ACR_PASSWORD 环境变量
       --instance <id>     默认 cri-avfqy9xkqi5bj8ee
 
+仓库根: 默认取「当前目录所在 git 仓库根」，不在 git 仓库内则取脚本上溯两级；
+        可用环境变量 PUSH_REPO_ROOT=<dir> 显式指定。
+
 日志: deploy/logs/push_<命名空间>_<tag>_<时间戳>.log
 EOF
 }
@@ -284,6 +306,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     -n|--namespace)   NS_INPUT="${2:-}"; shift 2 ;;
     -t|--tag)         TAG="${2:-}"; shift 2 ;;
+    --prefix)         TAG_PREFIX="${2:-}"; shift 2 ;;
     -r|--repo)        REPO_NAME="${2:-}"; REPO_NAME_EXPLICIT=1; shift 2 ;;
     -i|--image)       LOCAL_IMAGE="${2:-}"; LOCAL_IMAGE_EXPLICIT=1; shift 2 ;;
     -m|--module)      MODULE="${2:-}"; MODULE_MODE=1; shift 2 ;;
@@ -346,12 +369,16 @@ fi
 [[ -n "$NS_INPUT" ]] || { printf 'ERROR: 必须指定 -n/--namespace\n\n' >&2; usage; exit 2; }
 
 case "$NS_INPUT" in
-  prod|production|newapi-prod) NS="newapi-prod" ;;
-  pre|preview|newapi-pre)      NS="newapi-pre" ;;
-  test|testing|newapi-test)    NS="newapi-test" ;;
-  dev|develop|newapi-dev)      NS="newapi-dev" ;;
+  prod|production|newapi-prod) NS="newapi-prod"; NS_SHORT="prod" ;;
+  pre|preview|newapi-pre)      NS="newapi-pre";  NS_SHORT="pre" ;;
+  test|testing|newapi-test)    NS="newapi-test"; NS_SHORT="test" ;;
+  dev|develop|newapi-dev)      NS="newapi-dev";  NS_SHORT="dev" ;;
   *) printf 'ERROR: 未知命名空间 "%s"（可用 prod|pre|test|dev 或 newapi-prod|newapi-pre|newapi-test|newapi-dev）\n' "$NS_INPUT" >&2; exit 2 ;;
 esac
+
+# tag 前缀：未显式 --prefix 时取命名空间简写
+[[ -n "$TAG_PREFIX" ]] || TAG_PREFIX="$NS_SHORT"
+TAG_PREFIX="$(printf '%s' "$TAG_PREFIX" | sed 's/[^A-Za-z0-9_.-]/-/g')"
 
 # ============================ 模块模式初始化 ============================
 if [[ "$MODULE_MODE" == "1" ]]; then
@@ -375,14 +402,15 @@ fi
 cd "$REPO_ROOT" || exit 1
 
 # ── 默认 Dockerfile 自动选择 ─────────────────────────────────────────────
-# 未显式 -f/--upstream 时：仓库存在 Dockerfile.mac（本地增强版：cache mount +
-# 可切 npm/GOPROXY）就用它，否则回落上游 Dockerfile。CI 用 -f Dockerfile 显式指定不受影响。
+# 未显式 -f/--upstream 时：仅在 macOS（uname -s = Darwin）且仓库存在 Dockerfile.mac
+# （本地增强版：cache mount + 可切 npm/GOPROXY）才用它，其他平台（含 WSL/Linux）回落
+# 上游 Dockerfile。CI 用 -f Dockerfile 显式指定不受影响。
 DOCKERFILE_AUTO=0
-if [[ "$DOCKERFILE_EXPLICIT" != "1" && -f "${REPO_ROOT}/Dockerfile.mac" ]]; then
+if [[ "$DOCKERFILE_EXPLICIT" != "1" && "$(uname -s)" == "Darwin" && -f "${REPO_ROOT}/Dockerfile.mac" ]]; then
   DOCKERFILE="Dockerfile.mac"; DOCKERFILE_AUTO=1
 fi
 
-# 默认 tag：<yyyymmdd-HHMMSS>-<git短SHA>，非法字符归一为 '-'
+# 默认 tag：<prefix>-<yyyymmdd-HHMMSS>-<git短SHA>，非法字符归一为 '-'
 sanitize_tag() { printf '%s' "$1" | sed 's/[^A-Za-z0-9_.-]/-/g'; }
 
 if [[ -z "$TAG" ]]; then
@@ -391,7 +419,10 @@ if [[ -z "$TAG" ]]; then
   #   ① ACR 仓库（newapi-dev 等）开了「tag 不可变」，只到天的话同一 commit 当天第二次
   #      推送会撞同名 tag 被拒；② 跨时区开发者生成的 tag 才能互相比较、按名排序即按时间排序。
   _ts="$(TZ='Asia/Shanghai' date +%Y%m%d-%H%M%S)"
-  if [[ -n "$_sha" ]]; then TAG="${_ts}-${_sha}"; else TAG="${_ts}"; fi
+  # 前缀由 --prefix 指定，缺省为命名空间简写（prod/pre/test/dev）
+  _pfx=""
+  [[ -n "$TAG_PREFIX" ]] && _pfx="${TAG_PREFIX}-"
+  if [[ -n "$_sha" ]]; then TAG="${_pfx}${_ts}-${_sha}"; else TAG="${_pfx}${_ts}"; fi
 fi
 TAG="$(sanitize_tag "$TAG")"
 
@@ -420,9 +451,42 @@ case "$GO_PROXY_SEL" in
   official|golang|none|off|"")    GO_PROXY_SEL="" ;;
 esac
 
-# 构建期代理归一：auto/clash/local → 本机 Clash
+# 构建期代理归一（默认 auto）：自动探测可用代理，探测不到就不注入，避免把构建期所有
+# 网络请求（go mod / bun install / apt）绑到一个不可用的死代理上。
+#   ① 优先复用当前 shell 已配置的 HTTPS_PROXY/HTTP_PROXY（WSL 下 Clash 常监听 WSL 网关 IP
+#      的非 7890 端口，硬编码 7890 会失效）
+#   ② 回落本机 Clash 默认端口 127.0.0.1:7890
+#   ③ 都不可达 → 留空（等价于不启用代理）
+# 容器内的 127.0.0.1/localhost 指向容器自身，需改写为 host.docker.internal。
 case "$BUILD_PROXY" in
-  auto|AUTO|clash|local) BUILD_PROXY="http://host.docker.internal:7890" ;;
+  auto|AUTO|clash|local)
+    _bp="${HTTPS_PROXY:-}"
+    [[ -n "$_bp" ]] || _bp="${https_proxy:-}"
+    [[ -n "$_bp" ]] || _bp="${HTTP_PROXY:-}"
+    [[ -n "$_bp" ]] || _bp="${http_proxy:-}"
+    if [[ -z "$_bp" ]] && (exec 3<>/dev/tcp/127.0.0.1/7890) 2>/dev/null; then
+      _bp="http://host.docker.internal:7890"
+    fi
+    if [[ -n "$_bp" ]]; then
+      # 从 URL 里取 host:port 做可达性探测（无端口或非数字端口视为不可探测，直接沿用）
+      _authority="${_bp#*://}"; _authority="${_authority%%/*}"; _authority="${_authority##*@}"
+      _port="${_authority##*:}"
+      _phost="${_authority%:*}"
+      if [[ "$_port" =~ ^[0-9]+$ && -n "$_phost" ]]; then
+        case "$_phost" in 127.0.0.1|localhost) _phost="127.0.0.1" ;; esac
+        if ! (exec 3<>/dev/tcp/"$_phost"/"$_port") 2>/dev/null; then
+          warn "自动探测的构建期代理 $_bp 不可达 → 本次构建不启用代理"
+          _bp=""
+        fi
+      fi
+    fi
+    BUILD_PROXY="$_bp"
+    [[ -n "$BUILD_PROXY" ]] || log "未探测到可用构建期代理（HTTP(S)_PROXY 未设置且 127.0.0.1:7890 不可达）→ 本次不启用代理"
+    case "$BUILD_PROXY" in
+      *127.0.0.1:*|*localhost:*) BUILD_PROXY="${BUILD_PROXY/127.0.0.1/host.docker.internal}"
+                                 BUILD_PROXY="${BUILD_PROXY/localhost/host.docker.internal}" ;;
+    esac
+    ;;
 esac
 
 # Dockerfile 是否声明了某 ARG —— 只有声明了，--build-arg 才会被 BuildKit 消费
@@ -963,8 +1027,9 @@ diagnose_build_failure() {
       err "根因：Go 模块下载失败 —— 走的是官方源 proxy.golang.org（承载于 storage.googleapis.com），"
       log "   该域名国内多数网络不可达且**不报 403，而是直接 EOF/超时**，故易被误判为「构建逻辑问题」。"
       log "   实测：proxy.golang.org 直连超时（http=000）；goproxy.cn 200 / 0.6s。"
-      log "  修复① 用声明了 ARG GOPROXY 的 Dockerfile（不加 -f 即默认 Dockerfile.mac）"
-      log "  修复② 显式切源：--go-proxy cn（goproxy.cn）| aliyun（mirrors.aliyun.com/goproxy/）"
+      log "  修复① 让 Dockerfile 声明 ARG GOPROXY + ENV GOPROXY=\${GOPROXY}（参考仓库内 Dockerfile.mac 的写法）："
+      log "        macOS 下 Dockerfile.mac 默认自动启用；Linux/WSL 下 -f 需显式指定或改用该写法"
+      log "  修复② 已声明 ARG GOPROXY 的 Dockerfile，显式切源：--go-proxy cn（goproxy.cn）| aliyun | official | <url>"
       log "  修复③ 一个文件都不改：--proxy auto（走本机 Clash，已实测可通官方源）"
       ;;
     *"failed to authorize"*|*"pull access denied"*|*"manifest unknown"*|*"dial tcp"*|*"i/o timeout"*|*"no such host"*)
@@ -988,18 +1053,24 @@ build_env_report() {
     warn "--go-proxy 未生效：Dockerfile 未声明 ARG GOPROXY（BuildKit 不消费未声明的 build-arg）"
     log "   → 该 Dockerfile 会走 Go 内建默认源 proxy.golang.org —— 国内多数网络不可达，"
     log "     go mod download 会以 EOF/timeout 失败。选其一："
-    log "      ① 用自带 ARG GOPROXY 的 Dockerfile：--upstream 旁边的 Dockerfile.mac（不加 -f 即默认）"
+    log "      ① 在 Dockerfile 的 Go 构建阶段加：ARG GOPROXY=https://goproxy.cn,direct + ENV GOPROXY=\${GOPROXY}"
+    log "         （写法参考仓库内 Dockerfile.mac；仅 macOS 会自动选中它，Linux/WSL 需 -f 指定）"
     log "      ② 不改文件，走代理：--proxy auto（本机 Clash 已实测可通 proxy.golang.org）"
+    if [[ -n "$BUILD_PROXY" ]]; then
+      log "   → 本次已启用构建期代理 ${BUILD_PROXY}：go mod download 走代理直连官方源，无需改 Dockerfile"
+    fi
   fi
   if [[ -n "$BUILD_PROXY" ]]; then
     log "构建期代理：${BUILD_PROXY}    NO_PROXY=${NO_PROXY_LIST}"
     case "$BUILD_PROXY" in
       *host.docker.internal*)
-        if (exec 3<>/dev/tcp/127.0.0.1/7890) 2>/dev/null; then
-          log "  本机 127.0.0.1:7890 可达"
+        _bp="${BUILD_PROXY#*host.docker.internal}"; _bp="${_bp#:}"; _bp="${_bp%%/*}"
+        [[ -n "$_bp" ]] || _bp=7890
+        if (exec 3<>/dev/tcp/127.0.0.1/"${_bp}") 2>/dev/null; then
+          log "  本机 127.0.0.1:${_bp} 可达"
         else
-          warn "  ⚠ 本机 127.0.0.1:7890 连不上 → 构建期代理不会生效"
-          warn "    先启动 Clash，或指定其他端口：--proxy http://host.docker.internal:<port>"
+          warn "  ⚠ 本机 127.0.0.1:${_bp} 连不上 → 构建期代理不会生效"
+          warn "    先启动 Clash，或指定其他地址：--proxy http://<host>:<port>"
         fi
         ;;
     esac
@@ -1106,6 +1177,7 @@ do_logout() {
 head_banner() {
   _out "============================================================"
   _out " new-api 镜像构建与推送 · ${NS}"
+  _out " 仓库根: ${REPO_ROOT}"
   _out " 目标: ${REMOTE_REF}"
   if [[ "${DOCKERFILE_AUTO:-0}" == "1" ]]; then
     _out " Dockerfile: ${DOCKERFILE}（自动选择；--upstream 用上游原版）"
